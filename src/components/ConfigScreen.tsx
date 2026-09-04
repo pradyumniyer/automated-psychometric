@@ -72,7 +72,7 @@ export function ConfigScreen({
   const [activeSubscaleId, setActiveSubscaleId] = useState<string | null>(null);
   const [showSummarySum, setShowSummarySum] = useState(false);
   const [showSummaryMean, setShowSummaryMean] = useState(false);
-  const [activeStep, setActiveStep] = useState<'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring'>('subscales');
+  const [activeStep, setActiveStep] = useState<'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring'>('demographics');
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [collapsedWidth, setCollapsedWidth] = useState(280);
@@ -783,10 +783,6 @@ export function ConfigScreen({
             ))}
           </div>
           <div className="w-px h-6 bg-secondary-200" />
-          <Button onClick={runScoring} disabled={!canScore || scoring} size="sm">
-            {scoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
-            {scoring ? 'Scoring...' : 'Run Scoring'}
-          </Button>
           {scoringResult && (
             <>
               <Button variant="outline" size="sm" onClick={() => handleExport('csv')}><FileDown className="w-3.5 h-3.5" /> CSV</Button>
@@ -1056,7 +1052,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
     { name: 'scoring', icon: Calculator, label: 'Scoring' },
   ];
   return (
-    <div className="w-14 bg-white border-r border-secondary-200 flex flex-col items-center py-3 gap-1 flex-shrink-0">
+    <div className="w-16 bg-white border-r border-secondary-200 flex flex-col items-center py-3 gap-1 flex-shrink-0">
       {steps.map((s) => {
         const status = stepStatuses[s.name];
         const isActive = activeStep === s.name;
@@ -1065,7 +1061,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
           <button
             key={s.name}
             onClick={() => onStepClick(s.name)}
-            className={`relative flex flex-col items-center gap-1 w-11 py-2 rounded-lg transition-all ${isActive ? 'bg-primary-50 text-primary-700' : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-50'}`}
+            className={`relative flex flex-col items-center gap-1 w-14 py-2 rounded-lg transition-all ${isActive ? 'bg-primary-50 text-primary-700' : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-50'}`}
             title={s.label}
           >
             {isActive && <div className="absolute -left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-600 rounded-full" />}
@@ -1077,7 +1073,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
                 </div>
               )}
             </div>
-            <span className="text-[9px] font-medium leading-none">{s.label}</span>
+            <span className="text-[9px] font-medium leading-none text-center break-words">{s.label}</span>
           </button>
         );
       })}
@@ -1435,12 +1431,12 @@ function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBa
               ) : (
                 <div className="space-y-1">
                   {bands.map((band, i) => (
-                    <div key={i} className="flex items-center gap-1">
-                      <input value={band.name} onChange={(e) => onUpdateBand(name, i, 'name', e.target.value)} className="flex-1 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Name" />
-                      <input type="number" value={band.minScore} onChange={(e) => onUpdateBand(name, i, 'minScore', Number(e.target.value))} className="w-14 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-                      <span className="text-secondary-400 text-xs">–</span>
-                      <input type="number" value={band.maxScore} onChange={(e) => onUpdateBand(name, i, 'maxScore', Number(e.target.value))} className="w-14 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-                      <button onClick={() => onRemoveBand(name, i)} className="p-0.5 text-error-400 hover:text-error-600"><X className="w-3 h-3" /></button>
+                    <div key={i} className="flex items-center gap-1 w-full">
+                      <input value={band.name} onChange={(e) => onUpdateBand(name, i, 'name', e.target.value)} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Name" />
+                      <input type="number" value={band.minScore} onChange={(e) => onUpdateBand(name, i, 'minScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+                      <span className="text-secondary-400 text-xs flex-shrink-0">–</span>
+                      <input type="number" value={band.maxScore} onChange={(e) => onUpdateBand(name, i, 'maxScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+                      <button onClick={() => onRemoveBand(name, i)} className="p-0.5 text-error-400 hover:text-error-600 flex-shrink-0"><X className="w-3 h-3" /></button>
                     </div>
                   ))}
                 </div>

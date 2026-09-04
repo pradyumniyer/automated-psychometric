@@ -96,7 +96,7 @@ export function LiveGrid({
               {/* Row 1: merged group headers */}
               <tr>
                 <th rowSpan={2} className="px-2 py-2 text-left font-medium text-secondary-500 sticky left-0 bg-secondary-50 border-b border-r border-secondary-200 z-30">#</th>
-                <th rowSpan={2} className="px-2 py-2 text-center font-medium text-secondary-500 border-b border-r border-secondary-200">Status</th>
+                <th rowSpan={2} className="px-2 py-2 text-center font-medium text-secondary-500 border-b border-r border-secondary-200 bg-secondary-50 sticky top-0 z-20">Status</th>
                 {groups.map((g) => (
                   g.columns.length > 1 ? (
                     <th key={g.name} colSpan={g.columns.length}
@@ -135,7 +135,7 @@ export function LiveGrid({
             <thead className="sticky top-0 z-20">
               <tr>
                 <th className="px-2 py-2 text-left font-medium text-secondary-500 sticky left-0 bg-secondary-50 border-b border-r border-secondary-200 z-30">#</th>
-                <th className="px-2 py-2 text-center font-medium text-secondary-500 border-b border-r border-secondary-200">Status</th>
+                <th className="px-2 py-2 text-center font-medium text-secondary-500 border-b border-r border-secondary-200 bg-secondary-50 sticky top-0 z-20">Status</th>
                 {flatColumns.map((col) => (
                   <th key={col.key} className={`px-3 py-2 text-left font-medium text-xs whitespace-nowrap border-b border-r border-secondary-200 last:border-r-0 ${
                     col.type === 'score' ? 'bg-primary-50 text-primary-700' :
