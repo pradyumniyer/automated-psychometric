@@ -4,7 +4,7 @@ import {
   Upload, FileSpreadsheet, BarChart3, History as HistoryIcon, Plus, Trash2, ArrowRight,
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
-  GripVertical, Link2, Unlink, Calculator, Layers, Sliders, Users,
+  Link2, Unlink, Calculator, Layers, Sliders, Users,
   PanelLeftOpen, Sigma, TrendingUp,
 } from 'lucide-react';
 import {
@@ -615,8 +615,8 @@ export function ConfigScreen({
     // Demographics group
     const demoColsList = demoCols.map((d) => d.column_name).filter((c) => dataset.headers.includes(c));
     if (demoColsList.length > 0) {
-      const cols: GridColumn[] = demoColsList.map((c) => ({ key: c, label: c, group: 'Demographics', type: 'demo' as const }));
-      grps.push({ name: 'Demographics', columns: cols });
+      const cols: GridColumn[] = demoColsList.map((c) => ({ key: c, label: c, group: 'ID', type: 'demo' as const }));
+      grps.push({ name: 'ID', columns: cols });
       for (const c of demoColsList) {
         const vals = includedRows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
         sums[c] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
@@ -698,24 +698,6 @@ export function ConfigScreen({
   const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom'));
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
-
-  // Drag-and-drop state
-  const [draggedItem, setDraggedItem] = useState<string | null>(null);
-  const [dragSourceSubscale, setDragSourceSubscale] = useState<string | null>(null);
-
-  const handleDragStart = (col: string, sourceSubscale: string | null) => { setDraggedItem(col); setDragSourceSubscale(sourceSubscale); };
-  const handleDrop = (targetSubscale: string | null) => {
-    if (!draggedItem) return;
-    if (targetSubscale === null) {
-      if (dragSourceSubscale) removeItemFromSubscale(dragSourceSubscale, draggedItem);
-    } else {
-      if (dragSourceSubscale !== targetSubscale) {
-        if (dragSourceSubscale) removeItemFromSubscale(dragSourceSubscale, draggedItem);
-        addItemToSubscale(targetSubscale, draggedItem);
-      }
-    }
-    setDraggedItem(null); setDragSourceSubscale(null);
-  };
 
   // Batch selection handlers
   const toggleItemSelection = (col: string) => {
@@ -845,7 +827,7 @@ export function ConfigScreen({
               <div style={{ width: leftPanelWidth }} className="border-r border-secondary-200 bg-white overflow-y-auto flex-shrink-0">
                 <div className="px-3 py-2 border-b border-secondary-200 bg-secondary-50/50">
                   <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">
-                    {activeStep === 'demographics' && 'Demographic Columns'}
+                    {activeStep === 'demographics' && 'ID Columns'}
                     {activeStep === 'subscales' && 'Subscale Groups'}
                     {activeStep === 'scales' && 'Response Scales'}
                     {activeStep === 'bands' && 'Interpretation Bands'}
@@ -860,7 +842,6 @@ export function ConfigScreen({
                     subscales={subscaleStates} unassignedItems={unassignedItems}
                     onAddSubscale={addSubscale} onDeleteSubscale={deleteSubscale} onRenameSubscale={renameSubscale}
                     onRemoveItem={removeItemFromSubscale} onToggleReverse={toggleReverse} onMoveItem={moveItem}
-                    draggedItem={draggedItem} onDragStart={handleDragStart} onDrop={handleDrop}
                     selectedItems={selectedItems} onToggleSelection={toggleItemSelection}
                     onSelectAll={selectAllUnassigned} onClearSelection={clearSelection}
                     onBatchAdd={batchAddItems} activeSubscaleId={activeSubscaleId} onSetActiveSubscale={setActiveSubscaleId}
@@ -1045,7 +1026,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
   stepStatuses: Record<StepName, StepStatus>;
 }) {
   const steps: { name: StepName; icon: React.ComponentType<{ className?: string }>; label: string }[] = [
-    { name: 'demographics', icon: Users, label: 'Demographics' },
+    { name: 'demographics', icon: Users, label: 'ID' },
     { name: 'subscales', icon: Layers, label: 'Subscales' },
     { name: 'scales', icon: Sliders, label: 'Scales' },
     { name: 'bands', icon: Tag, label: 'Bands' },
@@ -1108,7 +1089,7 @@ function DemographicsPanel({ allColumns, demoCols, onToggle, onMarkAllItems }: {
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Demographic Columns</span>
+        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">ID Columns</span>
         <button onClick={onMarkAllItems} className="text-xs text-primary-600 hover:underline">Mark all as items</button>
       </div>
       <div className="relative mb-3">
@@ -1137,16 +1118,17 @@ function DemographicsPanel({ allColumns, demoCols, onToggle, onMarkAllItems }: {
 }
 
 // ── Subscales Panel — with batch selection ──
-function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSubscale, onRenameSubscale, onRemoveItem, onToggleReverse, onMoveItem, draggedItem, onDragStart, onDrop, selectedItems, onToggleSelection, onSelectAll, onClearSelection, onBatchAdd, activeSubscaleId, onSetActiveSubscale }: {
+function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSubscale, onRenameSubscale, onRemoveItem, onToggleReverse, onMoveItem, selectedItems, onToggleSelection, onSelectAll, onClearSelection, onBatchAdd, activeSubscaleId, onSetActiveSubscale }: {
   subscales: SubscaleState[]; unassignedItems: string[];
   onAddSubscale: () => void; onDeleteSubscale: (id: string) => void; onRenameSubscale: (id: string, name: string) => void;
   onRemoveItem: (id: string, col: string) => void; onToggleReverse: (id: string, col: string) => void; onMoveItem: (id: string, idx: number, dir: 'up' | 'down') => void;
-  draggedItem: string | null; onDragStart: (col: string, source: string | null) => void; onDrop: (target: string | null) => void;
   selectedItems: Set<string>; onToggleSelection: (col: string) => void; onSelectAll: () => void; onClearSelection: () => void;
   onBatchAdd: (subscaleId: string, cols: string[]) => void; activeSubscaleId: string | null; onSetActiveSubscale: (id: string | null) => void;
 }) {
   const [batchTarget, setBatchTarget] = useState<string>('');
+  const [search, setSearch] = useState('');
   const selectedArr = Array.from(selectedItems);
+  const filteredUnassigned = unassignedItems.filter((c) => c.toLowerCase().includes(search.toLowerCase()));
 
   const handleBatchAdd = () => {
     const targetId = activeSubscaleId || batchTarget;
@@ -1161,12 +1143,8 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
         <Button onClick={onAddSubscale} size="sm" className="px-2 py-1 text-xs"><Plus className="w-3 h-3" /> Add</Button>
       </div>
 
-      {/* Unassigned items pool with checkboxes */}
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={() => onDrop(null)}
-        className={`mb-3 p-2.5 rounded-xl border-2 border-dashed transition-colors ${draggedItem ? 'border-primary-400 bg-primary-50/50' : 'border-secondary-200 bg-secondary-50'}`}
-      >
+      {/* Unassigned items — searchable scrollable list */}
+      <div className="mb-3 p-2.5 rounded-xl border border-secondary-200 bg-secondary-50">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-secondary-500">Unassigned ({unassignedItems.length})</span>
           {unassignedItems.length > 0 && (
@@ -1179,15 +1157,24 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
         {unassignedItems.length === 0 ? (
           <p className="text-sm text-secondary-400 py-2 text-center">All items assigned.</p>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {unassignedItems.map((col) => (
-              <div key={col} className={`flex items-center gap-1 px-2 py-1 text-sm bg-white border rounded-lg cursor-grab hover:border-primary-300 transition-colors active:cursor-grabbing ${selectedItems.has(col) ? 'border-primary-400 bg-primary-50' : 'border-secondary-200'}`}
-                draggable onDragStart={() => onDragStart(col, null)} onDragEnd={() => onDrop(null)}>
-                <input type="checkbox" checked={selectedItems.has(col)} onChange={() => onToggleSelection(col)} className="w-3 h-3 rounded border-secondary-300 text-primary-600 focus:ring-primary-500" onClick={(e) => e.stopPropagation()}/>
-                {col}
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="relative mb-2">
+              <Search className="w-3.5 h-3.5 text-secondary-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items..." className="w-full pl-8 pr-3 py-1.5 text-xs border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400 bg-white" />
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+              {filteredUnassigned.map((col) => (
+                <button
+                  key={col}
+                  onClick={() => onToggleSelection(col)}
+                  className={`px-2.5 py-1 text-sm rounded-lg border transition-all ${selectedItems.has(col) ? 'border-primary-500 bg-primary-100 text-primary-700 font-medium' : 'border-secondary-200 bg-white text-secondary-700 hover:border-primary-300'}`}
+                >
+                  {col}
+                </button>
+              ))}
+              {filteredUnassigned.length === 0 && <p className="text-xs text-secondary-400 py-2 text-center w-full">No items match "{search}"</p>}
+            </div>
+          </>
         )}
       </div>
 
@@ -1195,8 +1182,8 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
       {selectedArr.length > 0 && (
         <div className="mb-3 p-2.5 bg-primary-50 border border-primary-200 rounded-lg">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-primary-700">{selectedArr.length} selected</span>
-            <select value={batchTarget} onChange={(e) => setBatchTarget(e.target.value)} className="flex-1 px-2 py-1 text-xs border border-secondary-200 rounded bg-white">
+            <span className="text-xs font-medium text-primary-700 whitespace-nowrap flex-shrink-0">{selectedArr.length} selected</span>
+            <select value={batchTarget} onChange={(e) => setBatchTarget(e.target.value)} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded bg-white">
               <option value="">Choose subscale...</option>
               {subscales.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
@@ -1209,24 +1196,22 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
       <div className="space-y-2.5">
         {subscales.map((sub) => (
           <div key={sub.id}
-            onDragOver={(e) => e.preventDefault()} onDrop={() => onDrop(sub.id)}
             onClick={() => onSetActiveSubscale(sub.id)}
-            className={`p-3 rounded-xl border bg-white transition-all cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-secondary-200 hover:border-secondary-300'} ${draggedItem ? 'border-dashed' : ''}`}>
+            className={`p-3 rounded-xl border bg-white transition-all cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-secondary-200 hover:border-secondary-300'}`}>
             <div className="flex items-center justify-between mb-2">
-              <input value={sub.name} onChange={(e) => onRenameSubscale(sub.id, e.target.value)} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold text-secondary-900 bg-transparent border-none outline-none flex-1 focus:underline" />
-              <button onClick={(e) => { e.stopPropagation(); onDeleteSubscale(sub.id); }} className="p-1 text-error-400 hover:text-error-600"><Trash2 className="w-3.5 h-3.5" /></button>
+              <input value={sub.name} onChange={(e) => onRenameSubscale(sub.id, e.target.value)} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold text-secondary-900 bg-transparent border-none outline-none flex-1 min-w-0 focus:underline" />
+              <button onClick={(e) => { e.stopPropagation(); onDeleteSubscale(sub.id); }} className="p-1 text-error-400 hover:text-error-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
             {sub.items.length === 0 ? (
-              <p className="text-xs text-secondary-400 py-2 text-center border border-dashed border-secondary-100 rounded">Drop items or select & add</p>
+              <p className="text-xs text-secondary-400 py-2 text-center border border-dashed border-secondary-100 rounded">Select items above and add them here</p>
             ) : (
               <div className="space-y-0.5">
                 {sub.items.map((item, idx) => (
-                  <div key={item.column} draggable onDragStart={(e) => { e.stopPropagation(); onDragStart(item.column, sub.id); }} onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1.5 px-2 py-1 bg-secondary-50 rounded text-xs group cursor-grab">
-                    <GripVertical className="w-2.5 h-2.5 text-secondary-300" />
-                    <span className="text-secondary-400 font-mono w-4">{idx + 1}.</span>
-                    <span className="flex-1 text-secondary-700 truncate">{item.column}</span>
-                    <div className="flex items-center gap-0.5">
+                  <div key={item.column} onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1.5 px-2 py-1 bg-secondary-50 rounded text-xs group">
+                    <span className="text-secondary-400 font-mono w-4 flex-shrink-0">{idx + 1}.</span>
+                    <span className="flex-1 min-w-0 text-secondary-700 truncate" title={item.column}>{item.column}</span>
+                    <div className="flex items-center gap-0.5 flex-shrink-0">
                       <button onClick={() => onMoveItem(sub.id, idx, 'up')} disabled={idx === 0} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-[-90deg]" /></button>
                       <button onClick={() => onMoveItem(sub.id, idx, 'down')} disabled={idx === sub.items.length - 1} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-90" /></button>
                       <button onClick={() => onToggleReverse(sub.id, item.column)} className={`px-1.5 py-0.5 text-xs rounded-full font-medium transition-colors ${item.reverse ? 'bg-warning-100 text-warning-700 border border-warning-300' : 'bg-secondary-100 text-secondary-400 border border-secondary-200 hover:text-secondary-600'}`}>Rev</button>
@@ -1324,7 +1309,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, customFormula, minVa
       {scoringMethod === 'custom' && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 mb-1">
-            <input value={customFormula} onChange={(e) => onSetCustomFormula(e.target.value)} placeholder="e.g. (Q1 + Q2) / 2 * Q3" className="flex-1 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400 font-mono" />
+            <input value={customFormula} onChange={(e) => onSetCustomFormula(e.target.value)} placeholder="e.g. (Q1 + Q2) / 2 * Q3" className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400 font-mono" />
             <Tooltip text="Use +, -, *, /, parentheses, and column names. Example: (Q1 + Q2 + Q3) / 3">
               <Info className="w-3.5 h-3.5 text-secondary-400" />
             </Tooltip>
@@ -1376,11 +1361,11 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, customFormula, minVa
       {scaleType === 'categorical' && (
         <div className="space-y-1">
           {labelMap.map((e, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <input value={e.label} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, label: ev.target.value } : lm))} className="flex-1 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-              <ArrowRight className="w-3 h-3 text-secondary-400" />
-              <input type="number" value={e.value} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, value: Number(ev.target.value) } : lm))} className="w-12 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-              <button onClick={() => onSetLabelMap(labelMap.filter((_, j) => j !== i))} className="p-0.5 text-error-400 hover:text-error-600"><X className="w-3 h-3" /></button>
+            <div key={i} className="flex items-center gap-1 w-full">
+              <input value={e.label} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, label: ev.target.value } : lm))} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+              <ArrowRight className="w-3 h-3 text-secondary-400 flex-shrink-0" />
+              <input type="number" value={e.value} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, value: Number(ev.target.value) } : lm))} className="w-12 flex-shrink-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+              <button onClick={() => onSetLabelMap(labelMap.filter((_, j) => j !== i))} className="p-0.5 text-error-400 hover:text-error-600 flex-shrink-0"><X className="w-3 h-3" /></button>
             </div>
           ))}
           <button onClick={() => onSetLabelMap([...labelMap, { label: '', value: 0 }])} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add label</button>

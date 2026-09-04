@@ -44,13 +44,13 @@ export function LiveGrid({
   summary, showSummarySum, showSummaryMean, hasScoring, maxDisplayRows = 200,
 }: LiveGridProps) {
   const displayRows = rows.slice(0, maxDisplayRows);
-  const useGroupedHeaders = groups.some((g) => g.name !== 'Demographics' && g.name !== 'Unassigned' && g.columns.some((c) => c.type === 'data'));
+  const useGroupedHeaders = groups.some((g) => g.name !== 'ID' && g.name !== 'Unassigned' && g.columns.some((c) => c.type === 'data'));
   const showSummary = hasScoring && (showSummarySum || showSummaryMean);
   const showSumRow = showSummary && showSummarySum;
   const showMeanRow = showSummary && showSummaryMean;
 
   const groupColors: Record<string, string> = {
-    'Demographics': 'bg-secondary-100 text-secondary-700 border-secondary-300',
+    'ID': 'bg-secondary-100 text-secondary-700 border-secondary-300',
     'Unassigned': 'bg-warning-100 text-warning-700 border-warning-300',
     'Overall Scale': 'bg-primary-100 text-primary-700 border-primary-300',
   };
