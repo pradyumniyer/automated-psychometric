@@ -36,10 +36,9 @@ interface SheetInfo { name: string; rows: number; cols: number; }
 type SaveState = 'idle' | 'saving' | 'saved';
 
 export function ConfigScreen({
-  project, onGoToAnalysis, highlightRowIndex, onClearHighlight,
+  project, highlightRowIndex, onClearHighlight,
 }: {
   project: Project;
-  onGoToAnalysis: () => void;
   highlightRowIndex: number | null;
   onClearHighlight: () => void;
 }) {
@@ -771,7 +770,6 @@ export function ConfigScreen({
               <Button variant="outline" size="sm" onClick={() => handleExport('xlsx')}><FileDown className="w-3.5 h-3.5" /> XLSX</Button>
             </>
           )}
-          <Button variant="primary" size="sm" onClick={onGoToAnalysis}><BarChart3 className="w-4 h-4" /> Analysis</Button>
         </div>
       </div>
 
@@ -879,7 +877,7 @@ export function ConfigScreen({
                     canScore={canScore} scoring={scoring} onRunScoring={runScoring}
                     scoringResult={scoringResult} onExport={handleExport}
                     excludedCount={excludedRows.size} subscaleCount={subscaleStates.length || (itemColumns.length > 0 ? 1 : 0)}
-                    onGoToAnalysis={onGoToAnalysis} usedAutoScale={subscaleStates.length === 0 && !!dataset}
+                    usedAutoScale={subscaleStates.length === 0 && !!dataset}
                     originalColCount={originalColCount} computedColCount={computedColCount}
                   />
                 )}
@@ -1435,10 +1433,10 @@ function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBa
 }
 
 // ── Scoring Panel ──
-function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, onGoToAnalysis, usedAutoScale, originalColCount, computedColCount }: {
+function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount }: {
   canScore: boolean; scoring: boolean; onRunScoring: () => void;
   scoringResult: ReturnType<typeof scoreDataset> | null; onExport: (f: 'csv' | 'xlsx') => void;
-  excludedCount: number; subscaleCount: number; onGoToAnalysis: () => void; usedAutoScale: boolean;
+  excludedCount: number; subscaleCount: number; usedAutoScale: boolean;
   originalColCount: number; computedColCount: number;
 }) {
   return (
@@ -1483,7 +1481,6 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
             <Button variant="outline" size="sm" onClick={() => onExport('csv')} className="flex-1 text-xs"><FileDown className="w-3 h-3" /> CSV</Button>
             <Button variant="outline" size="sm" onClick={() => onExport('xlsx')} className="flex-1 text-xs"><FileDown className="w-3 h-3" /> XLSX</Button>
           </div>
-          <Button variant="primary" size="sm" onClick={onGoToAnalysis} className="w-full mt-2"><BarChart3 className="w-3.5 h-3.5" /> Analysis Dashboard</Button>
         </Card>
       )}
     </div>

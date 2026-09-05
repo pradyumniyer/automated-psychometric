@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { ProjectList } from '@/components/ProjectList';
 import { ConfigScreen } from '@/components/ConfigScreen';
-import { AnalysisScreen } from '@/components/AnalysisScreen';
 import { Project } from '@/lib/supabase';
-import { ArrowLeft, FlaskConical, Settings2, BarChart3 } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Settings2 } from 'lucide-react';
 
-type View = 'list' | 'config' | 'analysis';
+type View = 'list' | 'config';
 
 export default function App() {
   const [view, setView] = useState<View>('list');
@@ -20,11 +19,6 @@ export default function App() {
   const goToList = () => {
     setProject(null);
     setView('list');
-  };
-
-  const goToAnalysis = () => {
-    setHighlightRowIndex(null);
-    setView('analysis');
   };
 
   const goToConfig = (rowIndex?: number) => {
@@ -53,48 +47,15 @@ export default function App() {
             <span className="font-semibold text-secondary-900">{project.name}</span>
           </div>
         </div>
-
-        {/* Screen toggle */}
-        <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-1">
-          <button
-            onClick={() => goToConfig()}
-            className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
-              view === 'config' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-600 hover:text-secondary-900'
-            }`}
-          >
-            <Settings2 className="w-4 h-4" />
-            Configure & Score
-          </button>
-          <button
-            onClick={goToAnalysis}
-            className={`flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
-              view === 'analysis' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-600 hover:text-secondary-900'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Analysis Dashboard
-          </button>
-        </div>
       </div>
 
       {/* Screen content */}
       <div className="flex-1 overflow-hidden">
-        {view === 'config' && (
-          <ConfigScreen
-            project={project}
-            onGoToAnalysis={goToAnalysis}
-            highlightRowIndex={highlightRowIndex}
-            onClearHighlight={() => setHighlightRowIndex(null)}
-          />
-        )}
-        {view === 'analysis' && (
-          <AnalysisScreen
-            project={project}
-            onGoToConfig={goToConfig}
-            highlightRowIndex={highlightRowIndex}
-            onClearHighlight={() => setHighlightRowIndex(null)}
-          />
-        )}
+        <ConfigScreen
+          project={project}
+          highlightRowIndex={highlightRowIndex}
+          onClearHighlight={() => setHighlightRowIndex(null)}
+        />
       </div>
     </div>
   );
