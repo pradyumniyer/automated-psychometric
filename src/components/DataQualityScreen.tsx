@@ -3,14 +3,14 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ShieldCheck, AlertTriangle, Eye, TrendingDown, BarChart3, Activity,
   ChevronDown, ChevronRight, Settings2, Trash2, Plus, X,
-  Check, Info, FileDown, ArrowRight, AlertCircle,
+  Check, Info, FileDown, AlertCircle,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Line, ComposedChart, Scatter, ReferenceLine, Boxplot as RechartsBoxplot,
+  Line, ComposedChart, Scatter, ReferenceLine,
 } from 'recharts';
 import { supabase, Dataset, DemographicColumn, SubscaleGroup, ResponseScale } from '@/lib/supabase';
-import { logAction, fetchHistory, deleteAction } from '@/lib/history';
+
 import {
   computeDataQuality, histogramData, qqPlotData, boxplotData,
   DEFAULT_THRESHOLDS, DEFAULT_ALLOWED_NON_RESPONSE,

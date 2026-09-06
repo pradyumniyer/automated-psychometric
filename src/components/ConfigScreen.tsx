@@ -5,7 +5,7 @@ import {
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
-  PanelLeftOpen, Sigma, TrendingUp,
+  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck,
 } from 'lucide-react';
 import {
   supabase, Project, Dataset, DemographicColumn, SubscaleGroup, SubscaleItem,
@@ -37,18 +37,30 @@ type SaveState = 'idle' | 'saving' | 'saved';
 
 export function ConfigScreen({
   project, highlightRowIndex, onClearHighlight,
+  excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
+  onGoToQuality, sharedDatasetId, onDatasetChange,
 }: {
   project: Project;
   highlightRowIndex: number | null;
   onClearHighlight: () => void;
+  excludedRows: Set<number>;
+  onToggleRowExclusion: (rowIndex: number) => void;
+  onSetExcludedRows: (rows: Set<number>) => void;
+  onGoToQuality: () => void;
+  sharedDatasetId: string | null;
+  onDatasetChange: (id: string | null) => void;
 }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
+  const activeDatasetId = sharedDatasetId ?? activeDatasetIdState;
+  const setActiveDatasetId = (id: string | null) => {
+    setActiveDatasetIdState(id);
+    onDatasetChange(id);
+  };
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [bandStates, setBandStates] = useState<Record<string, BandState[]>>({});
-  const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
   const [scoringResult, setScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
   const [overallScale, setOverallScale] = useState<SubscaleState>({
     id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
@@ -155,10 +167,10 @@ export function ConfigScreen({
     }
     if (scoreData) {
       const sr = scoreData as { headers: string[]; rows: Record<string, unknown>[]; excluded_rows: number[] };
-      setExcludedRows(new Set(sr.excluded_rows || []));
+      onSetExcludedRows(new Set(sr.excluded_rows || []));
       setScoringResult({ headers: sr.headers, rows: sr.rows as Record<string, number | string | null>[], subscaleScores: {}, interpretationLabels: {}, excludedRowIndices: sr.excluded_rows || [], configSnapshot: { subscales: [], bands: {} } });
     } else {
-      setExcludedRows(new Set());
+      onSetExcludedRows(new Set());
       setScoringResult(null);
     }
     if (subData && (subData as SubscaleGroup[]).length === 0 && ds) {
@@ -439,13 +451,11 @@ export function ConfigScreen({
     markDirty();
   };
 
-  // ── Row exclusion ──
+  // ── Row exclusion (delegates to shared state in App) ──
   const toggleRowExclusion = async (rowIndex: number) => {
     if (!dataset) return;
-    const newSet = new Set(excludedRows);
-    const wasExcluded = newSet.has(rowIndex);
-    if (wasExcluded) newSet.delete(rowIndex); else newSet.add(rowIndex);
-    setExcludedRows(newSet);
+    const wasExcluded = sharedExcludedRows.has(rowIndex);
+    onToggleRowExclusion(rowIndex);
     await logAction(project.id, 'row_exclude_toggle',
       `${wasExcluded ? 'Included' : 'Excluded'} row ${rowIndex + 1}`,
       { rowIndex, action: wasExcluded ? 'include' : 'exclude' },
@@ -477,13 +487,13 @@ export function ConfigScreen({
       } else {
         for (const sub of subscaleStates) bandConfigs[sub.name] = (bandStates[sub.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
       }
-      const result = scoreDataset(dataset.rows as Record<string, unknown>[], dataset.headers, subConfigs, bandConfigs, Array.from(excludedRows));
+      const result = scoreDataset(dataset.rows as Record<string, unknown>[], dataset.headers, subConfigs, bandConfigs, Array.from(sharedExcludedRows));
       setScoringResult(result);
       const { data: ls } = await supabase.from('scoring_results').select('version').eq('dataset_id', dataset.id).order('version', { ascending: false }).limit(1).maybeSingle();
       const nv = (ls?.version || 0) + 1;
-      await supabase.from('scoring_results').insert({ project_id: project.id, dataset_id: dataset.id, version: nv, headers: result.headers, rows: result.rows, config_snapshot: { subscales: subConfigs, bands: bandConfigs }, excluded_rows: Array.from(excludedRows) });
-      await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${excludedRows.size} excluded)`, { version: nv, excludedCount: excludedRows.size }, null, dataset.id);
-      setStatusMsg({ type: 'success', text: `Scoring complete (v${nv}). ${excludedRows.size} rows excluded.` });
+      await supabase.from('scoring_results').insert({ project_id: project.id, dataset_id: dataset.id, version: nv, headers: result.headers, rows: result.rows, config_snapshot: { subscales: subConfigs, bands: bandConfigs }, excluded_rows: Array.from(sharedExcludedRows) });
+      await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
+      setStatusMsg({ type: 'success', text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.` });
       const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (e) { setStatusMsg({ type: 'error', text: `Scoring failed: ${(e as Error).message}` }); }
     setScoring(false);
@@ -570,9 +580,9 @@ export function ConfigScreen({
     if (!dataset) return;
     if (action.action_type === 'row_exclude_toggle' && action.undo_data) {
       const rowIndex = action.undo_data.rowIndex as number;
-      const newSet = new Set(excludedRows);
+      const newSet = new Set(sharedExcludedRows);
       if (newSet.has(rowIndex)) newSet.delete(rowIndex); else newSet.add(rowIndex);
-      setExcludedRows(newSet);
+      onSetExcludedRows(newSet);
       await deleteAction(action.id);
       const hist = await fetchHistory(dataset.id); setHistory(hist);
       setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
@@ -609,7 +619,7 @@ export function ConfigScreen({
       : dataset.rows as Record<string, unknown>[];
 
     // Filter out excluded rows for summary calculations
-    const includedRows = gridRows.filter((_, i) => !excludedRows.has(i));
+    const includedRows = gridRows.filter((_, i) => !sharedExcludedRows.has(i));
 
     // Demographics group
     const demoColsList = demoCols.map((d) => d.column_name).filter((c) => dataset.headers.includes(c));
@@ -687,12 +697,12 @@ export function ConfigScreen({
     }
 
     return { groups: grps, summary: { sums, means } };
-  }, [dataset, scoringResult, demoCols, subscaleStates, unassignedItems, excludedRows]);
+  }, [dataset, scoringResult, demoCols, subscaleStates, unassignedItems, sharedExcludedRows]);
 
   const displayRows = dataset ? (
     scoringResult
-      ? (showExcludedOnly ? (scoringResult.rows as Record<string, unknown>[]).filter((_, i) => excludedRows.has(i)) : scoringResult.rows as Record<string, unknown>[])
-      : (showExcludedOnly ? (dataset.rows as Record<string, unknown>[]).filter((_, i) => excludedRows.has(i)) : dataset.rows as Record<string, unknown>[])
+      ? (showExcludedOnly ? (scoringResult.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : scoringResult.rows as Record<string, unknown>[])
+      : (showExcludedOnly ? (dataset.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : dataset.rows as Record<string, unknown>[])
   ) : [];
   const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom'));
   const originalColCount = dataset?.col_count ?? 0;
@@ -738,6 +748,8 @@ export function ConfigScreen({
           {showUpdateTemplate && linkedTemplate && (
             <Button variant="outline" size="sm" onClick={updateLinkedTemplate}><Check className="w-3.5 h-3.5" /> Update Template</Button>
           )}
+          <div className="w-px h-6 bg-secondary-200" />
+          <Button variant="outline" size="sm" onClick={onGoToQuality}><ShieldCheck className="w-4 h-4" /> Data Quality</Button>
         </div>
         <div className="flex items-center gap-3">
           {/* Auto-save indicator */}
@@ -876,7 +888,7 @@ export function ConfigScreen({
                   <ScoringPanel
                     canScore={canScore} scoring={scoring} onRunScoring={runScoring}
                     scoringResult={scoringResult} onExport={handleExport}
-                    excludedCount={excludedRows.size} subscaleCount={subscaleStates.length || (itemColumns.length > 0 ? 1 : 0)}
+                    excludedCount={sharedExcludedRows.size} subscaleCount={subscaleStates.length || (itemColumns.length > 0 ? 1 : 0)}
                     usedAutoScale={subscaleStates.length === 0 && !!dataset}
                     originalColCount={originalColCount} computedColCount={computedColCount}
                   />
@@ -930,7 +942,7 @@ export function ConfigScreen({
                 groups={groups}
                 rows={displayRows}
                 realRowCount={dataset.row_count}
-                excludedRows={excludedRows}
+                excludedRows={sharedExcludedRows}
                 onToggleRow={toggleRowExclusion}
                 showExcludedOnly={showExcludedOnly}
                 onToggleFilter={() => setShowExcludedOnly(!showExcludedOnly)}
@@ -945,7 +957,7 @@ export function ConfigScreen({
                 <Card className="mt-3 p-4 border-success-300 bg-success-50/30 flex-shrink-0">
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 text-success-800 font-medium"><Check className="w-4 h-4" /> Scoring complete ({scoringResult.headers.length} cols, {scoringResult.rows.length} rows)</div>
-                    <div className="text-sm text-secondary-500">{excludedRows.size} excluded · +{computedColCount} computed columns</div>
+                    <div className="text-sm text-secondary-500">{sharedExcludedRows.size} excluded · +{computedColCount} computed columns</div>
                   </div>
                 </Card>
               )}

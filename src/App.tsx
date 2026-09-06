@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { ProjectList } from '@/components/ProjectList';
 import { ConfigScreen } from '@/components/ConfigScreen';
+import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { Project } from '@/lib/supabase';
-import { ArrowLeft, FlaskConical, Settings2 } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Settings2, ShieldCheck } from 'lucide-react';
 
-type View = 'list' | 'config';
+type View = 'list' | 'config' | 'quality';
 
 export default function App() {
   const [view, setView] = useState<View>('list');
   const [project, setProject] = useState<Project | null>(null);
   const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
+  const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
+  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
 
   const openProject = (p: Project) => {
     setProject(p);
@@ -19,12 +22,35 @@ export default function App() {
   const goToList = () => {
     setProject(null);
     setView('list');
+    setExcludedRows(new Set());
+    setActiveDatasetId(null);
   };
 
-  const goToConfig = (rowIndex?: number) => {
+  const goToConfig = useCallback((rowIndex?: number) => {
     if (rowIndex != null) setHighlightRowIndex(rowIndex);
     setView('config');
-  };
+  }, []);
+
+  const goToQuality = useCallback(() => {
+    setView('quality');
+  }, []);
+
+  const toggleRowExclusion = useCallback((rowIndex: number) => {
+    setExcludedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowIndex)) next.delete(rowIndex);
+      else next.add(rowIndex);
+      return next;
+    });
+  }, []);
+
+  const bulkExclude = useCallback((indices: number[]) => {
+    setExcludedRows((prev) => {
+      const next = new Set(prev);
+      for (const idx of indices) next.add(idx);
+      return next;
+    });
+  }, []);
 
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
@@ -47,15 +73,50 @@ export default function App() {
             <span className="font-semibold text-secondary-900">{project.name}</span>
           </div>
         </div>
+
+        <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5">
+          <button
+            onClick={() => goToConfig()}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${view === 'config' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
+          >
+            <Settings2 className="w-4 h-4" />
+            Configure & Score
+          </button>
+          <button
+            onClick={goToQuality}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${view === 'quality' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Data Quality
+          </button>
+        </div>
       </div>
 
       {/* Screen content */}
       <div className="flex-1 overflow-hidden">
-        <ConfigScreen
-          project={project}
-          highlightRowIndex={highlightRowIndex}
-          onClearHighlight={() => setHighlightRowIndex(null)}
-        />
+        {view === 'config' && (
+          <ConfigScreen
+            project={project}
+            highlightRowIndex={highlightRowIndex}
+            onClearHighlight={() => setHighlightRowIndex(null)}
+            excludedRows={excludedRows}
+            onToggleRowExclusion={toggleRowExclusion}
+            onSetExcludedRows={setExcludedRows}
+            onGoToQuality={goToQuality}
+            sharedDatasetId={activeDatasetId}
+            onDatasetChange={setActiveDatasetId}
+          />
+        )}
+        {view === 'quality' && (
+          <DataQualityScreen
+            project={project}
+            excludedRows={excludedRows}
+            onToggleRow={toggleRowExclusion}
+            onBulkExclude={bulkExclude}
+            onInspectRow={(rowIndex) => goToConfig(rowIndex)}
+            onGoToExport={() => goToConfig()}
+          />
+        )}
       </div>
     </div>
   );
