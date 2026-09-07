@@ -2,10 +2,11 @@ import { useState, useCallback } from 'react';
 import { ProjectList } from '@/components/ProjectList';
 import { ConfigScreen } from '@/components/ConfigScreen';
 import { DataQualityScreen } from '@/components/DataQualityScreen';
+import { ExportScreen } from '@/components/ExportScreen';
 import { Project } from '@/lib/supabase';
-import { ArrowLeft, FlaskConical, Settings2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown } from 'lucide-react';
 
-type View = 'list' | 'config' | 'quality';
+type View = 'list' | 'config' | 'quality' | 'export';
 
 export default function App() {
   const [view, setView] = useState<View>('list');
@@ -33,6 +34,10 @@ export default function App() {
 
   const goToQuality = useCallback(() => {
     setView('quality');
+  }, []);
+
+  const goToExport = useCallback(() => {
+    setView('export');
   }, []);
 
   const toggleRowExclusion = useCallback((rowIndex: number) => {
@@ -80,7 +85,7 @@ export default function App() {
             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${view === 'config' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
           >
             <Settings2 className="w-4 h-4" />
-            Configure & Score
+            Configure
           </button>
           <button
             onClick={goToQuality}
@@ -88,6 +93,13 @@ export default function App() {
           >
             <ShieldCheck className="w-4 h-4" />
             Data Quality
+          </button>
+          <button
+            onClick={goToExport}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${view === 'export' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
+          >
+            <FileDown className="w-4 h-4" />
+            Export
           </button>
         </div>
       </div>
@@ -114,7 +126,15 @@ export default function App() {
             onToggleRow={toggleRowExclusion}
             onBulkExclude={bulkExclude}
             onInspectRow={(rowIndex) => goToConfig(rowIndex)}
-            onGoToExport={() => goToConfig()}
+            onGoToExport={goToExport}
+          />
+        )}
+        {view === 'export' && (
+          <ExportScreen
+            project={project}
+            excludedRows={excludedRows}
+            sharedDatasetId={activeDatasetId}
+            onDatasetChange={setActiveDatasetId}
           />
         )}
       </div>
