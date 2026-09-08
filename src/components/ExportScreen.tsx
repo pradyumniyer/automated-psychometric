@@ -10,6 +10,11 @@ import {
 } from '@/lib/supabase';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
+import {
+  computeDataQuality,
+  DEFAULT_ALLOWED_NON_RESPONSE,
+  DEFAULT_THRESHOLDS,
+} from '@/scientific/dataQuality';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -132,10 +137,15 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     })();
   }, [subscaleGroups]);
 
-  // ── Compute scored result (use saved or recompute) ──
+  // ── Compute scored result (prefer recompute when exclusions changed) ──
   const scoredResult = useMemo(() => {
     if (!dataset) return null;
-    if (savedScoringResult) {
+    const savedMatchesExclusions =
+      savedScoringResult &&
+      savedScoringResult.excluded_rows.length === excludedRows.size &&
+      savedScoringResult.excluded_rows.every((i) => excludedRows.has(i));
+
+    if (savedScoringResult && savedMatchesExclusions) {
       return {
         headers: savedScoringResult.headers,
         rows: savedScoringResult.rows as Record<string, number | string | null>[],
@@ -172,9 +182,22 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     return `${proj}_${type}.${ext}`;
   };
 
+  const noRowsToExport = includedCount <= 0 && !keepExcluded;
+
+  // Scale range for QC (first subscale with min/max, else null)
+  const qcScaleMin = useMemo(() => {
+    for (const s of responseScales) if (s.min_value != null) return s.min_value;
+    return null;
+  }, [responseScales]);
+  const qcScaleMax = useMemo(() => {
+    for (const s of responseScales) if (s.max_value != null) return s.max_value;
+    return null;
+  }, [responseScales]);
+
   // ── Export handlers ──
   const doExport = (type: ExportType, fmt: 'csv' | 'xlsx') => {
     if (!dataset) return;
+    if (noRowsToExport) return;
     const key = `${type}_${fmt}`;
     setExporting(key);
     try {
@@ -215,8 +238,145 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       const fn = fileName(type, fmt);
       if (fmt === 'csv') exportToCSV(headers, rows, fn);
       else exportToXLSX(headers, rows, fn);
-    } catch (e) {
+    } catch {
       // surfaced by disabling state; ignore
+    }
+    setExporting(null);
+  };
+
+  /** QC flags table — one row per participant with quality metrics */
+  const exportQcFlags = (fmt: 'csv' | 'xlsx') => {
+    if (!dataset || itemColumns.length === 0) return;
+    setExporting(`qc_${fmt}`);
+    try {
+      const quality = computeDataQuality(
+        dataset.rows as Record<string, unknown>[],
+        dataset.headers,
+        itemColumns,
+        [], // evaluate all rows so flags are visible even for excluded cases
+        qcScaleMin,
+        qcScaleMax,
+        DEFAULT_ALLOWED_NON_RESPONSE,
+        DEFAULT_THRESHOLDS,
+      );
+      const flagByRow = new Map(quality.flags.map((f) => [f.rowIndex, f]));
+      const headers = [
+        'row_number',
+        'excluded',
+        'flagged',
+        'severity',
+        'reasons',
+        'categories',
+      ];
+      const rows = dataset.rows.map((_, i) => {
+        const f = flagByRow.get(i);
+        return {
+          row_number: i + 1,
+          excluded: excludedRows.has(i),
+          flagged: !!f,
+          severity: f?.severity ?? '',
+          reasons: f?.reasons?.join(' | ') ?? '',
+          categories: f ? Array.from(f.categories).join(' | ') : '',
+        };
+      });
+      const fn = fileName('qc_flags' as ExportType, fmt).replace('qc_flags', 'qc_flags');
+      // fileName only accepts ExportType — build manually
+      const proj = project.name.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() || 'project';
+      const outName = `${proj}_qc_flags.${fmt}`;
+      if (fmt === 'csv') exportToCSV(headers, rows, outName);
+      else exportToXLSX(headers, rows, outName);
+    } catch {
+      // ignore
+    }
+    setExporting(null);
+  };
+
+  /** Simple codebook: column roles from current config */
+  const exportCodebook = (fmt: 'csv' | 'xlsx') => {
+    if (!dataset) return;
+    setExporting(`codebook_${fmt}`);
+    try {
+      const itemSet = new Set(itemColumns);
+      const headers = [
+        'column',
+        'role',
+        'subscale',
+        'reverse_scored',
+        'scoring_method',
+        'scale_min',
+        'scale_max',
+      ];
+      const rows: Record<string, unknown>[] = [];
+
+      for (const col of dataset.headers) {
+        if (demoColumnNames.has(col)) {
+          rows.push({
+            column: col,
+            role: 'demographic',
+            subscale: '',
+            reverse_scored: '',
+            scoring_method: '',
+            scale_min: '',
+            scale_max: '',
+          });
+          continue;
+        }
+        let role = itemSet.has(col) ? 'item' : 'other';
+        let subscale = '';
+        let reverse = '';
+        let method = '';
+        let sMin: number | string = '';
+        let sMax: number | string = '';
+        for (const sub of subscaleGroups) {
+          const item = (sub.items || []).find((it) => it.column === col);
+          if (item) {
+            role = 'item';
+            subscale = sub.name;
+            reverse = item.reverse ? 'yes' : 'no';
+            method = sub.scoring_method;
+            const scale = responseScales.find((rs) => rs.subscale_id === sub.id);
+            sMin = scale?.min_value ?? '';
+            sMax = scale?.max_value ?? '';
+            break;
+          }
+        }
+        rows.push({
+          column: col,
+          role,
+          subscale,
+          reverse_scored: reverse,
+          scoring_method: method,
+          scale_min: sMin,
+          scale_max: sMax,
+        });
+      }
+
+      // Provenance footer rows
+      rows.push({
+        column: '--- provenance ---',
+        role: '',
+        subscale: '',
+        reverse_scored: '',
+        scoring_method: '',
+        scale_min: '',
+        scale_max: '',
+      });
+      rows.push({
+        column: `project=${project.name}`,
+        role: `dataset=${dataset.sheet_name || dataset.file_name}`,
+        subscale: `excluded_count=${excludedRows.size}`,
+        reverse_scored: `exported_at=${new Date().toISOString()}`,
+        scoring_method: '',
+        scale_min: '',
+        scale_max: '',
+      });
+
+      const proj = project.name.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() || 'project';
+      const outName = `${proj}_codebook.${fmt}`;
+      if (fmt === 'csv') exportToCSV(headers, rows, outName);
+      else exportToXLSX(headers, rows, outName);
+    } catch {
+      // ignore
     }
     setExporting(null);
   };
@@ -307,6 +467,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="All original columns with excluded rows removed. Use this as a general-purpose cleaned dataset for any downstream analysis."
               badge="Always available"
               badgeColor="success"
+              disabled={noRowsToExport}
+              disabledReason={noRowsToExport ? 'No included rows to export. Include some rows or switch to “Keep with flag”.' : undefined}
               onExportCSV={() => doExport('cleaned_raw', 'csv')}
               onExportXLSX={() => doExport('cleaned_raw', 'xlsx')}
               exporting={exporting}
@@ -321,6 +483,14 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Questionnaire item columns only — demographics removed. Ideal for item analysis, factor analysis, or IRT workflows in jamovi, SPSS, or R."
               badge="No scoring needed"
               badgeColor="success"
+              disabled={noRowsToExport || itemColumns.length === 0}
+              disabledReason={
+                noRowsToExport
+                  ? 'No included rows to export. Include some rows or switch to “Keep with flag”.'
+                  : itemColumns.length === 0
+                    ? 'No item columns found (all columns marked demographic?).'
+                    : undefined
+              }
               onExportCSV={() => doExport('items_only', 'csv')}
               onExportXLSX={() => doExport('items_only', 'xlsx')}
               exporting={exporting}
@@ -335,8 +505,14 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Original columns plus subscale scores and interpretation labels. Use this when you need the full scored dataset for report-ready analysis."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
-              disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.') : undefined}
+              disabled={!scoringAvailable || noRowsToExport}
+              disabledReason={
+                noRowsToExport
+                  ? 'No included rows to export.'
+                  : !scoringAvailable
+                    ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.')
+                    : undefined
+              }
               onExportCSV={() => doExport('scored', 'csv')}
               onExportXLSX={() => doExport('scored', 'xlsx')}
               exporting={exporting}
@@ -351,13 +527,49 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Demographic columns plus score and interpretation columns only — item columns removed. Clean, compact file for group comparisons and demographic reporting."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
-              disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.') : undefined}
+              disabled={!scoringAvailable || noRowsToExport}
+              disabledReason={
+                noRowsToExport
+                  ? 'No included rows to export.'
+                  : !scoringAvailable
+                    ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.')
+                    : undefined
+              }
               onExportCSV={() => doExport('scores_demo', 'csv')}
               onExportXLSX={() => doExport('scores_demo', 'xlsx')}
               exporting={exporting}
               exportKey="scores_demo"
               fileName={fileName('scores_demo', 'csv')}
+            />
+
+            {/* E) QC flags */}
+            <ExportCard
+              icon={<AlertCircle className="w-5 h-5" />}
+              title="QC Flags Table"
+              description="One row per participant with quality flags, severity, reasons, and whether the row is currently excluded. Useful for R/audit trails alongside the cleaned data."
+              badge="Always available"
+              badgeColor="success"
+              disabled={itemColumns.length === 0}
+              disabledReason={itemColumns.length === 0 ? 'No item columns available for quality checks.' : undefined}
+              onExportCSV={() => exportQcFlags('csv')}
+              onExportXLSX={() => exportQcFlags('xlsx')}
+              exporting={exporting}
+              exportKey="qc"
+              fileName={`${project.name.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() || 'project'}_qc_flags.csv`}
+            />
+
+            {/* F) Codebook */}
+            <ExportCard
+              icon={<FileText className="w-5 h-5" />}
+              title="Codebook + Provenance"
+              description="Column roles (demographic / item), subscale membership, reverse scoring, scale min/max, plus a simple provenance line (project, dataset, exclusion count, export time)."
+              badge="Always available"
+              badgeColor="success"
+              onExportCSV={() => exportCodebook('csv')}
+              onExportXLSX={() => exportCodebook('xlsx')}
+              exporting={exporting}
+              exportKey="codebook"
+              fileName={`${project.name.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() || 'project'}_codebook.csv`}
             />
           </div>
 
@@ -366,7 +578,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <Info className="w-4 h-4 text-info-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-info-700">
               Raw imported data is never modified. Exclusions are applied at export time based on the current exclusion state.
-              {scoringAvailable && !savedScoringResult && ' Scores are computed on-the-fly from your current subscale configuration. Run scoring on the Configure screen to save a scoring version.'}
+              {scoringAvailable && !savedScoringResult && ' Scores are computed on-the-fly from your current subscale configuration when exclusions changed or no saved result exists.'}
+              {' '}Download QC flags + codebook with your data package for reproducible handoff to jamovi, SPSS, or R.
             </p>
           </div>
         </div>
