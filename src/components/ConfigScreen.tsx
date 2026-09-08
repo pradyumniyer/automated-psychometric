@@ -15,9 +15,15 @@ import {
 import { logAction, fetchHistory, deleteAction } from '@/lib/history';
 import { getSheetInfo, parseSheet, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
-import { detectDemographics, detectScale, recognizeColumns, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
+import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { validateBands, suggestBands } from '@/scientific/bandValidation';
+import {
+  buildTemplateDefinition,
+  matchTemplateToHeaders,
+  formatMatchSummary,
+  type TemplateMatchReport,
+} from '@/lib/templates';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridColumn, GridGroup } from './LiveGrid';
 
@@ -501,64 +507,177 @@ export function ConfigScreen({
 
   // ── Templates ──
   const saveAsTemplate = async (name: string, description: string, instrument: string) => {
-    const def: TemplateDefinition = {
-      subscales: subscaleStates.map((s) => ({ name: s.name, description: '', scoringMethod: s.scoringMethod, customFormula: s.customFormula || null, items: s.items.map((i) => ({ name: i.column, aliases: [i.column], order: i.order, reverse: i.reverse })) })),
-      responseScales: subscaleStates.map((s) => ({ subscaleName: s.name, scaleType: s.scaleType, minValue: s.minValue, maxValue: s.maxValue, labelMap: s.labelMap })),
-      interpretationBands: Object.entries(bandStates).map(([n, bs]) => ({ subscaleName: n, bands: bs.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })),
-      demographicRules: { patterns: ['age', 'gender', 'sex', 'education', 'income'], contentHeuristics: [] },
-    };
-    const { error } = await supabase.from('templates').insert({ name, description, instrument, definition: def, version: 1 });
+    if (subscaleStates.length === 0) {
+      setStatusMsg({ type: 'error', text: 'Add at least one subscale before saving a template.' });
+      return;
+    }
+    const def = buildTemplateDefinition(subscaleStates, bandStates);
+    const { error } = await supabase.from('templates').insert({
+      name: name.trim(),
+      description: description.trim(),
+      instrument: instrument.trim(),
+      definition: def,
+      version: 1,
+    });
     if (error) { setStatusMsg({ type: 'error', text: `Failed: ${error.message}` }); return; }
-    await logAction(project.id, 'template_save', `Saved template: ${name}`);
-    setStatusMsg({ type: 'success', text: `Template "${name}" saved.` });
+    await logAction(project.id, 'template_save', `Saved template: ${name.trim()}`);
+    const { data: tmplData } = await supabase.from('templates').select('*').order('name');
+    if (tmplData) setTemplates(tmplData as Template[]);
+    setStatusMsg({
+      type: 'success',
+      text: `Template "${name.trim()}" saved (instrument behaviour only — demographics stay dataset-specific).`,
+    });
     setShowTemplateModal(false);
-    await loadDatasets();
   };
 
   const applyTemplate = async (template: Template) => {
     if (!dataset) return;
     const def = template.definition as TemplateDefinition;
+    if (!def?.subscales?.length) {
+      setStatusMsg({ type: 'error', text: 'This template has no subscales to apply.' });
+      return;
+    }
+
+    // Match report first (does not write yet)
+    const report: TemplateMatchReport = matchTemplateToHeaders(template.name, def, dataset.headers);
+    if (report.matchedCount === 0) {
+      setStatusMsg({
+        type: 'error',
+        text: `Could not map any items from "${template.name}" to this dataset's columns. Check item names/aliases.`,
+      });
+      return;
+    }
+    if (report.unmatchedCount > 0) {
+      const ok = window.confirm(
+        `${formatMatchSummary(report)}\n\nApply anyway? Unmatched items will be omitted from subscales.`,
+      );
+      if (!ok) return;
+    } else if (subscaleStates.length > 0) {
+      const ok = window.confirm(
+        `Apply template "${template.name}"? This replaces the current subscale configuration for this dataset.\n\nDemographics will be re-detected independently (not taken from the template).`,
+      );
+      if (!ok) return;
+    }
+
+    // Demographics: always re-detect for this dataset (never copy from template)
     await supabase.from('demographic_columns').delete().eq('dataset_id', dataset.id);
-    const ds = detectDemographics(dataset.headers, dataset.rows as Record<string, unknown>[]);
-    for (const s of ds) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: dataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
+    const demoSuggestions = detectDemographics(dataset.headers, dataset.rows as Record<string, unknown>[]);
+    for (const s of demoSuggestions) {
+      await supabase.from('demographic_columns').insert({
+        project_id: project.id,
+        dataset_id: dataset.id,
+        column_name: s.column,
+        detected_by: s.rule,
+        confidence: s.confidence,
+        confirmed: s.confidence >= 0.5,
+      });
+    }
+
+    // Replace subscales for this dataset
     await supabase.from('subscale_groups').delete().eq('dataset_id', dataset.id);
+    // response_scales / bands cascade via subscale_id in many setups; delete orphans if tables allow
     const ns: SubscaleState[] = [];
+    const nextBands: Record<string, { name: string; minScore: number; maxScore: number; color: string }[]> = {};
+
     for (const sd of def.subscales) {
-      const mappings = recognizeColumns(sd.items.map((i) => ({ name: i.name, aliases: i.aliases })), dataset.headers);
-      const matched: SubscaleItem[] = sd.items.map((i, idx) => mappings[idx]?.matchedColumn ? { column: mappings[idx].matchedColumn!, order: i.order, reverse: i.reverse } : null).filter((x): x is SubscaleItem => x !== null);
-      const { data: ng } = await supabase.from('subscale_groups').insert({ project_id: project.id, dataset_id: dataset.id, name: sd.name, items: matched, scoring_method: sd.scoringMethod, custom_formula: sd.customFormula || null, display_order: ns.length }).select().single();
-      if (ng) {
-        const nid = (ng as SubscaleGroup).id;
-        const scaleDef = def.responseScales.find((rs) => rs.subscaleName === sd.name);
-        const bandDef = def.interpretationBands.find((ib) => ib.subscaleName === sd.name);
-        ns.push({ id: nid, name: sd.name, items: matched, scoringMethod: sd.scoringMethod, customFormula: sd.customFormula || '', scaleType: scaleDef?.scaleType || 'numeric', minValue: scaleDef?.minValue ?? null, maxValue: scaleDef?.maxValue ?? null, labelMap: scaleDef?.labelMap || [], displayOrder: ns.length });
-        if (scaleDef) await supabase.from('response_scales').insert({ project_id: project.id, dataset_id: dataset.id, subscale_id: nid, scale_type: scaleDef.scaleType, min_value: scaleDef.minValue, max_value: scaleDef.maxValue, label_map: scaleDef.labelMap });
-        if (bandDef) { for (let i = 0; i < bandDef.bands.length; i++) await supabase.from('interpretation_bands').insert({ project_id: project.id, dataset_id: dataset.id, subscale_id: nid, name: bandDef.bands[i].name, min_score: bandDef.bands[i].minScore, max_score: bandDef.bands[i].maxScore, color: bandDef.bands[i].color, display_order: i }); setBandStates((p) => ({ ...p, [sd.name]: bandDef.bands.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })); }
+      const matched = report.matchedBySubscale[sd.name] || [];
+      const { data: ng } = await supabase
+        .from('subscale_groups')
+        .insert({
+          project_id: project.id,
+          dataset_id: dataset.id,
+          name: sd.name,
+          items: matched,
+          scoring_method: sd.scoringMethod,
+          custom_formula: sd.customFormula || null,
+          display_order: ns.length,
+        })
+        .select()
+        .single();
+      if (!ng) continue;
+      const nid = (ng as SubscaleGroup).id;
+      const scaleDef = def.responseScales?.find((rs) => rs.subscaleName === sd.name);
+      const bandDef = def.interpretationBands?.find((ib) => ib.subscaleName === sd.name);
+      ns.push({
+        id: nid,
+        name: sd.name,
+        items: matched,
+        scoringMethod: sd.scoringMethod,
+        customFormula: sd.customFormula || '',
+        scaleType: scaleDef?.scaleType || 'numeric',
+        minValue: scaleDef?.minValue ?? null,
+        maxValue: scaleDef?.maxValue ?? null,
+        labelMap: scaleDef?.labelMap || [],
+        displayOrder: ns.length,
+      });
+      if (scaleDef) {
+        await supabase.from('response_scales').insert({
+          project_id: project.id,
+          dataset_id: dataset.id,
+          subscale_id: nid,
+          scale_type: scaleDef.scaleType,
+          min_value: scaleDef.minValue,
+          max_value: scaleDef.maxValue,
+          label_map: scaleDef.labelMap,
+        });
+      }
+      if (bandDef?.bands?.length) {
+        for (let i = 0; i < bandDef.bands.length; i++) {
+          await supabase.from('interpretation_bands').insert({
+            project_id: project.id,
+            dataset_id: dataset.id,
+            subscale_id: nid,
+            name: bandDef.bands[i].name,
+            min_score: bandDef.bands[i].minScore,
+            max_score: bandDef.bands[i].maxScore,
+            color: bandDef.bands[i].color,
+            display_order: i,
+          });
+        }
+        nextBands[sd.name] = bandDef.bands.map((b) => ({
+          name: b.name,
+          minScore: b.minScore,
+          maxScore: b.maxScore,
+          color: b.color,
+        }));
       }
     }
+
     setSubscaleStates(ns);
-    // Link the template
+    setBandStates(nextBands);
     await supabase.from('datasets').update({ linked_template_id: template.id }).eq('id', dataset.id);
     setLinkedTemplate(template);
-    await logAction(project.id, 'template_apply', `Applied template: ${template.name} (v${template.version})`, { templateId: template.id }, null, dataset.id);
-    setStatusMsg({ type: 'success', text: `Template "${template.name}" applied. Review mappings and adjust.` });
+    await logAction(
+      project.id,
+      'template_apply',
+      `Applied template: ${template.name} (v${template.version}) — ${report.matchedCount}/${report.totalItems} items matched`,
+      { templateId: template.id, matchReport: { matched: report.matchedCount, total: report.totalItems, unmatched: report.unmatchedNames } },
+      null,
+      dataset.id,
+    );
+    setStatusMsg({
+      type: report.unmatchedCount === 0 ? 'success' : 'info',
+      text: formatMatchSummary(report),
+    });
+    setShowTemplateModal(false);
     await loadDatasetConfig();
   };
 
   const updateLinkedTemplate = async () => {
     if (!dataset || !linkedTemplate) return;
-    const def: TemplateDefinition = {
-      subscales: subscaleStates.map((s) => ({ name: s.name, description: '', scoringMethod: s.scoringMethod, customFormula: s.customFormula || null, items: s.items.map((i) => ({ name: i.column, aliases: [i.column], order: i.order, reverse: i.reverse })) })),
-      responseScales: subscaleStates.map((s) => ({ subscaleName: s.name, scaleType: s.scaleType, minValue: s.minValue, maxValue: s.maxValue, labelMap: s.labelMap })),
-      interpretationBands: Object.entries(bandStates).map(([n, bs]) => ({ subscaleName: n, bands: bs.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })),
-      demographicRules: { patterns: ['age', 'gender', 'sex', 'education', 'income'], contentHeuristics: [] },
-    };
-    await supabase.from('templates').update({ definition: def, version: linkedTemplate.version + 1 }).eq('id', linkedTemplate.id);
-    await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
-    setLinkedTemplate({ ...linkedTemplate, version: linkedTemplate.version + 1, definition: def });
+    if (subscaleStates.length === 0) {
+      setStatusMsg({ type: 'error', text: 'Cannot update template with zero subscales.' });
+      return;
+    }
+    const def = buildTemplateDefinition(subscaleStates, bandStates);
+    const nextVersion = linkedTemplate.version + 1;
+    await supabase.from('templates').update({ definition: def, version: nextVersion, updated_at: new Date().toISOString() }).eq('id', linkedTemplate.id);
+    await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${nextVersion})`, { templateId: linkedTemplate.id }, null, dataset.id);
+    setLinkedTemplate({ ...linkedTemplate, version: nextVersion, definition: def });
     setShowUpdateTemplate(false);
-    setStatusMsg({ type: 'success', text: `Template "${linkedTemplate.name}" updated to v${linkedTemplate.version + 1}.` });
-    await loadDatasets();
+    const { data: tmplData } = await supabase.from('templates').select('*').order('name');
+    if (tmplData) setTemplates(tmplData as Template[]);
+    setStatusMsg({ type: 'success', text: `Template "${linkedTemplate.name}" updated to v${nextVersion}.` });
   };
 
   const unlinkTemplate = async () => {
@@ -1508,6 +1627,10 @@ function TemplateModal({ open, onClose, templates, onSaveAsTemplate, onApplyTemp
   const [name, setName] = useState(''), [desc, setDesc] = useState(''), [instrument, setInstrument] = useState('');
   return (
     <Modal open={open} onClose={onClose} title="Templates" maxWidth="max-w-3xl">
+      <p className="text-sm text-secondary-500 mb-4">
+        Templates store instrument behaviour only: subscales, reverse items, response scales, and interpretation bands.
+        Demographics and data-quality exclusions stay dataset-specific and are never copied from a template.
+      </p>
       <div className="flex gap-2 mb-4">
         <button onClick={() => setMode('list')} className={`px-4 py-2 text-sm rounded-lg ${mode === 'list' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Browse Templates</button>
         <button onClick={() => setMode('create')} className={`px-4 py-2 text-sm rounded-lg ${mode === 'create' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Save Current as Template</button>
@@ -1517,11 +1640,11 @@ function TemplateModal({ open, onClose, templates, onSaveAsTemplate, onApplyTemp
           {templates.length === 0 && <EmptyState icon={Tag} title="No templates yet" description="Save your current configuration as a reusable template." />}
           {templates.map((t) => (
             <Card key={t.id} className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <h4 className="font-semibold text-secondary-900">{t.name}</h4>
                   <p className="text-sm text-secondary-500">{t.description}</p>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
                     <StatusBadge status="info">v{t.version}</StatusBadge>
                     {t.instrument && <StatusBadge status="neutral">{t.instrument}</StatusBadge>}
                     <span className="text-xs text-secondary-400">{(t.definition as TemplateDefinition)?.subscales?.length || 0} subscales</span>
@@ -1531,14 +1654,20 @@ function TemplateModal({ open, onClose, templates, onSaveAsTemplate, onApplyTemp
               </div>
             </Card>
           ))}
+          {!hasDataset && templates.length > 0 && (
+            <p className="text-xs text-amber-700">Import a dataset before applying a template.</p>
+          )}
         </div>
       )}
       {mode === 'create' && (
         <div className="space-y-4">
+          <p className="text-xs text-secondary-500">
+            Saves the current subscales, reverse flags, scales, and bands. Does not save demographics or exclusions.
+          </p>
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Template Name</label><input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="e.g., GAD-7 Anxiety Scale" /></div>
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Description</label><input value={desc} onChange={(e) => setDesc(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="Brief description" /></div>
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Instrument</label><input value={instrument} onChange={(e) => setInstrument(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="e.g., GAD-7" /></div>
-          <Button onClick={() => { onSaveAsTemplate(name, desc, instrument); setName(''); setDesc(''); setInstrument(''); }} disabled={!name}>Save Template</Button>
+          <Button onClick={() => { onSaveAsTemplate(name, desc, instrument); setName(''); setDesc(''); setInstrument(''); }} disabled={!name.trim()}>Save Template</Button>
         </div>
       )}
     </Modal>
