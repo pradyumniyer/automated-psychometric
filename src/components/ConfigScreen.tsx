@@ -14,8 +14,9 @@ import {
 } from '@/lib/supabase';
 import { logAction, fetchHistory, deleteAction } from '@/lib/history';
 import { getSheetInfo, parseSheet, exportToCSV, exportToXLSX } from '@/lib/fileParser';
+import { buildTemplateDefinition, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
-import { detectDemographics, detectScale, recognizeColumns, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
+import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { validateBands, suggestBands } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -500,23 +501,43 @@ export function ConfigScreen({
   };
 
   // ── Templates ──
-  const saveAsTemplate = async (name: string, description: string, instrument: string) => {
-    const def: TemplateDefinition = {
-      subscales: subscaleStates.map((s) => ({ name: s.name, description: '', scoringMethod: s.scoringMethod, customFormula: s.customFormula || null, items: s.items.map((i) => ({ name: i.column, aliases: [i.column], order: i.order, reverse: i.reverse })) })),
-      responseScales: subscaleStates.map((s) => ({ subscaleName: s.name, scaleType: s.scaleType, minValue: s.minValue, maxValue: s.maxValue, labelMap: s.labelMap })),
-      interpretationBands: Object.entries(bandStates).map(([n, bs]) => ({ subscaleName: n, bands: bs.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })),
-      demographicRules: { patterns: ['age', 'gender', 'sex', 'education', 'income'], contentHeuristics: [] },
-    };
+  const saveAsTemplate = async (name: string, description: string, instrument: string): Promise<string | null> => {
+    const validation = validateTemplateConfig(subscaleStates);
+    if (!validation.valid) return validation.error;
+    const def = buildTemplateDefinition(subscaleStates, bandStates);
     const { error } = await supabase.from('templates').insert({ name, description, instrument, definition: def, version: 1 });
-    if (error) { setStatusMsg({ type: 'error', text: `Failed: ${error.message}` }); return; }
+    if (error) return `Failed to save: ${error.message}`;
     await logAction(project.id, 'template_save', `Saved template: ${name}`);
     setStatusMsg({ type: 'success', text: `Template "${name}" saved.` });
     setShowTemplateModal(false);
     await loadDatasets();
+    return null;
   };
 
-  const applyTemplate = async (template: Template) => {
+  const [pendingApplyTemplate, setPendingApplyTemplate] = useState<Template | null>(null);
+  const [applyMatchReport, setApplyMatchReport] = useState<TemplateMatchReport | null>(null);
+
+  const previewApplyTemplate = (template: Template) => {
     if (!dataset) return;
+    const def = template.definition as TemplateDefinition;
+    const report = matchTemplateToHeaders(template.name, def, dataset.headers);
+    if (report.matchedCount === 0) {
+      setStatusMsg({ type: 'error', text: `No items from "${template.name}" matched columns in this dataset. Check that the column names are compatible.` });
+      return;
+    }
+    setPendingApplyTemplate(template);
+    setApplyMatchReport(report);
+  };
+
+  const confirmApplyTemplate = async () => {
+    const template = pendingApplyTemplate;
+    const report = applyMatchReport;
+    if (!dataset || !template || !report) return;
+
+    if (subscaleStates.length > 0) {
+      if (!window.confirm('This will replace the current scale configuration. Continue?')) return;
+    }
+
     const def = template.definition as TemplateDefinition;
     await supabase.from('demographic_columns').delete().eq('dataset_id', dataset.id);
     const ds = detectDemographics(dataset.headers, dataset.rows as Record<string, unknown>[]);
@@ -524,8 +545,8 @@ export function ConfigScreen({
     await supabase.from('subscale_groups').delete().eq('dataset_id', dataset.id);
     const ns: SubscaleState[] = [];
     for (const sd of def.subscales) {
-      const mappings = recognizeColumns(sd.items.map((i) => ({ name: i.name, aliases: i.aliases })), dataset.headers);
-      const matched: SubscaleItem[] = sd.items.map((i, idx) => mappings[idx]?.matchedColumn ? { column: mappings[idx].matchedColumn!, order: i.order, reverse: i.reverse } : null).filter((x): x is SubscaleItem => x !== null);
+      const matched = report.matchedBySubscale[sd.name] || [];
+      if (matched.length === 0) continue;
       const { data: ng } = await supabase.from('subscale_groups').insert({ project_id: project.id, dataset_id: dataset.id, name: sd.name, items: matched, scoring_method: sd.scoringMethod, custom_formula: sd.customFormula || null, display_order: ns.length }).select().single();
       if (ng) {
         const nid = (ng as SubscaleGroup).id;
@@ -537,22 +558,26 @@ export function ConfigScreen({
       }
     }
     setSubscaleStates(ns);
-    // Link the template
     await supabase.from('datasets').update({ linked_template_id: template.id }).eq('id', dataset.id);
     setLinkedTemplate(template);
     await logAction(project.id, 'template_apply', `Applied template: ${template.name} (v${template.version})`, { templateId: template.id }, null, dataset.id);
-    setStatusMsg({ type: 'success', text: `Template "${template.name}" applied. Review mappings and adjust.` });
+    setStatusMsg({ type: 'success', text: formatMatchSummary(report) });
+    setPendingApplyTemplate(null);
+    setApplyMatchReport(null);
+    setShowTemplateModal(false);
     await loadDatasetConfig();
+  };
+
+  const cancelApplyTemplate = () => {
+    setPendingApplyTemplate(null);
+    setApplyMatchReport(null);
   };
 
   const updateLinkedTemplate = async () => {
     if (!dataset || !linkedTemplate) return;
-    const def: TemplateDefinition = {
-      subscales: subscaleStates.map((s) => ({ name: s.name, description: '', scoringMethod: s.scoringMethod, customFormula: s.customFormula || null, items: s.items.map((i) => ({ name: i.column, aliases: [i.column], order: i.order, reverse: i.reverse })) })),
-      responseScales: subscaleStates.map((s) => ({ subscaleName: s.name, scaleType: s.scaleType, minValue: s.minValue, maxValue: s.maxValue, labelMap: s.labelMap })),
-      interpretationBands: Object.entries(bandStates).map(([n, bs]) => ({ subscaleName: n, bands: bs.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })),
-      demographicRules: { patterns: ['age', 'gender', 'sex', 'education', 'income'], contentHeuristics: [] },
-    };
+    const validation = validateTemplateConfig(subscaleStates);
+    if (!validation.valid) { setStatusMsg({ type: 'error', text: validation.error! }); return; }
+    const def = buildTemplateDefinition(subscaleStates, bandStates);
     await supabase.from('templates').update({ definition: def, version: linkedTemplate.version + 1 }).eq('id', linkedTemplate.id);
     await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
     setLinkedTemplate({ ...linkedTemplate, version: linkedTemplate.version + 1, definition: def });
@@ -838,7 +863,7 @@ export function ConfigScreen({
                 <div className="px-3 py-2 border-b border-secondary-200 bg-secondary-50/50">
                   <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">
                     {activeStep === 'demographics' && 'ID Columns'}
-                    {activeStep === 'subscales' && 'Subscale Groups'}
+                    {activeStep === 'subscales' && 'Scale Groups'}
                     {activeStep === 'scales' && 'Response Scales'}
                     {activeStep === 'bands' && 'Interpretation Bands'}
                     {activeStep === 'scoring' && 'Scoring'}
@@ -1019,8 +1044,11 @@ export function ConfigScreen({
       </Modal>
 
       {/* Template modal */}
-      <TemplateModal open={showTemplateModal} onClose={() => setShowTemplateModal(false)}
-        templates={templates} onSaveAsTemplate={saveAsTemplate} onApplyTemplate={applyTemplate} hasDataset={!!dataset} />
+      <TemplateModal open={showTemplateModal} onClose={() => { setShowTemplateModal(false); cancelApplyTemplate(); }}
+        templates={templates} onSaveAsTemplate={saveAsTemplate} onPreviewApply={previewApplyTemplate}
+        onConfirmApply={confirmApplyTemplate} onCancelApply={cancelApplyTemplate}
+        hasDataset={!!dataset} hasScales={subscaleStates.some((s) => s.items.length > 0)}
+        matchReport={applyMatchReport} pendingTemplate={pendingApplyTemplate} />
     </div>
   );
 }
@@ -1037,7 +1065,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
 }) {
   const steps: { name: StepName; icon: React.ComponentType<{ className?: string }>; label: string }[] = [
     { name: 'demographics', icon: Users, label: 'ID' },
-    { name: 'subscales', icon: Layers, label: 'Subscales' },
+    { name: 'subscales', icon: Layers, label: 'Scales' },
     { name: 'scales', icon: Sliders, label: 'Scales' },
     { name: 'bands', icon: Tag, label: 'Bands' },
     { name: 'scoring', icon: Calculator, label: 'Scoring' },
@@ -1149,7 +1177,7 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Subscale Groups</span>
+        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Scale Groups</span>
         <Button onClick={onAddSubscale} size="sm" className="px-2 py-1 text-xs"><Plus className="w-3 h-3" /> Add</Button>
       </div>
 
@@ -1457,7 +1485,7 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="p-2 bg-secondary-50 rounded-lg text-center">
           <div className="text-lg font-bold text-primary-600">{subscaleCount}</div>
-          <div className="text-xs text-secondary-500">{usedAutoScale ? 'Overall Scale' : 'Subscales'}</div>
+          <div className="text-xs text-secondary-500">{usedAutoScale ? 'Overall Scale' : 'Scales'}</div>
         </div>
         <div className="p-2 bg-secondary-50 rounded-lg text-center">
           <div className="text-lg font-bold text-warning-600">{excludedCount}</div>
@@ -1500,45 +1528,145 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
 }
 
 // ── Template Modal ──
-function TemplateModal({ open, onClose, templates, onSaveAsTemplate, onApplyTemplate, hasDataset }: {
+function TemplateModal({ open, onClose, templates, onSaveAsTemplate, onPreviewApply, onConfirmApply, onCancelApply, hasDataset, hasScales, matchReport, pendingTemplate }: {
   open: boolean; onClose: () => void; templates: Template[];
-  onSaveAsTemplate: (n: string, d: string, i: string) => void; onApplyTemplate: (t: Template) => void; hasDataset: boolean;
+  onSaveAsTemplate: (n: string, d: string, i: string) => Promise<string | null>;
+  onPreviewApply: (t: Template) => void;
+  onConfirmApply: () => void;
+  onCancelApply: () => void;
+  hasDataset: boolean;
+  hasScales: boolean;
+  matchReport: TemplateMatchReport | null;
+  pendingTemplate: Template | null;
 }) {
   const [mode, setMode] = useState<'list' | 'create'>('list');
   const [name, setName] = useState(''), [desc, setDesc] = useState(''), [instrument, setInstrument] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    const err = await onSaveAsTemplate(name, desc, instrument);
+    if (err) { setSaveError(err); setSaving(false); return; }
+    setName(''); setDesc(''); setInstrument('');
+    setSaving(false);
+  };
+
+  const scaleCount = (def: TemplateDefinition) => def.subscales?.length || 0;
+  const itemCount = (def: TemplateDefinition) => (def.subscales || []).reduce((sum, s) => sum + s.items.length, 0);
+
   return (
     <Modal open={open} onClose={onClose} title="Templates" maxWidth="max-w-3xl">
       <div className="flex gap-2 mb-4">
-        <button onClick={() => setMode('list')} className={`px-4 py-2 text-sm rounded-lg ${mode === 'list' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Browse Templates</button>
-        <button onClick={() => setMode('create')} className={`px-4 py-2 text-sm rounded-lg ${mode === 'create' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Save Current as Template</button>
+        <button onClick={() => { setMode('list'); onCancelApply(); }} className={`px-4 py-2 text-sm rounded-lg ${mode === 'list' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Browse Templates</button>
+        <button onClick={() => { setMode('create'); onCancelApply(); }} className={`px-4 py-2 text-sm rounded-lg ${mode === 'create' ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}>Save Current as Template</button>
       </div>
-      {mode === 'list' && (
+      {mode === 'list' && !matchReport && (
         <div className="space-y-3">
           {templates.length === 0 && <EmptyState icon={Tag} title="No templates yet" description="Save your current configuration as a reusable template." />}
-          {templates.map((t) => (
-            <Card key={t.id} className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-semibold text-secondary-900">{t.name}</h4>
-                  <p className="text-sm text-secondary-500">{t.description}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <StatusBadge status="info">v{t.version}</StatusBadge>
-                    {t.instrument && <StatusBadge status="neutral">{t.instrument}</StatusBadge>}
-                    <span className="text-xs text-secondary-400">{(t.definition as TemplateDefinition)?.subscales?.length || 0} subscales</span>
+          {templates.map((t) => {
+            const def = t.definition as TemplateDefinition;
+            const sc = scaleCount(def);
+            const ic = itemCount(def);
+            return (
+              <Card key={t.id} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-semibold text-secondary-900">{t.name}</h4>
+                    <p className="text-sm text-secondary-500">{t.description}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <StatusBadge status="info">v{t.version}</StatusBadge>
+                      {t.instrument && <StatusBadge status="neutral">{t.instrument}</StatusBadge>}
+                      <span className="text-xs text-secondary-400">{sc} {sc === 1 ? 'scale' : 'scales'} · {ic} {ic === 1 ? 'item' : 'items'}</span>
+                    </div>
                   </div>
+                  <Button size="sm" disabled={!hasDataset} onClick={() => onPreviewApply(t)}><Sparkles className="w-4 h-4" /> Apply</Button>
                 </div>
-                <Button size="sm" disabled={!hasDataset} onClick={() => onApplyTemplate(t)}><Sparkles className="w-4 h-4" /> Apply</Button>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      {mode === 'list' && matchReport && pendingTemplate && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="font-semibold text-secondary-900">Match Report: {pendingTemplate.name}</h3>
+          </div>
+          <Card className={`p-4 ${matchReport.unmatchedCount === 0 ? 'border-success-300 bg-success-50/30' : 'border-warning-300 bg-warning-50/30'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              {matchReport.unmatchedCount === 0 ? <Check className="w-4 h-4 text-success-600" /> : <AlertTriangle className="w-4 h-4 text-warning-600" />}
+              <span className="font-medium text-secondary-900">
+                Matched {matchReport.matchedCount} of {matchReport.totalItems} items
+              </span>
+            </div>
+            {matchReport.unmatchedCount > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-medium text-secondary-600 mb-1">Unmatched items (will be skipped):</p>
+                <div className="flex flex-wrap gap-1">
+                  {matchReport.unmatchedNames.map((n) => (
+                    <span key={n} className="px-2 py-0.5 text-xs bg-warning-100 text-warning-700 rounded-full border border-warning-200">{n}</span>
+                  ))}
+                </div>
               </div>
-            </Card>
-          ))}
+            )}
+          </Card>
+          <div className="max-h-60 overflow-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-secondary-200 text-secondary-500">
+                  <th className="py-1.5 px-2 text-left font-medium">Scale</th>
+                  <th className="py-1.5 px-2 text-left font-medium">Template Item</th>
+                  <th className="py-1.5 px-2 text-left font-medium">Matched Column</th>
+                  <th className="py-1.5 px-2 text-center font-medium">Rev</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-secondary-100">
+                {matchReport.details.map((d, i) => (
+                  <tr key={i} className={d.matchedColumn ? '' : 'bg-warning-50/50'}>
+                    <td className="py-1 px-2 text-secondary-600">{d.subscaleName}</td>
+                    <td className="py-1 px-2 text-secondary-800 font-mono">{d.itemName}</td>
+                    <td className="py-1 px-2">{d.matchedColumn ? <span className="text-success-700 font-mono">{d.matchedColumn}</span> : <span className="text-warning-600 italic">no match</span>}</td>
+                    <td className="py-1 px-2 text-center">{d.reverse ? <span className="text-warning-600 font-medium">R</span> : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-secondary-200">
+            <Button variant="outline" size="sm" onClick={onCancelApply}>Cancel</Button>
+            <Button size="sm" onClick={onConfirmApply}>
+              <Check className="w-3.5 h-3.5" />
+              {matchReport.unmatchedCount > 0 ? `Apply ${matchReport.matchedCount} Matched Items` : 'Apply Template'}
+            </Button>
+          </div>
         </div>
       )}
       {mode === 'create' && (
         <div className="space-y-4">
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-info-50 rounded-lg">
+            <Info className="w-4 h-4 text-info-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-info-700">Templates store scales, items, reverse flags, response scales, and bands. Demographics and exclusions stay with the dataset.</p>
+          </div>
+          {saveError && (
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-error-50 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-error-600 flex-shrink-0" />
+              <p className="text-xs text-error-700">{saveError}</p>
+            </div>
+          )}
+          {!hasScales && (
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-warning-50 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-warning-600 flex-shrink-0" />
+              <p className="text-xs text-warning-700">Add at least one scale with items before saving as a template.</p>
+            </div>
+          )}
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Template Name</label><input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="e.g., GAD-7 Anxiety Scale" /></div>
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Description</label><input value={desc} onChange={(e) => setDesc(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="Brief description" /></div>
           <div><label className="block text-sm font-medium text-secondary-700 mb-1">Instrument</label><input value={instrument} onChange={(e) => setInstrument(e.target.value)} className="w-full px-4 py-2 border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" placeholder="e.g., GAD-7" /></div>
-          <Button onClick={() => { onSaveAsTemplate(name, desc, instrument); setName(''); setDesc(''); setInstrument(''); }} disabled={!name}>Save Template</Button>
+          <Button onClick={handleSave} disabled={!name || !hasScales || saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            Save Template
+          </Button>
         </div>
       )}
     </Modal>

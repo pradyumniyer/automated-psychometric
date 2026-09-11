@@ -332,11 +332,11 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <ExportCard
               icon={<BarChart3 className="w-5 h-5" />}
               title="Scored Data"
-              description="Original columns plus subscale scores and interpretation labels. Use this when you need the full scored dataset for report-ready analysis."
+              description="Original columns plus scale scores and interpretation labels. Use this when you need the full scored dataset for report-ready analysis."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
               disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.') : undefined}
+              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : undefined}
               onExportCSV={() => doExport('scored', 'csv')}
               onExportXLSX={() => doExport('scored', 'xlsx')}
               exporting={exporting}
@@ -348,11 +348,11 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <ExportCard
               icon={<Users className="w-5 h-5" />}
               title="Scores + Demographics"
-              description="Demographic columns plus score and interpretation columns only — item columns removed. Clean, compact file for group comparisons and demographic reporting."
+              description="Demographic columns plus scale scores and interpretation columns only — item columns removed. Clean, compact file for group comparisons and demographic reporting."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
               disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure subscales with items on the Configure screen first.') : undefined}
+              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : undefined}
               onExportCSV={() => doExport('scores_demo', 'csv')}
               onExportXLSX={() => doExport('scores_demo', 'xlsx')}
               exporting={exporting}

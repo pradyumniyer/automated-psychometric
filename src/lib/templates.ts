@@ -191,6 +191,20 @@ export function matchTemplateToHeaders(
   };
 }
 
+/** Validate that the current config is saveable as a template */
+export function validateTemplateConfig(
+  subscaleStates: SubscaleStateLike[],
+): { valid: boolean; error: string | null } {
+  if (subscaleStates.length === 0) {
+    return { valid: false, error: 'Add at least one scale with items before saving as a template.' };
+  }
+  const withItems = subscaleStates.filter((s) => s.items.length > 0);
+  if (withItems.length === 0) {
+    return { valid: false, error: 'At least one scale must have items assigned.' };
+  }
+  return { valid: true, error: null };
+}
+
 export function formatMatchSummary(report: TemplateMatchReport): string {
   const base = `Matched ${report.matchedCount}/${report.totalItems} items from "${report.templateName}".`;
   if (report.unmatchedCount === 0) return `${base} All items mapped — review reverse flags and scales, then score if needed.`;
