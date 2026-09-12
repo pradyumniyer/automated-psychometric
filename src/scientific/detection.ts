@@ -26,6 +26,19 @@ const DEMOGRAPHIC_PATTERNS: { patterns: RegExp; name: string }[] = [
   { patterns: /\b(city|state|province|region|zip|postcode|postal)\b/i, name: 'location' },
   { patterns: /\b(language)\b/i, name: 'language' },
   { patterns: /\b(height|weight|bmi)\b/i, name: 'physical attribute' },
+  // Survey platform system columns (Qualtrics, SurveyMonkey, REDCap, etc.)
+  { patterns: /^(ResponseID|Response\s*ID|ResponseId)$/i, name: 'survey system: response ID' },
+  { patterns: /^(RecipientEmail|Recipient\s*Email|EmailAddress|email)$/i, name: 'survey system: email' },
+  { patterns: /^(RecipientFirstName|RecipientLastName|Recipient\s*First|Recipient\s*Last)$/i, name: 'survey system: recipient name' },
+  { patterns: /^(StartDate|Start\s*Date|EndDate|End\s*Date|RecordedDate|Recorded\s*Date)$/i, name: 'survey system: timestamp' },
+  { patterns: /^(Progress|Finished|Status|survey_complete)$/i, name: 'survey system: completion status' },
+  { patterns: /^(IPAddress|IP\s*Address|ip_address)$/i, name: 'survey system: IP address' },
+  { patterns: /^(Duration.*seconds.*|Duration|duration_sec)$/i, name: 'survey system: duration' },
+  { patterns: /^(ExternalDataReference|External\s*Data\s*Ref|ExternalReference)$/i, name: 'survey system: external ref' },
+  { patterns: /^(LocationLatitude|LocationLongitude|Location\s*Lat|Location\s*Lng)$/i, name: 'survey system: geolocation' },
+  { patterns: /^(DistributionChannel|Distribution\s*Channel|UserLanguage|User\s*Language)$/i, name: 'survey system: metadata' },
+  { patterns: /^(Collector\s*ID|CollectorID|Respondent\s*ID|Custom\s*Data\s*1)$/i, name: 'survey system: SurveyMonkey metadata' },
+  { patterns: /^(redcap_event_name|redcap_repeat_instrument|redcap_repeat_instance|redcap_data_access_group)$/i, name: 'survey system: REDCap metadata' },
 ];
 
 export function detectDemographics(headers: string[], rows: Record<string, unknown>[]): DemographicSuggestion[] {

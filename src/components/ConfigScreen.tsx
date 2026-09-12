@@ -13,7 +13,8 @@ import {
   ActionHistory,
 } from '@/lib/supabase';
 import { logAction, fetchHistory, deleteAction } from '@/lib/history';
-import { getSheetInfo, parseSheet, exportToCSV, exportToXLSX } from '@/lib/fileParser';
+import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
+import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { buildTemplateDefinition, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
@@ -94,6 +95,10 @@ export function ConfigScreen({
   const highlightRef = useRef<HTMLTableRowElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Import preview state ──
+  const [importPreviewRequest, setImportPreviewRequest] = useState<ImportPreviewRequest | null>(null);
+  const [importSheetQueue, setImportSheetQueue] = useState<string[]>([]);
 
   useEffect(() => {
     if (highlightRowIndex != null && highlightRef.current) {
@@ -253,54 +258,66 @@ export function ConfigScreen({
         setPendingFile(file); setSheetInfos(info.sheets);
         setCheckedSheets(new Set(info.sheets.map((s) => s.name))); setImporting(false);
       } else if (info.sheets.length === 1) {
-        await doImport(file, info.sheets[0].name);
+        // Single sheet — open preview directly
+        setPendingFile(file);
+        setImportPreviewRequest({ file, sheetName: info.sheets[0].name, queueIndex: 0, queueTotal: 1 });
+        setImporting(false);
       } else { setStatusMsg({ type: 'error', text: 'No sheets found in file.' }); setImporting(false); }
     } catch (e) { setStatusMsg({ type: 'error', text: `Failed to read file: ${(e as Error).message}` }); setImporting(false); }
   };
 
-  const doImport = async (file: File, sheetName: string) => {
-    setImporting(true); setSheetInfos(null); setPendingFile(null);
+  const importSelectedSheets = () => {
+    if (!pendingFile || checkedSheets.size === 0) return;
+    const queue = Array.from(checkedSheets);
+    setSheetInfos(null);
+    setImportSheetQueue(queue);
+    setImportPreviewRequest({ file: pendingFile, sheetName: queue[0], queueIndex: 0, queueTotal: queue.length });
+  };
+
+  const handlePreviewConfirm = async (result: ImportPreviewResult) => {
+    if (!pendingFile) return;
+    setImporting(true);
     try {
-      const parsed = await parseSheet(file, sheetName);
-      if (parsed.rows.length === 0) { setStatusMsg({ type: 'error', text: 'No data rows found.' }); setImporting(false); return; }
+      const parsed = result.parsed;
       const { data: newDs, error } = await supabase.from('datasets').insert({
-        project_id: project.id, file_name: file.name, sheet_name: sheetName,
-        headers: parsed.headers, rows: parsed.rows, column_meta: {},
+        project_id: project.id, file_name: pendingFile.name, sheet_name: result.sheetName,
+        headers: parsed.headers, rows: parsed.rows, column_meta: parsed.columnMeta || {},
         row_count: parsed.rowCount, col_count: parsed.colCount,
       }).select().single();
       if (error) throw error;
       const newDataset = newDs as Dataset;
       const demoSuggestions = detectDemographics(parsed.headers, parsed.rows);
       for (const s of demoSuggestions) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: newDataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
-      await logAction(project.id, 'import', `Imported ${file.name} [${sheetName}] (${parsed.rowCount} rows, ${parsed.colCount} cols)`, { fileName: file.name, sheetName }, null, newDataset.id);
-      setStatusMsg({ type: 'success', text: `Imported ${parsed.rowCount} rows × ${parsed.colCount} columns from sheet "${sheetName}".` });
+      await logAction(project.id, 'import', `Imported ${pendingFile.name} [${result.sheetName}] (${parsed.rowCount} rows, ${parsed.colCount} cols)`, { fileName: pendingFile.name, sheetName: result.sheetName }, null, newDataset.id);
+
+      // Check if there are more sheets in the queue
+      const currentRequest = importPreviewRequest;
+      if (currentRequest && currentRequest.queueTotal > 1 && currentRequest.queueIndex < currentRequest.queueTotal - 1) {
+        const nextIdx = currentRequest.queueIndex + 1;
+        const nextSheet = importSheetQueue[nextIdx];
+        setImportPreviewRequest({ file: pendingFile, sheetName: nextSheet, queueIndex: nextIdx, queueTotal: currentRequest.queueTotal });
+        setStatusMsg({ type: 'success', text: `Imported "${result.sheetName}" (${parsed.rowCount} rows). Next sheet...` });
+      } else {
+        // All done
+        setImportPreviewRequest(null);
+        setImportSheetQueue([]);
+        setPendingFile(null);
+        const total = currentRequest?.queueTotal ?? 1;
+        if (total > 1) {
+          setStatusMsg({ type: 'success', text: `Imported ${total} sheets successfully.` });
+        } else {
+          setStatusMsg({ type: 'success', text: `Imported ${parsed.rowCount} rows × ${parsed.colCount} columns from "${result.sheetName}".` });
+        }
+      }
       await loadDatasets(); setActiveDatasetId(newDataset.id);
     } catch (e) { setStatusMsg({ type: 'error', text: `Import failed: ${(e as Error).message}` }); }
     setImporting(false);
   };
 
-  const importSelectedSheets = async () => {
-    if (!pendingFile || checkedSheets.size === 0) return;
-    setImporting(true); setSheetInfos(null);
-    try {
-      for (const sheetName of checkedSheets) {
-        const parsed = await parseSheet(pendingFile, sheetName);
-        if (parsed.rows.length === 0) continue;
-        const { data: newDs, error } = await supabase.from('datasets').insert({
-          project_id: project.id, file_name: pendingFile.name, sheet_name: sheetName,
-          headers: parsed.headers, rows: parsed.rows, column_meta: {},
-          row_count: parsed.rowCount, col_count: parsed.colCount,
-        }).select().single();
-        if (error) throw error;
-        const newDataset = newDs as Dataset;
-        const demoSuggestions = detectDemographics(parsed.headers, parsed.rows);
-        for (const s of demoSuggestions) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: newDataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
-        await logAction(project.id, 'import', `Imported ${pendingFile.name} [${sheetName}] (${parsed.rowCount} rows, ${parsed.colCount} cols)`, { fileName: pendingFile.name, sheetName }, null, newDataset.id);
-      }
-      setStatusMsg({ type: 'success', text: `Imported ${checkedSheets.size} sheet${checkedSheets.size > 1 ? 's' : ''} successfully.` });
-      await loadDatasets();
-    } catch (e) { setStatusMsg({ type: 'error', text: `Import failed: ${(e as Error).message}` }); }
-    setPendingFile(null); setImporting(false);
+  const handlePreviewCancel = () => {
+    setImportPreviewRequest(null);
+    setImportSheetQueue([]);
+    setPendingFile(null);
   };
 
   // ── Demographics ──
@@ -1043,6 +1060,14 @@ export function ConfigScreen({
         </div>
       </Modal>
 
+      {/* Import preview modal */}
+      <ImportPreviewModal
+        open={!!importPreviewRequest}
+        request={importPreviewRequest}
+        onConfirm={handlePreviewConfirm}
+        onCancel={handlePreviewCancel}
+      />
+
       {/* Template modal */}
       <TemplateModal open={showTemplateModal} onClose={() => { setShowTemplateModal(false); cancelApplyTemplate(); }}
         templates={templates} onSaveAsTemplate={saveAsTemplate} onPreviewApply={previewApplyTemplate}
@@ -1111,7 +1136,7 @@ function ImportZone({ onImport, importing, fileInputRef }: { onImport: (f: File)
         {importing ? <Loader2 className="w-8 h-8 text-primary-600 animate-spin" /> : <Upload className="w-8 h-8 text-primary-600" />}
       </div>
       <h3 className="text-lg font-semibold text-secondary-900 mb-2">{importing ? 'Importing...' : 'Import your dataset'}</h3>
-      <p className="text-sm text-secondary-500 mb-4">Drag & drop a CSV or XLSX file, or click to browse. Multi-tab spreadsheets supported.</p>
+      <p className="text-sm text-secondary-500 mb-4">Drag & drop a CSV or XLSX file, or click to browse. Works with Qualtrics, SurveyMonkey, REDCap, Google Forms, and general spreadsheet exports. You'll preview the layout before importing.</p>
       <Button onClick={() => fileInputRef.current?.click()} disabled={importing}><FileSpreadsheet className="w-4 h-4" /> Choose File</Button>
     </div>
   );
