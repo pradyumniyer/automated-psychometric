@@ -3,10 +3,11 @@ import { ProjectList } from '@/components/ProjectList';
 import { ConfigScreen } from '@/components/ConfigScreen';
 import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { ExportScreen } from '@/components/ExportScreen';
+import { ReportScreen } from '@/components/ReportScreen';
 import { Project } from '@/lib/supabase';
-import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
 
-type View = 'list' | 'config' | 'quality' | 'export';
+type View = 'list' | 'config' | 'quality' | 'export' | 'report';
 
 export default function App() {
   const [view, setView] = useState<View>('list');
@@ -38,6 +39,10 @@ export default function App() {
 
   const goToExport = useCallback(() => {
     setView('export');
+  }, []);
+
+  const goToReport = useCallback(() => {
+    setView('report');
   }, []);
 
   const toggleRowExclusion = useCallback((rowIndex: number) => {
@@ -101,6 +106,13 @@ export default function App() {
             <FileDown className="w-4 h-4" />
             Export
           </button>
+          <button
+            onClick={goToReport}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all ${view === 'report' ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
+          >
+            <FileText className="w-4 h-4" />
+            Report
+          </button>
         </div>
       </div>
 
@@ -131,6 +143,14 @@ export default function App() {
         )}
         {view === 'export' && (
           <ExportScreen
+            project={project}
+            excludedRows={excludedRows}
+            sharedDatasetId={activeDatasetId}
+            onDatasetChange={setActiveDatasetId}
+          />
+        )}
+        {view === 'report' && (
+          <ReportScreen
             project={project}
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
