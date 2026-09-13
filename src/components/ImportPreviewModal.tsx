@@ -26,6 +26,7 @@ export interface ImportPreviewRequest {
 export interface ImportPreviewResult {
   parsed: ParsedSheet;
   sheetName: string;
+  emptyRowsKept: number;
 }
 
 interface Props {
@@ -146,7 +147,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
         setImporting(false);
         return;
       }
-      onConfirm({ parsed, sheetName: request.sheetName });
+      onConfirm({ parsed, sheetName: request.sheetName, emptyRowsKept: removeEmptyRows ? 0 : emptyRowReport.count });
     } catch (e) {
       setError((e as Error).message);
       setImporting(false);

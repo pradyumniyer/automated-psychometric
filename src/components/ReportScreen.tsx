@@ -116,9 +116,17 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
   const hasSubscaleConfig = subscaleGroups.length > 0 && subscaleGroups.some((s) => s.items && s.items.length > 0);
 
   // ── Compute scored result ──
+  const savedExclusionsStale = useMemo(() => {
+    if (!savedScoringResult) return false;
+    const saved = new Set(savedScoringResult.excluded_rows);
+    if (saved.size !== excludedRows.size) return true;
+    for (const idx of excludedRows) if (!saved.has(idx)) return true;
+    return false;
+  }, [savedScoringResult, excludedRows]);
+
   const scoredResult = useMemo(() => {
     if (!dataset) return null;
-    if (savedScoringResult) {
+    if (savedScoringResult && !savedExclusionsStale) {
       return {
         headers: savedScoringResult.headers,
         rows: savedScoringResult.rows as Record<string, number | string | null>[],
@@ -139,7 +147,7 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
     }
     return null;
-  }, [dataset, savedScoringResult, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  }, [dataset, savedScoringResult, savedExclusionsStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
 
   // ── Derived values ──
   const totalRows = dataset?.rows.length ?? 0;

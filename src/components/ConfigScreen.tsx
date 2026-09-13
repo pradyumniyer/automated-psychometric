@@ -56,6 +56,10 @@ export function ConfigScreen({
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
   const activeDatasetId = sharedDatasetId ?? activeDatasetIdState;
   const setActiveDatasetId = (id: string | null) => {
+    if (id !== activeDatasetId && configDirty) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      performAutoSaveRef.current();
+    }
     setActiveDatasetIdState(id);
     onDatasetChange(id);
   };
@@ -95,6 +99,7 @@ export function ConfigScreen({
   const highlightRef = useRef<HTMLTableRowElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const performAutoSaveRef = useRef<() => Promise<void>>(async () => {});
 
   // ── Import preview state ──
   const [importPreviewRequest, setImportPreviewRequest] = useState<ImportPreviewRequest | null>(null);
@@ -235,6 +240,7 @@ export function ConfigScreen({
       setStatusMsg({ type: 'error', text: 'Auto-save failed. Your changes may not be persisted.' });
     }
   }, [dataset, configDirty, subscaleStates, bandStates, project.id, linkedTemplate]);
+  performAutoSaveRef.current = performAutoSave;
 
   // Debounce auto-save: trigger 1s after configDirty becomes true
   useEffect(() => {
@@ -277,6 +283,9 @@ export function ConfigScreen({
   const handlePreviewConfirm = async (result: ImportPreviewResult) => {
     if (!pendingFile) return;
     setImporting(true);
+    const currentRequest = importPreviewRequest;
+    const queueIdx = currentRequest?.queueIndex ?? 0;
+    const queueTotal = currentRequest?.queueTotal ?? 1;
     try {
       const parsed = result.parsed;
       const { data: newDs, error } = await supabase.from('datasets').insert({
@@ -286,31 +295,49 @@ export function ConfigScreen({
       }).select().single();
       if (error) throw error;
       const newDataset = newDs as Dataset;
-      const demoSuggestions = detectDemographics(parsed.headers, parsed.rows);
-      for (const s of demoSuggestions) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: newDataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
+
+      // Insert demographics — if this fails, clean up the orphan dataset row
+      try {
+        const demoSuggestions = detectDemographics(parsed.headers, parsed.rows);
+        for (const s of demoSuggestions) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: newDataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
+      } catch (demoErr) {
+        await supabase.from('datasets').delete().eq('id', newDataset.id);
+        throw new Error(`Import failed during demographic detection and was rolled back: ${(demoErr as Error).message}`);
+      }
+
       await logAction(project.id, 'import', `Imported ${pendingFile.name} [${result.sheetName}] (${parsed.rowCount} rows, ${parsed.colCount} cols)`, { fileName: pendingFile.name, sheetName: result.sheetName }, null, newDataset.id);
 
+      // Build success message with empty-row info
+      const emptyNote = result.emptyRowsKept > 0 ? ` (${result.emptyRowsKept} empty row${result.emptyRowsKept > 1 ? 's' : ''} kept)` : '';
+
       // Check if there are more sheets in the queue
-      const currentRequest = importPreviewRequest;
-      if (currentRequest && currentRequest.queueTotal > 1 && currentRequest.queueIndex < currentRequest.queueTotal - 1) {
-        const nextIdx = currentRequest.queueIndex + 1;
+      if (currentRequest && queueTotal > 1 && queueIdx < queueTotal - 1) {
+        const nextIdx = queueIdx + 1;
         const nextSheet = importSheetQueue[nextIdx];
-        setImportPreviewRequest({ file: pendingFile, sheetName: nextSheet, queueIndex: nextIdx, queueTotal: currentRequest.queueTotal });
-        setStatusMsg({ type: 'success', text: `Imported "${result.sheetName}" (${parsed.rowCount} rows). Next sheet...` });
+        setImportPreviewRequest({ file: pendingFile, sheetName: nextSheet, queueIndex: nextIdx, queueTotal });
+        setStatusMsg({ type: 'success', text: `Imported "${result.sheetName}" (${parsed.rowCount} rows)${emptyNote}. Next sheet...` });
       } else {
         // All done
         setImportPreviewRequest(null);
         setImportSheetQueue([]);
         setPendingFile(null);
-        const total = currentRequest?.queueTotal ?? 1;
-        if (total > 1) {
-          setStatusMsg({ type: 'success', text: `Imported ${total} sheets successfully.` });
+        if (queueTotal > 1) {
+          setStatusMsg({ type: 'success', text: `Imported ${queueTotal} sheets successfully${emptyNote ? ` — last sheet had ${result.emptyRowsKept} empty row${result.emptyRowsKept > 1 ? 's' : ''} kept` : ''}.` });
         } else {
-          setStatusMsg({ type: 'success', text: `Imported ${parsed.rowCount} rows × ${parsed.colCount} columns from "${result.sheetName}".` });
+          setStatusMsg({ type: 'success', text: `Imported ${parsed.rowCount} rows × ${parsed.colCount} columns from "${result.sheetName}"${emptyNote}.` });
         }
       }
       await loadDatasets(); setActiveDatasetId(newDataset.id);
-    } catch (e) { setStatusMsg({ type: 'error', text: `Import failed: ${(e as Error).message}` }); }
+    } catch (e) {
+      const failedSheet = result.sheetName;
+      const importedBefore = queueIdx > 0 ? `${queueIdx} sheet${queueIdx > 1 ? 's' : ''} already imported successfully. ` : '';
+      const remaining = queueTotal - queueIdx - 1;
+      const remainingNote = remaining > 0 ? ` ${remaining} sheet${remaining > 1 ? 's' : ''} not imported.` : '';
+      setImportPreviewRequest(null);
+      setImportSheetQueue([]);
+      setPendingFile(null);
+      setStatusMsg({ type: 'error', text: `Import failed on "${failedSheet}": ${(e as Error).message}. ${importedBefore}${remainingNote}` });
+    }
     setImporting(false);
   };
 
@@ -746,7 +773,7 @@ export function ConfigScreen({
       ? (showExcludedOnly ? (scoringResult.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : scoringResult.rows as Record<string, unknown>[])
       : (showExcludedOnly ? (dataset.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : dataset.rows as Record<string, unknown>[])
   ) : [];
-  const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom'));
+  const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom')) && itemColumns.length > 0;
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
 
@@ -1527,7 +1554,7 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
       </div>
       {!canScore && (
         <Card className="p-2.5 mb-3 border-warning-300 bg-warning-50/50">
-          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> All subscales must have items assigned.</div>
+          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom') ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
         </Card>
       )}
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">

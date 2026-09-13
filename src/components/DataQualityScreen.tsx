@@ -175,7 +175,29 @@ export function DataQualityScreen({
     );
   }
 
-  if (!dataset || !qualityResult) {
+  if (!dataset) {
+    return (
+      <div className="h-full flex items-center justify-center bg-secondary-50">
+        <div className="text-sm text-secondary-500">Loading data quality analysis...</div>
+      </div>
+    );
+  }
+
+  if (itemColumns.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center bg-secondary-50">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 rounded-2xl bg-secondary-100 flex items-center justify-center mx-auto mb-4">
+            <BarChart3 className="w-8 h-8 text-secondary-400" />
+          </div>
+          <h3 className="text-lg font-semibold text-secondary-900 mb-1">No item columns available</h3>
+          <p className="text-sm text-secondary-500">All columns in this dataset are marked as demographics. Data quality analysis requires at least one item column. Adjust column assignments on the Configure screen.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!qualityResult) {
     return (
       <div className="h-full flex items-center justify-center bg-secondary-50">
         <div className="text-sm text-secondary-500">Loading data quality analysis...</div>
@@ -223,6 +245,14 @@ export function DataQualityScreen({
         </div>
 
         <div className="p-6 space-y-6">
+          {/* ── All-excluded banner ── */}
+          {includedCount === 0 && totalRows > 0 && (
+            <div className="flex items-center gap-3 px-4 py-3 bg-error-50 rounded-lg">
+              <AlertCircle className="w-5 h-5 text-error-600 flex-shrink-0" />
+              <p className="text-sm text-error-700">All rows are currently excluded. Data quality metrics below reflect zero included cases. Adjust exclusions to see meaningful results.</p>
+            </div>
+          )}
+
           {/* ── Allowed non-response + thresholds ── */}
           <Card className="overflow-hidden">
             <button onClick={() => setShowSettings(!showSettings)}

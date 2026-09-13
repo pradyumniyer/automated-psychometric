@@ -95,7 +95,11 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   const excludedCount = excludedRows.size;
   const includedCount = totalRows - excludedCount;
 
-  // ── Build subscale configs for recomputation ──
+  const noIncludedRows = !keepExcluded && includedCount === 0 && totalRows > 0;
+  const noItemColumns = itemColumns.length === 0;
+  const exclusionBlockedReason = noIncludedRows
+    ? 'All rows are excluded. Switch to "Keep with flag" mode or adjust exclusions on the Data Quality screen.'
+    : undefined;
   const subConfigs = useMemo<SubscaleConfig[]>(() => {
     return subscaleGroups.map((sub) => {
       const scale = responseScales.find((s) => s.subscale_id === sub.id);
@@ -133,9 +137,17 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   }, [subscaleGroups]);
 
   // ── Compute scored result (use saved or recompute) ──
+  const savedExclusionsStale = useMemo(() => {
+    if (!savedScoringResult) return false;
+    const saved = new Set(savedScoringResult.excluded_rows);
+    if (saved.size !== excludedRows.size) return true;
+    for (const idx of excludedRows) if (!saved.has(idx)) return true;
+    return false;
+  }, [savedScoringResult, excludedRows]);
+
   const scoredResult = useMemo(() => {
     if (!dataset) return null;
-    if (savedScoringResult) {
+    if (savedScoringResult && !savedExclusionsStale) {
       return {
         headers: savedScoringResult.headers,
         rows: savedScoringResult.rows as Record<string, number | string | null>[],
@@ -156,7 +168,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
     }
     return null;
-  }, [dataset, savedScoringResult, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  }, [dataset, savedScoringResult, savedExclusionsStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
 
   // ── Exclusion filtering ──
   function applyExclusions<T extends Record<string, unknown>>(rows: T[], includeExcludedColumn: boolean): T[] {
@@ -307,6 +319,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="All original columns with excluded rows removed. Use this as a general-purpose cleaned dataset for any downstream analysis."
               badge="Always available"
               badgeColor="success"
+              disabled={noIncludedRows}
+              disabledReason={exclusionBlockedReason}
               onExportCSV={() => doExport('cleaned_raw', 'csv')}
               onExportXLSX={() => doExport('cleaned_raw', 'xlsx')}
               exporting={exporting}
@@ -321,6 +335,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Questionnaire item columns only — demographics removed. Ideal for item analysis, factor analysis, or IRT workflows in jamovi, SPSS, or R."
               badge="No scoring needed"
               badgeColor="success"
+              disabled={noItemColumns || noIncludedRows}
+              disabledReason={noItemColumns ? 'No item columns available. All columns are marked as demographics.' : exclusionBlockedReason}
               onExportCSV={() => doExport('items_only', 'csv')}
               onExportXLSX={() => doExport('items_only', 'xlsx')}
               exporting={exporting}
@@ -335,8 +351,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Original columns plus scale scores and interpretation labels. Use this when you need the full scored dataset for report-ready analysis."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
-              disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : undefined}
+              disabled={!scoringAvailable || noIncludedRows}
+              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
               onExportCSV={() => doExport('scored', 'csv')}
               onExportXLSX={() => doExport('scored', 'xlsx')}
               exporting={exporting}
@@ -351,8 +367,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               description="Demographic columns plus scale scores and interpretation columns only — item columns removed. Clean, compact file for group comparisons and demographic reporting."
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
-              disabled={!scoringAvailable}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : undefined}
+              disabled={!scoringAvailable || noIncludedRows}
+              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
               onExportCSV={() => doExport('scores_demo', 'csv')}
               onExportXLSX={() => doExport('scores_demo', 'xlsx')}
               exporting={exporting}
@@ -367,6 +383,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <p className="text-xs text-info-700">
               Raw imported data is never modified. Exclusions are applied at export time based on the current exclusion state.
               {scoringAvailable && !savedScoringResult && ' Scores are computed on-the-fly from your current subscale configuration. Run scoring on the Configure screen to save a scoring version.'}
+              {savedExclusionsStale && ' Saved scores were computed with a different exclusion set. Scores have been recomputed using current exclusions.'}
             </p>
           </div>
         </div>
