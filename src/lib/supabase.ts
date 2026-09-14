@@ -7,9 +7,45 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false },
 });
 
+export type ProjectType = 'survey_scoring' | 'content_validity';
+
 export interface Project {
   id: string; name: string; description: string;
+  project_type: ProjectType;
   created_at: string; updated_at: string;
+}
+
+export interface CVDataset {
+  id: string; project_id: string; file_name: string;
+  sheet_name: string | null;
+  headers: string[]; rows: Record<string, unknown>[];
+  row_count: number; col_count: number;
+  created_at: string;
+}
+
+export interface CVConfig {
+  id: string; project_id: string; dataset_id: string;
+  method: 'lawshe' | 'aiken';
+  item_label_column: string | null;
+  expert_columns: string[];
+  dimension_column: string | null;
+  row_types: Record<number, 'item' | 'dimension'>;
+  value_mapping: Record<string, string | number>;
+  scale_lo: number | null;
+  scale_hi: number | null;
+  alpha: number;
+  empty_as_essential: boolean;
+  excluded_experts: string[];
+  dropped_items: number[];
+  updated_at: string;
+}
+
+export interface CVResults {
+  id: string; project_id: string; dataset_id: string;
+  results: Record<string, unknown>[];
+  summary: Record<string, unknown>;
+  config_snapshot: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface Dataset {
