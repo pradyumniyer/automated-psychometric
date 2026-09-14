@@ -1554,7 +1554,7 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
       </div>
       {!canScore && (
         <Card className="p-2.5 mb-3 border-warning-300 bg-warning-50/50">
-          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {subscaleCount > 0 && !usedAutoScale ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
+          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom') ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
         </Card>
       )}
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">
