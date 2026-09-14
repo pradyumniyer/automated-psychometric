@@ -24,6 +24,7 @@ export function CVResultsScreen({ project, sharedDatasetId, onDatasetChange }: P
   const [analysing, setAnalysing] = useState(false);
   const [result, setResult] = useState<ContentValidityResult | null>(null);
   const [showSummary, setShowSummary] = useState(true);
+  const [analyseError, setAnalyseError] = useState<string | null>(null);
 
   const activeDataset = datasets.find((d) => d.id === sharedDatasetId) ?? datasets[0] ?? null;
 
@@ -78,7 +79,9 @@ export function CVResultsScreen({ project, sharedDatasetId, onDatasetChange }: P
         const val = row[col];
         if (val != null && String(val).trim() !== '') {
           const v = String(val).trim();
-          if (!(v in config.value_mapping)) set.add(v);
+          if (v in config.value_mapping) continue;
+          if (config.method === 'aiken' && !isNaN(Number(v))) continue;
+          set.add(v);
         }
       }
     }
@@ -89,6 +92,7 @@ export function CVResultsScreen({ project, sharedDatasetId, onDatasetChange }: P
   const handleAnalyse = useCallback(async () => {
     if (!activeDataset || !config || validationError || unmappedValues.length > 0) return;
     setAnalysing(true);
+    setAnalyseError(null);
     try {
       let res: ContentValidityResult;
       if (config.method === 'lawshe') {
@@ -122,16 +126,20 @@ export function CVResultsScreen({ project, sharedDatasetId, onDatasetChange }: P
       }
       setResult(res);
 
-      // Save to DB
-      await supabase.from('cv_results').upsert({
+      const { error: upsertError } = await supabase.from('cv_results').upsert({
         project_id: project.id,
         dataset_id: activeDataset.id,
         results: res.itemResults as unknown as Record<string, unknown>[],
         summary: res.summary as Record<string, unknown>,
         config_snapshot: { ...config, method: config.method },
       }, { onConflict: 'dataset_id' });
-    } catch {
-      // ignore
+      if (upsertError) throw new Error(upsertError.message);
+    } catch (err) {
+      setAnalyseError(
+        err instanceof Error
+          ? `Analysis failed: ${err.message}`
+          : 'Analysis failed. Please check your configuration and try again.',
+      );
     }
     setAnalysing(false);
   }, [activeDataset, config, validationError, unmappedValues, project.id]);
@@ -229,6 +237,13 @@ export function CVResultsScreen({ project, sharedDatasetId, onDatasetChange }: P
           <div className="flex items-center gap-2 px-4 py-3 bg-error-50 rounded-lg">
             <AlertCircle className="w-5 h-5 text-error-600 flex-shrink-0" />
             <p className="text-sm text-error-700">{validationError}</p>
+          </div>
+        )}
+
+        {analyseError && (
+          <div className="flex items-start gap-2 px-4 py-3 bg-error-50 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-error-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-error-700">{analyseError}</p>
           </div>
         )}
 

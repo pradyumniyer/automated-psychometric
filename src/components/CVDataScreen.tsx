@@ -30,6 +30,7 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showSheetPicker, setShowSheetPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeDataset = datasets.find((d) => d.id === sharedDatasetId) ?? datasets[0] ?? null;
@@ -96,32 +97,49 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
+    setUploadError(null);
     try {
       const info = await getSheetInfo(file);
-      setPendingFile(file);
-      setSheetInfo(info.sheets);
-      setShowSheetPicker(true);
-    } catch {
-      // ignore
+      if (info.sheets.length === 1) {
+        await importSheet(file, info.sheets[0].name);
+      } else {
+        setPendingFile(file);
+        setSheetInfo(info.sheets);
+        setShowSheetPicker(true);
+      }
+    } catch (err) {
+      setUploadError(
+        err instanceof Error
+          ? `Could not read this file: ${err.message}`
+          : 'Could not read this file. Make sure it is a valid Excel or CSV file.',
+      );
     }
     setUploading(false);
+    e.target.value = '';
   };
 
-  const importSheet = async (sheetName: string) => {
-    if (!pendingFile) return;
+  const importSheet = async (file: File, sheetName: string) => {
     setUploading(true);
+    setUploadError(null);
     try {
-      const rawRows = await getRawSheet(pendingFile, sheetName);
+      const rawRows = await getRawSheet(file, sheetName);
       const parsed: ParsedSheet = parseSheetConfigurable(rawRows, {
         sheetName, headerRow: 0, labelRow: null, dataStartRow: 1, removeEmptyRows: false,
       });
-      if (parsed.rows.length === 0) return;
+      if (parsed.rows.length === 0) {
+        setUploadError('The selected sheet has no data rows. Check that your file has a header row followed by data.');
+        setShowSheetPicker(false);
+        setPendingFile(null);
+        setSheetInfo(null);
+        setUploading(false);
+        return;
+      }
 
-      const { data } = await supabase
+      const { data, error: insertError } = await supabase
         .from('cv_datasets')
         .insert({
           project_id: project.id,
-          file_name: pendingFile.name,
+          file_name: file.name,
           sheet_name: sheetName,
           headers: parsed.headers,
           rows: parsed.rows,
@@ -130,6 +148,8 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
         })
         .select()
         .maybeSingle();
+
+      if (insertError) throw new Error(insertError.message);
 
       if (data) {
         const newDs = data as CVDataset;
@@ -140,8 +160,15 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
       setShowSheetPicker(false);
       setPendingFile(null);
       setSheetInfo(null);
-    } catch {
-      // ignore
+    } catch (err) {
+      setUploadError(
+        err instanceof Error
+          ? `Import failed: ${err.message}`
+          : 'Import failed. Please try again.',
+      );
+      setShowSheetPicker(false);
+      setPendingFile(null);
+      setSheetInfo(null);
     }
     setUploading(false);
   };
@@ -190,7 +217,11 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
 
   const unmappedValues = useMemo(() => {
     if (!config) return [];
-    return distinctValues.filter((v) => !(v in config.value_mapping));
+    return distinctValues.filter((v) => {
+      if (v in config.value_mapping) return false;
+      if (config.method === 'aiken' && !isNaN(Number(v))) return false;
+      return true;
+    });
   }, [distinctValues, config]);
 
   const expertQuality = useMemo(() => {
@@ -226,6 +257,12 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
             {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
             {uploading ? 'Reading file...' : 'Choose file'}
           </Button>
+          {uploadError && (
+            <div className="mt-4 flex items-start gap-2 px-4 py-3 bg-error-50 rounded-lg text-left">
+              <AlertCircle className="w-4 h-4 text-error-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-error-700">{uploadError}</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -264,6 +301,12 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
           {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
           {uploading ? 'Importing...' : 'Import another sheet'}
         </Button>
+        {uploadError && (
+          <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-error-50 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-error-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-error-700">{uploadError}</p>
+          </div>
+        )}
       </div>
 
       {/* Scrollable content */}
@@ -649,7 +692,7 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
           <p className="text-sm text-secondary-500 mb-3">Found {sheetInfo?.length ?? 0} sheet{sheetInfo?.length !== 1 ? 's' : ''}. Choose which to import:</p>
           {sheetInfo?.map((s) => (
             <button key={s.name}
-              onClick={() => importSheet(s.name)}
+              onClick={() => pendingFile && importSheet(pendingFile, s.name)}
               className="w-full flex items-center justify-between px-4 py-3 border border-secondary-200 rounded-lg hover:border-accent-300 hover:bg-accent-50 transition-colors text-left">
               <div>
                 <div className="text-sm font-medium text-secondary-900">{s.name}</div>

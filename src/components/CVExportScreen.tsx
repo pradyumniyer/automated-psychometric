@@ -21,6 +21,7 @@ export function CVExportScreen({ project, sharedDatasetId, onDatasetChange }: Pr
   const [config, setConfig] = useState<CVConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const activeDataset = datasets.find((d) => d.id === sharedDatasetId) ?? datasets[0] ?? null;
 
@@ -171,6 +172,7 @@ export function CVExportScreen({ project, sharedDatasetId, onDatasetChange }: Pr
   const doExport = useCallback((type: 'full' | 'kept' | 'retained', format: 'csv' | 'xlsx') => {
     const key = `${type}_${format}`;
     setExporting(key);
+    setExportError(null);
     try {
       let data: { headers: string[]; rows: Record<string, unknown>[] };
       let baseName: string;
@@ -183,8 +185,12 @@ export function CVExportScreen({ project, sharedDatasetId, onDatasetChange }: Pr
 
       if (format === 'csv') exportToCSV(data.headers, data.rows, fileName);
       else exportToXLSX(data.headers, data.rows, fileName);
-    } catch {
-      // ignore
+    } catch (err) {
+      setExportError(
+        err instanceof Error
+          ? `Export failed: ${err.message}`
+          : 'Export failed. Please try again.',
+      );
     }
     setExporting(null);
   }, [buildFullMatrix, buildKeptItems, buildRetainedList, activeDataset, project.name]);
@@ -312,6 +318,13 @@ export function CVExportScreen({ project, sharedDatasetId, onDatasetChange }: Pr
             {config.method === 'aiken' && ' Critical V uses a normal approximation.'}
           </p>
         </div>
+
+        {exportError && (
+          <div className="flex items-start gap-2 px-4 py-3 bg-error-50 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-error-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-error-700">{exportError}</p>
+          </div>
+        )}
       </div>
     </div>
   );
