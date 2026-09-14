@@ -31,61 +31,82 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
   const [showSheetPicker, setShowSheetPicker] = useState(false);
   const [showSettings, setShowSettings] = useState(true);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeDataset = datasets.find((d) => d.id === sharedDatasetId) ?? datasets[0] ?? null;
 
-  // ── Load datasets ──
+  // ── Load datasets (stable — only depends on project.id) ──
   const loadDatasets = useCallback(async () => {
     const { data, error } = await supabase
       .from('cv_datasets')
       .select('*')
       .eq('project_id', project.id)
       .order('created_at', { ascending: true });
-    if (!error && data) {
-      const ds = data as CVDataset[];
-      setDatasets(ds);
-      if (ds.length > 0 && !sharedDatasetId) {
-        onDatasetChange(ds[0].id);
-      }
+    if (error) {
+      console.error('[CVDataScreen] loadDatasets error:', error);
+    } else {
+      setDatasets(data as CVDataset[]);
     }
     setLoading(false);
-  }, [project.id, sharedDatasetId, onDatasetChange]);
+  }, [project.id]);
+
+  // Auto-select first dataset when datasets arrive and none is selected
+  useEffect(() => {
+    if (datasets.length > 0 && !sharedDatasetId) {
+      onDatasetChange(datasets[0].id);
+    }
+  }, [datasets, sharedDatasetId, onDatasetChange]);
 
   // ── Load config for active dataset ──
   const loadConfig = useCallback(async () => {
-    if (!activeDataset) { setConfig(null); return; }
+    if (!activeDataset) { setConfig(null); setConfigError(null); return; }
+    setConfigError(null);
     const { data, error } = await supabase
       .from('cv_config')
       .select('*')
       .eq('dataset_id', activeDataset.id)
       .maybeSingle();
-    if (!error && data) {
+    if (error) {
+      console.error('[CVDataScreen] cv_config select error:', error);
+      setConfigError(`Failed to load configuration: ${error.message}`);
+      return;
+    }
+    if (data) {
       setConfig(data as CVConfig);
-    } else if (!error) {
-      // Create default config
-      const newConfig = {
-        project_id: project.id,
-        dataset_id: activeDataset.id,
-        method: 'lawshe' as CVMethod,
-        item_label_column: null,
-        expert_columns: [] as string[],
-        dimension_column: null,
-        row_types: {} as Record<number, RowType>,
-        value_mapping: {} as Record<string, string | number>,
-        scale_lo: 1,
-        scale_hi: 5,
-        alpha: 0.05,
-        empty_as_essential: false,
-        excluded_experts: [] as string[],
-        dropped_items: [] as number[],
-      };
-      const { data: created } = await supabase
-        .from('cv_config')
-        .insert(newConfig)
-        .select()
-        .maybeSingle();
-      if (created) setConfig(created as CVConfig);
+      return;
+    }
+    // No config yet — create default
+    const newConfig = {
+      project_id: project.id,
+      dataset_id: activeDataset.id,
+      method: 'lawshe' as CVMethod,
+      item_label_column: null,
+      expert_columns: [] as string[],
+      dimension_column: null,
+      row_types: {} as Record<number, RowType>,
+      value_mapping: {} as Record<string, string | number>,
+      scale_lo: 1,
+      scale_hi: 5,
+      alpha: 0.05,
+      empty_as_essential: false,
+      excluded_experts: [] as string[],
+      dropped_items: [] as number[],
+    };
+    const { data: created, error: insertErr } = await supabase
+      .from('cv_config')
+      .insert(newConfig)
+      .select()
+      .maybeSingle();
+    if (insertErr) {
+      console.error('[CVDataScreen] cv_config insert error:', insertErr);
+      setConfigError(`Failed to create configuration: ${insertErr.message}`);
+      return;
+    }
+    if (created) {
+      setConfig(created as CVConfig);
+    } else {
+      setConfigError('Failed to create configuration: no row returned from database.');
     }
   }, [activeDataset, project.id]);
 
@@ -108,6 +129,7 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
         setShowSheetPicker(true);
       }
     } catch (err) {
+      console.error('[CVDataScreen] handleFileSelect error:', err);
       setUploadError(
         err instanceof Error
           ? `Could not read this file: ${err.message}`
@@ -147,20 +169,24 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
           col_count: parsed.colCount,
         })
         .select()
-        .maybeSingle();
+        .single();
 
-      if (insertError) throw new Error(insertError.message);
-
-      if (data) {
-        const newDs = data as CVDataset;
-        setDatasets([...datasets, newDs]);
-        onDatasetChange(newDs.id);
+      if (insertError) {
+        console.error('[CVDataScreen] cv_datasets insert error:', insertError);
+        throw new Error(insertError.message);
       }
+
+      const newDs = data as CVDataset;
+      setDatasets([...datasets, newDs]);
+      onDatasetChange(newDs.id);
+      // Explicitly reload from DB to match the proven survey pattern
+      await loadDatasets();
 
       setShowSheetPicker(false);
       setPendingFile(null);
       setSheetInfo(null);
     } catch (err) {
+      console.error('[CVDataScreen] importSheet error:', err);
       setUploadError(
         err instanceof Error
           ? `Import failed: ${err.message}`
@@ -271,7 +297,19 @@ export function CVDataScreen({ project, sharedDatasetId, onDatasetChange }: Prop
   if (!activeDataset || !config) {
     return (
       <div className="h-full flex items-center justify-center bg-secondary-50">
-        <div className="text-sm text-secondary-500">Loading...</div>
+        {configError ? (
+          <div className="max-w-md text-center">
+            <div className="w-12 h-12 rounded-xl bg-error-100 flex items-center justify-center mx-auto mb-3">
+              <AlertCircle className="w-6 h-6 text-error-600" />
+            </div>
+            <p className="text-sm text-error-700 mb-3">{configError}</p>
+            <Button variant="outline" size="sm" onClick={() => loadConfig()}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <div className="text-sm text-secondary-500">Loading...</div>
+        )}
       </div>
     );
   }
