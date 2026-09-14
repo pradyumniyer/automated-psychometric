@@ -2,7 +2,7 @@
 // Exclusions are respected from shared state. Scoring is optional.
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  FileDown, FileSpreadsheet, Table, FileText, BarChart3, Users,
+  FileDown, FileSpreadsheet, Table, FileText, BarChart3, Users, Hash,
   Check, AlertCircle, Info, Loader2, Download,
 } from 'lucide-react';
 import {
@@ -19,7 +19,7 @@ interface Props {
   onDatasetChange: (id: string | null) => void;
 }
 
-type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo';
+type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo' | 'scores_only';
 
 export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -220,6 +220,20 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
           return out;
         });
         rows = applyExclusions(filteredRows, keepExcluded);
+      } else if (type === 'scores_only') {
+        if (!scoredResult) throw new Error('Scoring not available');
+        // Demo columns + score columns only (no interpretation/band/label columns)
+        const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
+        const scoreCols = scoredResult.headers
+          .filter((h) => !dataset.headers.includes(h))
+          .filter((h) => !h.endsWith(' Interpretation'));
+        headers = keepExcluded ? [...demoList, ...scoreCols, 'excluded'] : [...demoList, ...scoreCols];
+        const filteredRows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
+          const out: Record<string, unknown> = {};
+          for (const col of headers) { if (col !== 'excluded') out[col] = row[col]; }
+          return out;
+        });
+        rows = applyExclusions(filteredRows, keepExcluded);
       } else {
         return;
       }
@@ -374,6 +388,22 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               exporting={exporting}
               exportKey="scores_demo"
               fileName={fileName('scores_demo', 'csv')}
+            />
+
+            {/* E) Scores Only */}
+            <ExportCard
+              icon={<Hash className="w-5 h-5" />}
+              title="Scores only"
+              description="Scale scores without interpretation labels. Includes ID/demographic columns and all subscale + overall scores — no band or label columns. Use when you only need numeric scores for further analysis in jamovi, SPSS, or R."
+              badge={scoringAvailable ? 'Ready' : 'Scoring required'}
+              badgeColor={scoringAvailable ? 'success' : 'neutral'}
+              disabled={!scoringAvailable || noIncludedRows}
+              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
+              onExportCSV={() => doExport('scores_only', 'csv')}
+              onExportXLSX={() => doExport('scores_only', 'xlsx')}
+              exporting={exporting}
+              exportKey="scores_only"
+              fileName={fileName('scores_only', 'csv')}
             />
           </div>
 
