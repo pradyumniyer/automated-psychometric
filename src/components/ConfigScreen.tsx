@@ -41,6 +41,7 @@ export function ConfigScreen({
   project, highlightRowIndex, onClearHighlight,
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
+  showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
 }: {
   project: Project;
   highlightRowIndex: number | null;
@@ -51,6 +52,10 @@ export function ConfigScreen({
   onGoToQuality: () => void;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
+  showSummarySum: boolean;
+  showSummaryMean: boolean;
+  onToggleSummarySum: () => void;
+  onToggleSummaryMean: () => void;
 }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
@@ -87,8 +92,7 @@ export function ConfigScreen({
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [activeSubscaleId, setActiveSubscaleId] = useState<string | null>(null);
-  const [showSummarySum, setShowSummarySum] = useState(false);
-  const [showSummaryMean, setShowSummaryMean] = useState(false);
+
   const [activeStep, setActiveStep] = useState<'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring'>('demographics');
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
@@ -388,8 +392,11 @@ export function ConfigScreen({
     if (error) return;
     const newSub = data as SubscaleGroup;
     setSubscaleStates([...subscaleStates, { id: newSub.id, name, items: [], scoringMethod: 'sum', customFormula: '', scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: order }]);
+    setActiveSubscaleId(newSub.id);
+    setActiveStep('subscales');
     await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
     const hist = await fetchHistory(dataset.id); setHistory(hist);
+    setStatusMsg({ type: 'success', text: `Created subscale: ${name}` });
   };
 
   const deleteSubscale = async (id: string) => {
@@ -830,8 +837,8 @@ export function ConfigScreen({
           {/* Summary toggles */}
           <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5">
             {([
-              { key: 'sum' as const, icon: Sigma, label: 'Sum', active: showSummarySum, toggle: () => setShowSummarySum((v) => !v) },
-              { key: 'mean' as const, icon: TrendingUp, label: 'Mean', active: showSummaryMean, toggle: () => setShowSummaryMean((v) => !v) },
+              { key: 'sum' as const, icon: Sigma, label: 'Sum', active: showSummarySum, toggle: onToggleSummarySum },
+              { key: 'mean' as const, icon: TrendingUp, label: 'Mean', active: showSummaryMean, toggle: onToggleSummaryMean },
             ] as const).map(({ key, icon: Icon, label, active, toggle }) => (
               <button
                 key={key}
@@ -960,6 +967,7 @@ export function ConfigScreen({
                     excludedCount={sharedExcludedRows.size} subscaleCount={subscaleStates.length || (itemColumns.length > 0 ? 1 : 0)}
                     usedAutoScale={subscaleStates.length === 0 && !!dataset}
                     originalColCount={originalColCount} computedColCount={computedColCount}
+                    hasSubscaleItems={subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom')}
                   />
                 )}
               </div>
@@ -1525,11 +1533,12 @@ function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBa
 }
 
 // ── Scoring Panel ──
-function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount }: {
+function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount, hasSubscaleItems }: {
   canScore: boolean; scoring: boolean; onRunScoring: () => void;
   scoringResult: ReturnType<typeof scoreDataset> | null; onExport: (f: 'csv' | 'xlsx') => void;
   excludedCount: number; subscaleCount: number; usedAutoScale: boolean;
   originalColCount: number; computedColCount: number;
+  hasSubscaleItems: boolean;
 }) {
   return (
     <div className="p-3">
@@ -1554,7 +1563,7 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
       </div>
       {!canScore && (
         <Card className="p-2.5 mb-3 border-warning-300 bg-warning-50/50">
-          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom') ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
+          <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {hasSubscaleItems ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
         </Card>
       )}
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">

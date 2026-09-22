@@ -24,7 +24,7 @@ export interface QualityThresholds {
 }
 
 export const DEFAULT_THRESHOLDS: QualityThresholds = {
-  unexpectedMissingPct: 20,
+  unexpectedMissingPct: 0,
   longstringMin: 6,
   extremeRate: 0.80,
   midpointRate: 0.70,

@@ -178,10 +178,16 @@ export function detectHeaderLayout(rawRows: unknown[][]): HeaderLayoutDetection 
   };
 }
 
-/** Analyze empty rows in the data region (returns 1-based row numbers as seen in the file) */
+/** Analyze empty rows in the data region (returns 1-based row numbers as seen in the file).
+ *  Trailing fully-empty rows are automatically excluded from the report and from the data region. */
 export function analyzeEmptyRows(rawRows: unknown[][], dataStartRow: number): EmptyRowReport {
+  // Find last non-empty row — trailing empties are trimmed automatically
+  let lastNonEmpty = dataStartRow - 1;
+  for (let i = rawRows.length - 1; i >= dataStartRow; i--) {
+    if (!isRowEmpty(rawRows[i])) { lastNonEmpty = i; break; }
+  }
   const emptyRowNumbers: number[] = [];
-  for (let i = dataStartRow; i < rawRows.length; i++) {
+  for (let i = dataStartRow; i <= lastNonEmpty; i++) {
     if (isRowEmpty(rawRows[i])) {
       emptyRowNumbers.push(i + 1); // 1-based file row number
     }
@@ -245,7 +251,15 @@ export function parseSheetConfigurable(
   }
 
   const dataSlice = rawRows.slice(dataStartRow);
-  let rows: Record<string, unknown>[] = dataSlice.map((row) => {
+
+  // Auto-trim trailing fully-empty rows
+  let lastNonEmptyIdx = -1;
+  for (let i = dataSlice.length - 1; i >= 0; i--) {
+    if (!isRowEmpty(dataSlice[i])) { lastNonEmptyIdx = i; break; }
+  }
+  const trimmedSlice = lastNonEmptyIdx >= 0 ? dataSlice.slice(0, lastNonEmptyIdx + 1) : dataSlice;
+
+  let rows: Record<string, unknown>[] = trimmedSlice.map((row) => {
     const obj: Record<string, unknown> = {};
     headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : null; });
     return obj;

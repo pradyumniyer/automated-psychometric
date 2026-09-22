@@ -96,7 +96,6 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   const includedCount = totalRows - excludedCount;
 
   const noIncludedRows = !keepExcluded && includedCount === 0 && totalRows > 0;
-  const noItemColumns = itemColumns.length === 0;
   const exclusionBlockedReason = noIncludedRows
     ? 'All rows are excluded. Switch to "Keep with flag" mode or adjust exclusions on the Data Quality screen.'
     : undefined;
@@ -326,39 +325,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
 
           {/* ── Export type cards ── */}
           <div className="grid grid-cols-2 gap-4">
-            {/* A) Cleaned Raw */}
-            <ExportCard
-              icon={<FileSpreadsheet className="w-5 h-5" />}
-              title="Cleaned Raw Data"
-              description="All original columns with excluded rows removed. Use this as a general-purpose cleaned dataset for any downstream analysis."
-              badge="Always available"
-              badgeColor="success"
-              disabled={noIncludedRows}
-              disabledReason={exclusionBlockedReason}
-              onExportCSV={() => doExport('cleaned_raw', 'csv')}
-              onExportXLSX={() => doExport('cleaned_raw', 'xlsx')}
-              exporting={exporting}
-              exportKey="cleaned_raw"
-              fileName={fileName('cleaned_raw', 'csv')}
-            />
-
-            {/* B) Items Only */}
-            <ExportCard
-              icon={<Table className="w-5 h-5" />}
-              title="Items Only"
-              description="Questionnaire item columns only — demographics removed. Ideal for item analysis, factor analysis, or IRT workflows in jamovi, SPSS, or R."
-              badge="No scoring needed"
-              badgeColor="success"
-              disabled={noItemColumns || noIncludedRows}
-              disabledReason={noItemColumns ? 'No item columns available. All columns are marked as demographics.' : exclusionBlockedReason}
-              onExportCSV={() => doExport('items_only', 'csv')}
-              onExportXLSX={() => doExport('items_only', 'xlsx')}
-              exporting={exporting}
-              exportKey="items_only"
-              fileName={fileName('items_only', 'csv')}
-            />
-
-            {/* C) Scored Data */}
+            {/* A) Scored Data */}
             <ExportCard
               icon={<BarChart3 className="w-5 h-5" />}
               title="Scored Data"
@@ -374,7 +341,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               fileName={fileName('scored', 'csv')}
             />
 
-            {/* D) Scores + Demographics */}
+            {/* B) Scores + Demographics */}
             <ExportCard
               icon={<Users className="w-5 h-5" />}
               title="Scores + Demographics"
@@ -390,7 +357,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               fileName={fileName('scores_demo', 'csv')}
             />
 
-            {/* E) Scores Only */}
+            {/* C) Scores Only */}
             <ExportCard
               icon={<Hash className="w-5 h-5" />}
               title="Scores only"

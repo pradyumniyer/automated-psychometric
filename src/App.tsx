@@ -15,6 +15,8 @@ export default function App() {
   const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const [showSummarySum, setShowSummarySum] = useState(false);
+  const [showSummaryMean, setShowSummaryMean] = useState(false);
 
   const openProject = (p: Project) => {
     setProject(p);
@@ -60,6 +62,10 @@ export default function App() {
       for (const idx of indices) next.add(idx);
       return next;
     });
+  }, []);
+
+  const setExcludedRowsDirect = useCallback((rows: Set<number>) => {
+    setExcludedRows(rows);
   }, []);
 
   if (view === 'list' || !project) {
@@ -125,10 +131,14 @@ export default function App() {
             onClearHighlight={() => setHighlightRowIndex(null)}
             excludedRows={excludedRows}
             onToggleRowExclusion={toggleRowExclusion}
-            onSetExcludedRows={setExcludedRows}
+            onSetExcludedRows={setExcludedRowsDirect}
             onGoToQuality={goToQuality}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={setActiveDatasetId}
+            showSummarySum={showSummarySum}
+            showSummaryMean={showSummaryMean}
+            onToggleSummarySum={() => setShowSummarySum((v) => !v)}
+            onToggleSummaryMean={() => setShowSummaryMean((v) => !v)}
           />
         )}
         {view === 'quality' && (
@@ -137,8 +147,11 @@ export default function App() {
             excludedRows={excludedRows}
             onToggleRow={toggleRowExclusion}
             onBulkExclude={bulkExclude}
+            onSetExcludedRows={setExcludedRowsDirect}
             onInspectRow={(rowIndex) => goToConfig(rowIndex)}
             onGoToExport={goToExport}
+            sharedDatasetId={activeDatasetId}
+            onDatasetChange={setActiveDatasetId}
           />
         )}
         {view === 'export' && (

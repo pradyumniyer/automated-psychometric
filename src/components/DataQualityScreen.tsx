@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ShieldCheck, AlertTriangle, Eye, TrendingDown, BarChart3, Activity,
   ChevronDown, ChevronRight, Settings2, Trash2, Plus, X,
-  Check, Info, FileDown, AlertCircle,
+  Check, Info, FileDown, AlertCircle, RotateCcw,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -30,15 +30,20 @@ interface Props {
   excludedRows: Set<number>;
   onToggleRow: (rowIndex: number) => void;
   onBulkExclude: (indices: number[]) => void;
+  onSetExcludedRows: (rows: Set<number>) => void;
   onInspectRow: (rowIndex: number) => void;
   onGoToExport: () => void;
+  sharedDatasetId: string | null;
+  onDatasetChange: (id: string | null) => void;
 }
 
 export function DataQualityScreen({
-  project, excludedRows, onToggleRow, onBulkExclude, onInspectRow, onGoToExport,
+  project, excludedRows, onToggleRow, onBulkExclude, onSetExcludedRows, onInspectRow, onGoToExport,
+  sharedDatasetId, onDatasetChange,
 }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const activeDatasetId = sharedDatasetId;
+  const setActiveDatasetId = onDatasetChange;
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
@@ -55,6 +60,11 @@ export function DataQualityScreen({
     setDatasets(dsList);
     if (dsList.length > 0 && !activeDatasetId) setActiveDatasetId(dsList[0].id);
   }, [project.id, activeDatasetId]);
+
+  // When datasets load and no active dataset is set, pick the first
+  useEffect(() => {
+    if (datasets.length > 0 && !activeDatasetId) setActiveDatasetId(datasets[0].id);
+  }, [datasets, activeDatasetId, setActiveDatasetId]);
 
   useEffect(() => { loadDatasets(); }, [loadDatasets]);
 
@@ -132,6 +142,27 @@ export function DataQualityScreen({
       .map((f) => f.rowIndex);
     if (indices.length === 0) return;
     onBulkExclude(indices);
+  };
+
+  // Exclude all flagged rows, or include all if every row is already excluded
+  const handleExcludeAllToggle = () => {
+    if (!qualityResult) return;
+    const flaggedIndices = qualityResult.flags.map((f) => f.rowIndex);
+    const allFlaggedExcluded = flaggedIndices.length > 0 && flaggedIndices.every((idx) => excludedRows.has(idx));
+    if (allFlaggedExcluded) {
+      // Un-exclude all flagged rows
+      const next = new Set(excludedRows);
+      for (const idx of flaggedIndices) next.delete(idx);
+      onSetExcludedRows(next);
+    } else {
+      // Exclude all flagged rows that aren't already excluded
+      onBulkExclude(flaggedIndices.filter((idx) => !excludedRows.has(idx)));
+    }
+  };
+
+  const resetThresholds = () => {
+    setThresholds(DEFAULT_THRESHOLDS);
+    setAllowedNonResponse(DEFAULT_ALLOWED_NON_RESPONSE);
   };
 
   const addTextValue = () => {
@@ -301,7 +332,12 @@ export function DataQualityScreen({
 
                 {/* Thresholds */}
                 <div>
-                  <div className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-2">Detection thresholds</div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Detection thresholds</div>
+                    <button onClick={resetThresholds} className="text-xs text-primary-600 hover:underline flex items-center gap-1">
+                      <RotateCcw className="w-3 h-3" /> Reset to defaults
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                     <ThresholdInput label="Unexpected missing (% of items)" value={thresholds.unexpectedMissingPct}
                       onChange={(v) => setThresholds({ ...thresholds, unexpectedMissingPct: v })} />
@@ -379,6 +415,16 @@ export function DataQualityScreen({
             <div className="px-5 py-3 border-b border-secondary-200 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-secondary-900">Flagged rows</h2>
               <div className="flex items-center gap-2">
+                {(() => {
+                  const flaggedIndices = qualityResult.flags.map((f) => f.rowIndex);
+                  const allFlaggedExcluded = flaggedIndices.length > 0 && flaggedIndices.every((idx) => excludedRows.has(idx));
+                  return (
+                    <Button variant={allFlaggedExcluded ? 'secondary' : 'outline'} size="sm" onClick={handleExcludeAllToggle} disabled={qualityResult.flags.length === 0}>
+                      {allFlaggedExcluded ? 'Include all flagged' : 'Exclude all flagged'}
+                    </Button>
+                  );
+                })()}
+                <div className="w-px h-5 bg-secondary-200" />
                 <Button variant="outline" size="sm" onClick={() => handleBulkExclude('missingness')} disabled={!qualityResult.flags.some((f) => f.categories.has('missingness'))}>
                   Exclude high-missing
                 </Button>

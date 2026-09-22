@@ -117,7 +117,12 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
 
   const dataRowCount = useMemo(() => {
     if (!rawRows) return 0;
-    const total = rawRows.length - dataStartRow;
+    // Auto-trim trailing empties: find last non-empty row from dataStartRow onward
+    let lastNonEmpty = dataStartRow - 1;
+    for (let i = rawRows.length - 1; i >= dataStartRow; i--) {
+      if (!rawRows[i].every((v) => v == null || String(v).trim() === '')) { lastNonEmpty = i; break; }
+    }
+    const total = Math.max(0, lastNonEmpty - dataStartRow + 1);
     if (removeEmptyRows) return Math.max(0, total - emptyRowReport.count);
     return Math.max(0, total);
   }, [rawRows, dataStartRow, removeEmptyRows, emptyRowReport]);
@@ -248,7 +253,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
                 onChange={(e) => setRemoveEmptyRows(e.target.checked)}
                 className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
               />
-              <span className="text-xs text-secondary-600">Remove fully empty data rows</span>
+              <span className="text-xs text-secondary-600">Remove empty data rows</span>
             </label>
           </div>
 
@@ -265,8 +270,8 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
             <div className="flex items-start gap-2 px-3 py-2.5 bg-warning-50 rounded-lg">
               <AlertTriangle className="w-4 h-4 text-warning-600 flex-shrink-0 mt-0.5" />
               <div className="text-xs text-warning-700">
-                <span className="font-medium">Found {emptyRowReport.count} fully empty row{emptyRowReport.count > 1 ? 's' : ''}</span> in the data region (row{emptyRowReport.count > 1 ? 's' : ''} {formatEmptyRowSample(emptyRowReport)}).
-                They will be kept. Check "Remove fully empty data rows" to drop them.
+                <span className="font-medium">{emptyRowReport.count} empty row{emptyRowReport.count > 1 ? 's' : ''} within the data</span> (row{emptyRowReport.count > 1 ? 's' : ''} {formatEmptyRowSample(emptyRowReport)}).
+                They will be kept. Check "Remove empty data rows" to drop them.
               </div>
             </div>
           )}
@@ -366,7 +371,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
             <p className="text-[11px] text-secondary-500 leading-relaxed">
               Works best with tabular exports from Qualtrics, SurveyMonkey, REDCap, Google Forms, and Excel/CSV.
               For multi-row headers, use the controls above to pick the name row.
-              Empty rows inside the data are kept by default.
+              Trailing empty rows are trimmed automatically; empty rows within the data are kept by default.
             </p>
           </div>
 
