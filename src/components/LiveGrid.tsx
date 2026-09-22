@@ -156,7 +156,7 @@ export function LiveGrid({
               const isHighlighted = highlightRowIndex === realIdx;
               return (
                 <tr key={i} ref={isHighlighted ? highlightRef : undefined}
-                  className={isHighlighted ? 'bg-accent-100 ring-2 ring-accent-400' : isExcluded ? 'bg-error-50/50' : i % 2 ? 'bg-secondary-50/20' : 'bg-white'}>
+                  className={isHighlighted ? 'bg-accent-100 ring-2 ring-accent-400' : isExcluded ? 'bg-warning-50' : i % 2 ? 'bg-secondary-50/20' : 'bg-white'}>
                   <td className="px-2 py-1.5 text-secondary-400 font-mono text-xs sticky left-0 bg-inherit border-r border-secondary-100">{realIdx + 1}</td>
                   <td className="px-2 py-1.5 text-center border-r border-secondary-100">
                     <button onClick={() => onToggleRow(realIdx)}

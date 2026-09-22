@@ -6,10 +6,12 @@ import {
   getRawSheet,
   detectHeaderLayout,
   analyzeEmptyRows,
+  analyzeEmptyColumns,
   parseSheetConfigurable,
   type ParsedSheet,
   type HeaderLayoutDetection,
   type EmptyRowReport,
+  type EmptyColumnReport,
 } from '@/lib/fileParser';
 import { Button, Modal } from './ui';
 
@@ -45,6 +47,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
   const [labelRow, setLabelRow] = useState<number | null>(null);
   const [dataStartRow, setDataStartRow] = useState(1);
   const [removeEmptyRows, setRemoveEmptyRows] = useState(false);
+  const [removeEmptyCols, setRemoveEmptyCols] = useState(false);
   const [activePreset, setActivePreset] = useState<Preset>('auto-detect');
   const [importing, setImporting] = useState(false);
 
@@ -54,6 +57,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
     setLoading(true);
     setError(null);
     setRemoveEmptyRows(false);
+    setRemoveEmptyCols(false);
     setImporting(false);
     getRawSheet(request.file, request.sheetName)
       .then((rows) => {
@@ -115,6 +119,11 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
     return analyzeEmptyRows(rawRows, dataStartRow);
   }, [rawRows, dataStartRow]);
 
+  const emptyColReport: EmptyColumnReport = useMemo(() => {
+    if (!rawRows) return { count: 0, columnIndices: [] };
+    return analyzeEmptyColumns(rawRows, dataStartRow, previewHeaders.length);
+  }, [rawRows, dataStartRow, previewHeaders.length]);
+
   const dataRowCount = useMemo(() => {
     if (!rawRows) return 0;
     // Auto-trim trailing empties: find last non-empty row from dataStartRow onward
@@ -146,6 +155,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
         labelRow,
         dataStartRow,
         removeEmptyRows,
+        removeEmptyColumns: removeEmptyCols,
       });
       if (parsed.rows.length === 0) {
         setError('No data rows found with the current settings.');
@@ -247,13 +257,23 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
                 className="w-24 px-3 py-1.5 text-sm border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400"
               />
             </div>
-            <label className="flex items-center gap-2 py-1.5 cursor-pointer select-none">
+            <label className={`flex items-center gap-2 py-1.5 select-none ${emptyRowReport.count > 0 ? 'cursor-pointer' : 'opacity-50'}`}>
               <input
                 type="checkbox" checked={removeEmptyRows}
+                disabled={emptyRowReport.count === 0}
                 onChange={(e) => setRemoveEmptyRows(e.target.checked)}
                 className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
               />
-              <span className="text-xs text-secondary-600">Remove empty data rows</span>
+              <span className="text-xs text-secondary-600">Remove empty data rows {emptyRowReport.count > 0 && `(${emptyRowReport.count})`}</span>
+            </label>
+            <label className={`flex items-center gap-2 py-1.5 select-none ${emptyColReport.count > 0 ? 'cursor-pointer' : 'opacity-50'}`}>
+              <input
+                type="checkbox" checked={removeEmptyCols}
+                disabled={emptyColReport.count === 0}
+                onChange={(e) => setRemoveEmptyCols(e.target.checked)}
+                className="w-4 h-4 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span className="text-xs text-secondary-600">Remove empty columns {emptyColReport.count > 0 && `(${emptyColReport.count})`}</span>
             </label>
           </div>
 
@@ -279,6 +299,23 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
             <div className="flex items-center gap-2 px-3 py-2.5 bg-info-50 rounded-lg">
               <Info className="w-4 h-4 text-info-600 flex-shrink-0" />
               <span className="text-xs text-info-700">{emptyRowReport.count} empty row{emptyRowReport.count > 1 ? 's' : ''} will be removed.</span>
+            </div>
+          )}
+
+          {/* Empty column warning */}
+          {emptyColReport.count > 0 && !removeEmptyCols && (
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-warning-50 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-warning-600 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-warning-700">
+                <span className="font-medium">{emptyColReport.count} fully empty column{emptyColReport.count > 1 ? 's' : ''}</span> in the data region.
+                They will be kept. Check "Remove empty columns" to drop them.
+              </div>
+            </div>
+          )}
+          {emptyColReport.count > 0 && removeEmptyCols && (
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-info-50 rounded-lg">
+              <Info className="w-4 h-4 text-info-600 flex-shrink-0" />
+              <span className="text-xs text-info-700">{emptyColReport.count} empty column{emptyColReport.count > 1 ? 's' : ''} will be removed.</span>
             </div>
           )}
 

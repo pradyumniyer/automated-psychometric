@@ -26,6 +26,11 @@ export interface EmptyRowReport {
   rowNumbers: number[];
 }
 
+export interface EmptyColumnReport {
+  count: number;
+  columnIndices: number[];
+}
+
 // Get list of sheet names and dimensions from a workbook (for multi-tab selection)
 export async function getSheetInfo(file: File): Promise<{ fileName: string; sheets: SheetInfo[] }> {
   const buf = await file.arrayBuffer();
@@ -195,6 +200,25 @@ export function analyzeEmptyRows(rawRows: unknown[][], dataStartRow: number): Em
   return { count: emptyRowNumbers.length, rowNumbers: emptyRowNumbers };
 }
 
+/** Analyze fully empty columns in the data region (0-based column indices). */
+export function analyzeEmptyColumns(rawRows: unknown[][], dataStartRow: number, colCount: number): EmptyColumnReport {
+  // Find last non-empty row (same logic as analyzeEmptyRows)
+  let lastNonEmpty = dataStartRow - 1;
+  for (let i = rawRows.length - 1; i >= dataStartRow; i--) {
+    if (!isRowEmpty(rawRows[i])) { lastNonEmpty = i; break; }
+  }
+  const emptyCols: number[] = [];
+  for (let c = 0; c < colCount; c++) {
+    let hasValue = false;
+    for (let r = dataStartRow; r <= lastNonEmpty; r++) {
+      const v = rawRows[r]?.[c];
+      if (v != null && String(v).trim() !== '') { hasValue = true; break; }
+    }
+    if (!hasValue) emptyCols.push(c);
+  }
+  return { count: emptyCols.length, columnIndices: emptyCols };
+}
+
 /** Deduplicate headers and fill blanks */
 function buildHeaders(rawRow: unknown[]): string[] {
   const rawHeaders = (rawRow || []).map((v, i) => {
@@ -215,6 +239,7 @@ export interface ConfigurableParseOptions {
   labelRow: number | null;
   dataStartRow: number;
   removeEmptyRows: boolean;
+  removeEmptyColumns?: boolean;
 }
 
 /** Parse a sheet with user-chosen header/data-start settings */
@@ -222,7 +247,7 @@ export function parseSheetConfigurable(
   rawRows: unknown[][],
   options: ConfigurableParseOptions,
 ): ParsedSheet {
-  const { sheetName, headerRow, labelRow, dataStartRow, removeEmptyRows } = options;
+  const { sheetName, headerRow, labelRow, dataStartRow, removeEmptyRows, removeEmptyColumns } = options;
 
   if (rawRows.length === 0) {
     return { sheetName, headers: [], rows: [], rowCount: 0, colCount: 0 };
@@ -234,8 +259,8 @@ export function parseSheetConfigurable(
     throw new Error('Data start row must be after the header row.');
   }
 
-  const headers = buildHeaders(rawRows[headerRow]);
-  const colCount = headers.length;
+  let headers = buildHeaders(rawRows[headerRow]);
+  let colCount = headers.length;
 
   // Build column_meta with labels if a label row was specified
   let columnMeta: Record<string, { label?: string }> | undefined;
@@ -269,6 +294,31 @@ export function parseSheetConfigurable(
     rows = rows.filter((row) => headers.some((h) => row[h] != null && String(row[h]).trim() !== ''));
   }
 
+  // Drop fully empty columns if requested
+  if (removeEmptyColumns) {
+    const nonEmptyIdx = headers.map((_, i) => {
+      return trimmedSlice.some((row) => {
+        const v = row[i];
+        return v != null && String(v).trim() !== '';
+      });
+    });
+    const keepIdx = nonEmptyIdx.map((keep, i) => keep ? i : -1).filter((i) => i >= 0);
+    const newHeaders = keepIdx.map((i) => headers[i]);
+    if (columnMeta) {
+      const newMeta: Record<string, { label?: string }> = {};
+      for (const h of newHeaders) { if (columnMeta[h]) newMeta[h] = columnMeta[h]; }
+      columnMeta = newMeta;
+    }
+    headers.length = 0;
+    for (const h of newHeaders) headers.push(h);
+    colCount = headers.length;
+    rows = rows.map((row) => {
+      const out: Record<string, unknown> = {};
+      keepIdx.forEach((origIdx, newIdx) => { out[headers[newIdx]] = row[headers[origIdx]] !== undefined ? row[headers[origIdx]] : null; });
+      return out;
+    });
+  }
+
   return {
     sheetName,
     headers,
@@ -288,6 +338,7 @@ export async function parseSheet(file: File, sheetName: string): Promise<ParsedS
     labelRow: null,
     dataStartRow: 1,
     removeEmptyRows: false,
+    removeEmptyColumns: false,
   });
 }
 

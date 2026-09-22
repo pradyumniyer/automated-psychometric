@@ -182,10 +182,13 @@ export function ConfigScreen({
     }
     if (scoreData) {
       const sr = scoreData as { headers: string[]; rows: Record<string, unknown>[]; excluded_rows: number[] };
-      onSetExcludedRows(new Set(sr.excluded_rows || []));
+      // Only hydrate App exclusions from saved scoring if App set is empty (first load).
+      // Never overwrite active DQ exclusions on tab switch.
+      if (sharedExcludedRows.size === 0 && sr.excluded_rows && sr.excluded_rows.length > 0) {
+        onSetExcludedRows(new Set(sr.excluded_rows));
+      }
       setScoringResult({ headers: sr.headers, rows: sr.rows as Record<string, number | string | null>[], subscaleScores: {}, interpretationLabels: {}, excludedRowIndices: sr.excluded_rows || [], configSnapshot: { subscales: [], bands: {} } });
     } else {
-      onSetExcludedRows(new Set());
       setScoringResult(null);
     }
     if (subData && (subData as SubscaleGroup[]).length === 0 && ds) {
@@ -396,7 +399,11 @@ export function ConfigScreen({
     setActiveStep('subscales');
     await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
     const hist = await fetchHistory(dataset.id); setHistory(hist);
-    setStatusMsg({ type: 'success', text: `Created subscale: ${name}` });
+    // Scroll the new subscale into view after render
+    setTimeout(() => {
+      const el = document.querySelector(`[data-subscale-id="${newSub.id}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
   const deleteSubscale = async (id: string) => {
@@ -1293,7 +1300,7 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
       {/* Subscale cards */}
       <div className="space-y-2.5">
         {subscales.map((sub) => (
-          <div key={sub.id}
+          <div key={sub.id} data-subscale-id={sub.id}
             onClick={() => onSetActiveSubscale(sub.id)}
             className={`p-3 rounded-xl border bg-white transition-all cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-secondary-200 hover:border-secondary-300'}`}>
             <div className="flex items-center justify-between mb-2">

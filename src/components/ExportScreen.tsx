@@ -170,10 +170,10 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   }, [dataset, savedScoringResult, savedExclusionsStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
 
   // ── Exclusion filtering ──
-  function applyExclusions<T extends Record<string, unknown>>(rows: T[], includeExcludedColumn: boolean): T[] {
-    if (keepExcluded) {
-      return rows.map((row, i) => ({ ...row, excluded: excludedRows.has(i) })) as T[];
-    }
+  // Drop excluded: omit excluded rows entirely.
+  // Keep with flag: include ALL rows with complete data — no "excluded" column appended.
+  function applyExclusions<T extends Record<string, unknown>>(rows: T[]): T[] {
+    if (keepExcluded) return rows;
     return rows.filter((_, i) => !excludedRows.has(i));
   }
 
@@ -193,46 +193,44 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       let rows: Record<string, unknown>[];
 
       if (type === 'cleaned_raw') {
-        headers = keepExcluded ? [...dataset.headers, 'excluded'] : dataset.headers;
-        rows = applyExclusions(dataset.rows as Record<string, unknown>[], keepExcluded);
+        headers = dataset.headers;
+        rows = applyExclusions(dataset.rows as Record<string, unknown>[]);
       } else if (type === 'items_only') {
-        headers = keepExcluded ? [...itemColumns, 'excluded'] : itemColumns;
+        headers = itemColumns;
         const itemRows = (dataset.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of itemColumns) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(itemRows, keepExcluded);
+        rows = applyExclusions(itemRows);
       } else if (type === 'scored') {
         if (!scoredResult) throw new Error('Scoring not available');
-        headers = keepExcluded ? [...scoredResult.headers, 'excluded'] : scoredResult.headers;
-        rows = applyExclusions(scoredResult.rows as Record<string, unknown>[], keepExcluded);
+        headers = scoredResult.headers;
+        rows = applyExclusions(scoredResult.rows as Record<string, unknown>[]);
       } else if (type === 'scores_demo') {
         if (!scoredResult) throw new Error('Scoring not available');
-        // Keep demo columns + score/interpretation columns only
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
         const scoreCols = scoredResult.headers.filter((h) => !dataset.headers.includes(h));
-        headers = keepExcluded ? [...demoList, ...scoreCols, 'excluded'] : [...demoList, ...scoreCols];
+        headers = [...demoList, ...scoreCols];
         const filteredRows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
-          for (const col of headers) { if (col !== 'excluded') out[col] = row[col]; }
+          for (const col of headers) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(filteredRows, keepExcluded);
+        rows = applyExclusions(filteredRows);
       } else if (type === 'scores_only') {
         if (!scoredResult) throw new Error('Scoring not available');
-        // Demo columns + score columns only (no interpretation/band/label columns)
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
         const scoreCols = scoredResult.headers
           .filter((h) => !dataset.headers.includes(h))
           .filter((h) => !h.endsWith(' Interpretation'));
-        headers = keepExcluded ? [...demoList, ...scoreCols, 'excluded'] : [...demoList, ...scoreCols];
+        headers = [...demoList, ...scoreCols];
         const filteredRows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
-          for (const col of headers) { if (col !== 'excluded') out[col] = row[col]; }
+          for (const col of headers) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(filteredRows, keepExcluded);
+        rows = applyExclusions(filteredRows);
       } else {
         return;
       }
@@ -306,7 +304,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
                 <h3 className="text-sm font-semibold text-secondary-900">Exclusion handling</h3>
                 <p className="text-xs text-secondary-500 mt-0.5">
                   {keepExcluded
-                    ? 'All rows are kept. An "excluded" column (true/false) is appended to indicate excluded rows.'
+                    ? 'All rows are kept with complete data (scores + interpretations as applicable). Excluded rows are not filtered out.'
                     : 'Excluded rows are dropped from the exported file. This is the default.'}
                 </p>
               </div>
