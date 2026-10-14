@@ -16,13 +16,32 @@ import {
   DEFAULT_THRESHOLDS, DEFAULT_ALLOWED_NON_RESPONSE,
   QualityThresholds, AllowedNonResponse, RowFlag, Severity, FlagCategory,
 } from '@/scientific/dataQuality';
+import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
 import { Button, Card } from './ui';
 import { Project } from '@/lib/supabase';
 
 interface SubscaleState {
   id: string; name: string;
+  items: SubscaleGroup['items'];
+  scoringMethod: SubscaleGroup['scoring_method'];
   minValue: number | null; maxValue: number | null;
   scaleType: 'numeric' | 'categorical';
+  labelMap: ResponseScale['label_map'];
+}
+
+function configuredRange(subscale: SubscaleState): { min: number; max: number } | null {
+  if (
+    Number.isFinite(subscale.minValue)
+    && Number.isFinite(subscale.maxValue)
+    && subscale.minValue! <= subscale.maxValue!
+  ) {
+    return { min: subscale.minValue!, max: subscale.maxValue! };
+  }
+  const values = subscale.labelMap.map((entry) => entry.value);
+  if (values.length > 0 && values.every(Number.isFinite)) {
+    return { min: Math.min(...values), max: Math.max(...values) };
+  }
+  return null;
 }
 
 interface Props {
@@ -88,9 +107,12 @@ export function DataQualityScreen({
           const scale = scaleData as ResponseScale | null;
           subs.push({
             id: sub.id, name: sub.name,
+            items: sub.items || [],
+            scoringMethod: sub.scoring_method,
             minValue: scale?.min_value ?? null,
             maxValue: scale?.max_value ?? null,
             scaleType: (scale?.scale_type as 'numeric' | 'categorical') || 'numeric',
+            labelMap: scale?.label_map || [],
           });
         }
         setSubscaleStates(subs);
@@ -106,20 +128,103 @@ export function DataQualityScreen({
 
   // Get scale min/max from first subscale with range, or overall
   const scaleMin = useMemo(() => {
-    const s = subscaleStates.find((s) => s.minValue != null);
-    return s?.minValue ?? null;
+    const range = subscaleStates.map(configuredRange).find((candidate) => candidate !== null);
+    return range?.min ?? null;
   }, [subscaleStates]);
 
   const scaleMax = useMemo(() => {
-    const s = subscaleStates.find((s) => s.maxValue != null);
-    return s?.maxValue ?? null;
+    const range = subscaleStates.map(configuredRange).find((candidate) => candidate !== null);
+    return range?.max ?? null;
   }, [subscaleStates]);
+
+  const qualityNormalization = useMemo(() => {
+    if (!dataset) return null;
+    const configs: SubscaleConfig[] = [];
+    const reverseRangesByColumn: Record<string, { min: number; max: number }> = {};
+    const assignedColumns = new Set<string>();
+
+    for (const subscale of subscaleStates) {
+      if (subscale.items.length === 0) continue;
+      const responseScale = {
+        scaleType: subscale.scaleType,
+        minValue: subscale.minValue ?? undefined,
+        maxValue: subscale.maxValue ?? undefined,
+        labelMap: subscale.labelMap,
+        allowedNonresponse: [
+          ...allowedNonResponse.textValues,
+          ...allowedNonResponse.numericSentinels.map(String),
+        ],
+      };
+      const hasNumericRange = responseScale.scaleType === 'numeric'
+        && Number.isFinite(responseScale.minValue)
+        && Number.isFinite(responseScale.maxValue)
+        && responseScale.minValue! <= responseScale.maxValue!;
+      if (!hasNumericRange && responseScale.labelMap.length === 0) {
+        return null;
+      }
+      configs.push({
+        id: subscale.id,
+        name: subscale.name,
+        items: subscale.items,
+        scoringMethod: subscale.scoringMethod,
+        responseScale,
+      });
+      for (const item of subscale.items) {
+        assignedColumns.add(item.column);
+        const range = configuredRange(subscale);
+        if (item.reverse && range) {
+          reverseRangesByColumn[item.column] = range;
+        }
+      }
+    }
+
+    const unassignedColumns = itemColumns.filter((column) => !assignedColumns.has(column));
+    if (unassignedColumns.length > 0) {
+      const configuredScale = subscaleStates.find((subscale) => configuredRange(subscale) !== null);
+      if (!configuredScale) return null;
+      const range = configuredRange(configuredScale)!;
+      configs.push({
+        id: 'quality-unassigned-items',
+        name: 'Unassigned items',
+        items: unassignedColumns.map((column, order) => ({ column, order, reverse: false })),
+        scoringMethod: 'mean',
+        responseScale: {
+          scaleType: configuredScale.scaleType,
+          minValue: range.min,
+          maxValue: range.max,
+          labelMap: configuredScale.labelMap,
+          allowedNonresponse: [
+            ...allowedNonResponse.textValues,
+            ...allowedNonResponse.numericSentinels.map(String),
+          ],
+        },
+      });
+    }
+    if (configs.length === 0 || itemColumns.some((column) => !assignedColumns.has(column) && unassignedColumns.length === 0)) {
+      return null;
+    }
+
+    const normalizedMatrix = normalizeResponseMatrix(
+      dataset.rows as Record<string, unknown>[],
+      configs,
+      [...allowedNonResponse.textValues, ...allowedNonResponse.numericSentinels.map(String)],
+    );
+    const scaleForMidpoint = subscaleStates.find((subscale) => configuredRange(subscale) !== null) ?? null;
+    const midpointRange = scaleForMidpoint ? configuredRange(scaleForMidpoint)! : null;
+    const responseOptionCount = scaleForMidpoint
+      ? scaleForMidpoint.labelMap.length || (
+        midpointRange!.max - midpointRange!.min + 1
+      )
+      : null;
+    return { normalizedMatrix, reverseRangesByColumn, responseOptionCount };
+  }, [dataset, subscaleStates, itemColumns, allowedNonResponse]);
 
   // ── Compute quality result ──
   const qualityResult = useMemo(() => {
     if (!dataset || itemColumns.length === 0) return null;
+    const rows = dataset.rows as Record<string, unknown>[];
     return computeDataQuality(
-      dataset.rows as Record<string, unknown>[],
+      rows,
       dataset.headers,
       itemColumns,
       Array.from(excludedRows),
@@ -127,8 +232,18 @@ export function DataQualityScreen({
       scaleMax,
       allowedNonResponse,
       thresholds,
+      {
+        rowIds: rows.map((row, index) => {
+          const id = row.ID;
+          const value = typeof id === 'string' || typeof id === 'number' ? String(id).trim() : '';
+          return value || `row-${index}`;
+        }),
+        normalizedMatrix: qualityNormalization?.normalizedMatrix,
+        reverseRangesByColumn: qualityNormalization?.reverseRangesByColumn,
+        responseOptionCount: qualityNormalization?.responseOptionCount ?? undefined,
+      },
     );
-  }, [dataset, itemColumns, excludedRows, scaleMin, scaleMax, allowedNonResponse, thresholds]);
+  }, [dataset, itemColumns, excludedRows, scaleMin, scaleMax, allowedNonResponse, thresholds, qualityNormalization]);
 
   const totalRows = dataset?.rows.length ?? 0;
   const includedCount = totalRows - excludedRows.size;
