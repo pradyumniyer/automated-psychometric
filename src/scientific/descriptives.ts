@@ -1,7 +1,7 @@
 // Descriptive statistics — matching R's output conventions.
 // Skewness/kurtosis default to e1071 type=2 (SPSS/SAS compatible).
 
-import { pnorm } from './distributions';
+import { qt } from './distributions';
 
 export interface DescriptiveStats {
   n: number; validN: number; missing: number;
@@ -90,7 +90,7 @@ export function descriptiveStats(x: number[]): DescriptiveStats {
   const m = mean(v), s = sd(v), seVal = se(v);
   const min = v.length ? Math.min(...v) : NaN;
   const max = v.length ? Math.max(...v) : NaN;
-  const tCrit = validN > 30 ? 1.959963985 : tCritical(0.975, validN - 1);
+  const tCrit = qt(0.975, validN - 1);
   return {
     n, validN, missing: n - validN,
     mean: m, sd: s, variance: variance(v), se: seVal,
@@ -100,13 +100,6 @@ export function descriptiveStats(x: number[]): DescriptiveStats {
     q1: quantile(v, 0.25), q3: quantile(v, 0.75), iqr: quantile(v, 0.75) - quantile(v, 0.25),
     ci95Lower: m - tCrit * seVal, ci95Upper: m + tCrit * seVal,
   };
-}
-
-function tCritical(p: number, df: number): number {
-  if (df <= 0) return NaN;
-  const z = pnorm(p, 0, 1, true);
-  const g1 = 1 / (4 * df), g2 = 1 / (96 * df * df);
-  return z + (z * z + 1) * g1 / 2 + (z ** 3 + 3 * z) * g2 * 2;
 }
 
 export function pearsonCorrelation(x: number[], y: number[]): number {

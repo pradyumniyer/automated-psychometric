@@ -1,72 +1,289 @@
-// Statistical distribution functions — ported from R's C source.
-// All functions match R's stats package output to machine precision.
-
-// Normal distribution: inverse CDF (qnorm) — AS 241, Wichura 1988
-export function qnorm(p: number, mean = 0, sd = 1, lowerTail = true, _logP = false): number {
-  if (isNaN(p) || isNaN(mean) || isNaN(sd)) return NaN;
-  if (sd < 0) return NaN;
-  if (p < 0 || p > 1) return NaN;
-  if (p === 0) return lowerTail ? -Infinity : Infinity;
-  if (p === 1) return lowerTail ? Infinity : -Infinity;
+// Normal distribution functions use a Cody/Cephes erfc approximation and an
+// inverse-tail rational approximation refined against the log CDF.
+export function qnorm(p: number, mean = 0, sd = 1, lowerTail = true, logP = false): number {
+  if (Number.isNaN(p) || Number.isNaN(mean) || Number.isNaN(sd) || sd < 0) return NaN;
+  if (logP ? p > 0 : p < 0 || p > 1) return NaN;
   if (sd === 0) return mean;
 
-  let q = lowerTail ? p : 1 - p;
-  if (q > 0.5) {
-    q = 1 - q;
-    mean = -mean;
-  }
-  const split1 = 0.425;
-  const split2 = 5.0;
-  const const1 = 0.180625;
-  const const2 = 1.6;
-  const a = [3.3871327179, 1.3314666789, 0.1918923377, 0.01597831652, 0.00074511329, 0.00002995785182];
-  const b = [1.4234372777, 0.4230792469, 0.04193942357, 0.0002612971903, 0.000001188385067, -0.00000015273786717];
-  const c = [1.789537973, 0.4231372718, 0.0279868237, 0.0002017218121, 0.000001298668732, -0.00000001406359564];
-  const d = [1.2303324359, 0.2777638438, 0.01917896486, 0.0002742296261, -0.00002063365982, 0.000001492407593];
-
-  let val: number;
-  if (q <= split1) {
-    const r = const1 - q * q;
-    val = q * ((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5];
-    val /= ((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5];
-  } else if (q <= split2) {
-    const r = q - 0.5;
-    const s = r * r;
-    val = r * (((((c[0] * s + c[1]) * s + c[2]) * s + c[3]) * s + c[4]) * s + c[5]);
-    val /= ((((d[0] * s + d[1]) * s + d[2]) * s + d[3]) * s + d[4]) * s + d[5];
+  const logHalf = -Math.LN2;
+  let logSmallTail: number;
+  let negative: boolean;
+  if (logP) {
+    if (p === -Infinity) return lowerTail ? -Infinity : Infinity;
+    if (p === 0) return lowerTail ? Infinity : -Infinity;
+    if (lowerTail) {
+      negative = p <= logHalf;
+      logSmallTail = negative ? p : logOneMinusExp(p);
+    } else {
+      negative = p > logHalf;
+      logSmallTail = negative ? logOneMinusExp(p) : p;
+    }
   } else {
-    const r = q;
-    const s = Math.log(-Math.log(r));
-    val = const2 + s * ((((a[0] * s + a[1]) * s + a[2]) * s + a[3]) * s + a[4]) * s + a[5];
-    val /= 1 + s * ((((b[0] * s + b[1]) * s + b[2]) * s + b[3]) * s + b[4]) * s + b[5];
+    if (p === 0) return lowerTail ? -Infinity : Infinity;
+    if (p === 1) return lowerTail ? Infinity : -Infinity;
+    if (lowerTail) {
+      negative = p < 0.5;
+      logSmallTail = Math.log(negative ? p : 1 - p);
+    } else {
+      negative = p > 0.5;
+      logSmallTail = Math.log(negative ? 1 - p : p);
+    }
   }
-  return mean + sd * val;
+
+  if (logSmallTail === logHalf) return mean;
+  const standardQuantile = normalQuantileFromLogTail(logSmallTail, negative);
+  return mean + sd * standardQuantile;
 }
 
-// Normal distribution CDF (pnorm) — Abramowitz & Stegun 7.1.26
-export function pnorm(x: number, mean = 0, sd = 1, lowerTail = true, _logP = false): number {
-  if (isNaN(x) || isNaN(mean) || isNaN(sd)) return NaN;
-  if (sd < 0) return NaN;
-  if (sd === 0) return x >= mean ? 1 : 0;
-  const x1 = (x - mean) / sd;
-  if (Math.abs(x1) < 7) {
-    const t = 1 / (1 + 0.2316419 * Math.abs(x1));
-    const d = 0.398942280401433;
-    const poly = t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-    let p = 1 - d * Math.exp(-0.5 * x1 * x1) * poly;
-    if (x1 < 0) p = 1 - p;
-    return lowerTail ? p : 1 - p;
+export function pnorm(
+  x: number,
+  mean = 0,
+  sd = 1,
+  lowerTail = true,
+  logP = false,
+): number {
+  if (Number.isNaN(x) || Number.isNaN(mean) || Number.isNaN(sd) || sd < 0) return NaN;
+  if (sd === 0) {
+    const probability = x >= mean ? 1 : 0;
+    return logP ? Math.log(lowerTail ? probability : 1 - probability) : lowerTail ? probability : 1 - probability;
   }
-  if (x1 < 0) {
-    const p = Math.exp(-0.5 * x1 * x1) / (Math.abs(x1) * Math.sqrt(2 * Math.PI));
-    return lowerTail ? p : 1 - p;
+
+  const z = (x - mean) / sd;
+  if (z === 0) return logP ? -Math.LN2 : 0.5;
+  const logSmallTail = Math.LN2 * -1 + logErfcPositive(Math.abs(z) / Math.SQRT2);
+  const wantsSmallTail = lowerTail ? z < 0 : z > 0;
+  if (wantsSmallTail) return logP ? logSmallTail : Math.exp(logSmallTail);
+  if (logP) return Math.log1p(-Math.exp(logSmallTail));
+  return 1 - Math.exp(logSmallTail);
+}
+
+export function pt(q: number, df: number, lowerTail = true, logP = false): number {
+  if (Number.isNaN(q) || Number.isNaN(df) || df <= 0) return NaN;
+  if (df === Infinity) return pnorm(q, 0, 1, lowerTail, logP);
+  if (q === 0) return logP ? -Math.LN2 : 0.5;
+  if (q === Infinity) return logP ? (lowerTail ? 0 : -Infinity) : lowerTail ? 1 : 0;
+  if (q === -Infinity) return logP ? (lowerTail ? -Infinity : 0) : lowerTail ? 0 : 1;
+
+  const x = df / (df + q * q);
+  const logSmallTail = -Math.LN2 + logRegularizedBeta(x, df / 2, 0.5);
+  const wantsSmallTail = lowerTail ? q < 0 : q > 0;
+  if (wantsSmallTail) return logP ? logSmallTail : Math.exp(logSmallTail);
+  if (logP) return Math.log1p(-Math.exp(logSmallTail));
+  return 1 - Math.exp(logSmallTail);
+}
+
+export function qt(p: number, df: number, lowerTail = true, logP = false): number {
+  if (Number.isNaN(p) || Number.isNaN(df) || df <= 0 || (logP ? p > 0 : p < 0 || p > 1)) return NaN;
+  if (df === Infinity) return qnorm(p, 0, 1, lowerTail, logP);
+
+  const logHalf = -Math.LN2;
+  let logSmallTail: number;
+  let negative: boolean;
+  if (logP) {
+    if (p === -Infinity) return lowerTail ? -Infinity : Infinity;
+    if (p === 0) return lowerTail ? Infinity : -Infinity;
+    if (lowerTail) {
+      negative = p <= logHalf;
+      logSmallTail = negative ? p : logOneMinusExp(p);
+    } else {
+      negative = p > logHalf;
+      logSmallTail = negative ? logOneMinusExp(p) : p;
+    }
+  } else {
+    if (p === 0) return lowerTail ? -Infinity : Infinity;
+    if (p === 1) return lowerTail ? Infinity : -Infinity;
+    if (lowerTail) {
+      negative = p < 0.5;
+      logSmallTail = Math.log(negative ? p : 1 - p);
+    } else {
+      negative = p > 0.5;
+      logSmallTail = Math.log(negative ? 1 - p : p);
+    }
   }
-  const p = 1 - Math.exp(-0.5 * x1 * x1) / (x1 * Math.sqrt(2 * Math.PI));
-  return lowerTail ? p : 1 - p;
+  if (logSmallTail === logHalf) return 0;
+
+  const normalMagnitude = -normalQuantileFromLogTail(logSmallTail, true);
+  const nu = df;
+  const z2 = normalMagnitude * normalMagnitude;
+  const hillStart = normalMagnitude
+    + (normalMagnitude * z2 + normalMagnitude) / (4 * nu)
+    + (5 * normalMagnitude * z2 * z2 + 16 * normalMagnitude * z2 + 3 * normalMagnitude) / (96 * nu * nu);
+  let low = 0;
+  let high = Math.max(1, Number.isFinite(hillStart) ? hillStart : 1);
+
+  const logTailAtMagnitude = (magnitude: number) =>
+    pt(negative ? -magnitude : magnitude, df, negative, true);
+  for (let i = 0; i < 1024 && logTailAtMagnitude(high) > logSmallTail; i++) high *= 2;
+
+  for (let i = 0; i < 256; i++) {
+    const middle = low + (high - low) / 2;
+    if (logTailAtMagnitude(middle) > logSmallTail) low = middle;
+    else high = middle;
+    if (high - low <= 1e-13 * Math.max(1, high)) break;
+  }
+  const quantile = (low + high) / 2;
+  return negative ? -quantile : quantile;
+}
+
+function normalQuantileFromLogTail(logProbability: number, negative: boolean): number {
+  const c = [
+    -0.007784894002430293,
+    -0.3223964580411365,
+    -2.400758277161838,
+    -2.549732539343734,
+    4.374664141464968,
+    2.938163982698783,
+  ];
+  const d = [
+    0.007784695709041462,
+    0.3224671290700398,
+    2.445134137142996,
+    3.754408661907416,
+  ];
+  const tailRoot = Math.sqrt(-2 * logProbability);
+  let x = polynomial(tailRoot, c) / (polynomial(tailRoot, d) * tailRoot + 1);
+
+  for (let i = 0; i < 3; i++) {
+    const logCdf = pnorm(x, 0, 1, true, true);
+    const logDensity = -0.5 * x * x - 0.5 * Math.log(2 * Math.PI);
+    x -= (logCdf - logProbability) * Math.exp(logCdf - logDensity);
+  }
+  return negative ? x : -x;
+}
+
+function logErfcPositive(x: number): number {
+  const t = [
+    9.60497373987052,
+    90.0260197203843,
+    2232.00534594684,
+    7003.32514112805,
+    55592.3013010395,
+  ];
+  const u = [
+    33.5617141647503,
+    521.357949780153,
+    4594.3238297098,
+    22629.0000613891,
+    49267.3942608636,
+  ];
+  const p = [
+    2.46196981473531e-10,
+    0.564189564831069,
+    7.4632105644227,
+    48.6371970985681,
+    196.520832956077,
+    526.445194995477,
+    934.528527171958,
+    1027.55188689516,
+    557.535335369399,
+  ];
+  const q = [
+    13.2281951154745,
+    86.707214088599,
+    354.93777888782,
+    975.708501743205,
+    1823.9091668791,
+    2246.33760818711,
+    1656.66309194161,
+    557.535340817728,
+  ];
+  const r = [
+    0.564189583547755,
+    1.27536670759978,
+    5.0190504225118,
+    6.16021097993054,
+    7.40974269950449,
+    2.978866653721,
+  ];
+  const s = [
+    2.26052863220117,
+    9.39603524938001,
+    12.0489539808097,
+    17.0814450747566,
+    9.60896809063286,
+    3.36907645100082,
+  ];
+
+  if (x === Infinity) return -Infinity;
+  if (x < 1) {
+    const erf = x * polynomial(x * x, t) / polynomialWithLeadingOne(x * x, u);
+    return Math.log1p(-erf);
+  }
+  if (x > 1e154) return -Infinity;
+  const numerator = x < 8 ? polynomial(x, p) : polynomial(x, r);
+  const denominator = x < 8 ? polynomialWithLeadingOne(x, q) : polynomialWithLeadingOne(x, s);
+  return -x * x + Math.log(numerator) - Math.log(denominator);
+}
+
+function polynomial(x: number, coefficients: number[]): number {
+  let value = coefficients[0];
+  for (let i = 1; i < coefficients.length; i++) value = value * x + coefficients[i];
+  return value;
+}
+
+function polynomialWithLeadingOne(x: number, coefficients: number[]): number {
+  let value = x + coefficients[0];
+  for (let i = 1; i < coefficients.length; i++) value = value * x + coefficients[i];
+  return value;
+}
+
+function logOneMinusExp(x: number): number {
+  return x < -Math.LN2 ? Math.log1p(-Math.exp(x)) : Math.log(-Math.expm1(x));
+}
+
+function logRegularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return -Infinity;
+  if (x >= 1) return 0;
+
+  const logFront = a * Math.log(x) + b * Math.log1p(-x)
+    - logGamma(a) - logGamma(b) + logGamma(a + b);
+  if (x < (a + 1) / (a + b + 2)) {
+    return logFront + Math.log(betaContinuedFraction(a, b, x)) - Math.log(a);
+  }
+  const logComplement = logFront
+    + Math.log(betaContinuedFraction(b, a, 1 - x))
+    - Math.log(b);
+  return logOneMinusExp(logComplement);
+}
+
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const maxIterations = 10000;
+  const epsilon = 3e-14;
+  const tiny = 1e-300;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - qab * x / qap;
+  if (Math.abs(d) < tiny) d = tiny;
+  d = 1 / d;
+  let result = d;
+
+  for (let m = 1; m <= maxIterations; m++) {
+    const m2 = 2 * m;
+    let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = 1 + aa / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    result *= d * c;
+
+    aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = 1 + aa / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const delta = d * c;
+    result *= delta;
+    if (Math.abs(delta - 1) < epsilon) break;
+  }
+  return result;
 }
 
 // Chi-square CDF (pchisq) via regularized incomplete gamma
-export function pchisq(x: number, df: number, lowerTail = true, _logP = false): number {
+export function pchisq(x: number, df: number, lowerTail = true): number {
   if (x <= 0) return lowerTail ? 0 : 1;
   if (!isFinite(x)) return lowerTail ? 1 : 0;
   const p = lowerIncGammaP(df / 2, x / 2);

@@ -43,7 +43,7 @@ export function shapiroWilk(data: number[]): ShapiroWilkResult {
   let W = 0, pw = 1.0, ifault = 0;
 
   if (n === 3) {
-    a[1] = 0.70710678;
+    a[1] = Math.SQRT1_2;
   } else {
     const an25 = an + 0.25;
     let summ2 = 0.0;

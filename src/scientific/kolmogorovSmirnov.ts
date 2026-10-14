@@ -63,7 +63,7 @@ export function lillieforsTest(data: number[]): KSResult {
     .sort((a, b) => a - b);
 
   const n = x.length;
-  if (n < 4) return { D: NaN, pValue: NaN, n, method: 'Lilliefors (Kolmogorov-Smirnov normality)', lillieforsCorrected: true };
+  if (n < 5) return { D: NaN, pValue: NaN, n, method: 'Lilliefors (Kolmogorov-Smirnov normality)', lillieforsCorrected: true };
 
   // Estimate parameters from the data
   const mean = x.reduce((s, v) => s + v, 0) / n;
@@ -120,45 +120,32 @@ function kolmogorovPValue(D: number, n: number): number {
 // But more precisely, R's nortest uses a polynomial approximation.
 // We implement the Dallal-Wilkinson formula as documented in R's nortest source.
 function lillieforsPValue(D: number, n: number): number {
-  // R nortest::lillie.test uses:
-  // Dadj = (sqrt(n) - 0.01 + 0.855/sqrt(n)) * D
-  // Then:
-  // if Dadj < 0.1: p = 1
-  // else: p = exp(-7.01356 * Dadj^2 * (Dadj^2 + 1) * ... )
-  // Actually the R source uses a lookup-table approach. We use the
-  // Dallal-Wilkinson approximation which is what R implements.
+  const adjustedD = n > 100 ? D * Math.pow(n / 100, 0.49) : D;
+  const adjustedN = Math.min(n, 100);
+  let pValue = Math.exp(
+    -7.01256 * adjustedD ** 2 * (adjustedN + 2.78019)
+    + 2.99587 * adjustedD * Math.sqrt(adjustedN + 2.78019)
+    - 0.122119
+    + 0.974598 / Math.sqrt(adjustedN)
+    + 1.67997 / adjustedN,
+  );
 
-  // From R's nortest source (lillie.test):
-  // Uses the approximation: p = exp(lambda), where lambda is computed
-  // from a polynomial in Dadj.
-
-  const sqrtN = Math.sqrt(n);
-  const Dadj = (sqrtN - 0.01 + 0.855 / sqrtN) * D;
-
-  if (Dadj <= 0.18) return 1.0;
-
-  // Dallal-Wilkinson coefficients (from R nortest source)
-  // p = exp(-7.01356 * Dadj^2 * (1 + 0.2 * Dadj + ...))
-  // More precisely, R uses this polynomial:
-  const d2 = Dadj * Dadj;
-  let p;
-  if (Dadj < 0.3) {
-    // For small D, use: p = exp(-13.448 * d2 + ...)
-    p = Math.exp(-13.448 * d2 + 0.151 * Math.sqrt(d2));
-  } else if (Dadj < 0.5) {
-    p = Math.exp(-12.645 * d2 + 0.062 * Math.sqrt(d2));
-  } else if (Dadj < 0.7) {
-    p = Math.exp(-11.842 * d2);
-  } else if (Dadj < 0.9) {
-    p = Math.exp(-11.039 * d2);
-  } else {
-    p = Math.exp(-10.236 * d2);
+  if (pValue > 0.1) {
+    const k = (Math.sqrt(n) - 0.01 + 0.85 / Math.sqrt(n)) * D;
+    if (k <= 0.302) {
+      pValue = 1;
+    } else if (k <= 0.5) {
+      pValue = 2.76773 - 19.828315 * k + 80.709644 * k ** 2
+        - 138.55152 * k ** 3 + 81.218052 * k ** 4;
+    } else if (k <= 0.9) {
+      pValue = -4.901232 + 40.662806 * k - 97.490286 * k ** 2
+        + 94.029866 * k ** 3 - 32.355711 * k ** 4;
+    } else if (k <= 1.31) {
+      pValue = 6.198765 - 19.558097 * k + 23.186922 * k ** 2
+        - 12.234627 * k ** 3 + 2.423045 * k ** 4;
+    } else {
+      pValue = 0;
+    }
   }
-
-  // Clamp
-  if (p > 1) p = 1;
-  if (p < 0) p = 0;
-  // Ensure p doesn't exceed 1 and is not reported as 0 for very small values
-  if (p < 1e-10) p = 1e-10;
-  return p;
+  return pValue;
 }

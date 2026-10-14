@@ -8,6 +8,7 @@ import {
 import { kurtosis, skewness } from "../src/scientific/descriptives";
 import { scoreDataset, SubscaleConfig } from "../src/scientific/scoring";
 import { shapiroWilk } from "../src/scientific/shapiroWilk";
+import { lillieforsTest } from "../src/scientific/kolmogorovSmirnov";
 
 const fixtureDirectory = new URL("../docs/fixtures/", import.meta.url);
 const csv = readFileSync(new URL("fixture_A.csv", fixtureDirectory), "utf8");
@@ -188,11 +189,27 @@ describe("data quality per scientific-spec sections 2.1–2.5 and 2.7", () => {
     expect.soft(seKurtosis).toBeCloseTo(0.832745618, 9);
   });
 
-  // Deferred until after first users; KS is not shown in the UI. D differs by 4e-8 because pnorm is approximate; p looks wrong versus Dallal-Wilkinson. See step 2d.
-  it.todo("verifies Fixture A Lilliefors KS D");
+  it("verifies Fixture A Lilliefors KS D", () => {
+    const validMeans = getFixtureQuality().result.rowMeanValues
+      .filter((value) => value != null && !isNaN(value));
+    const result = lillieforsTest(validMeans);
 
-  // Deferred until after first users; KS is not shown in the UI. D differs by 4e-8 because pnorm is approximate; p looks wrong versus Dallal-Wilkinson. See step 2d.
-  it.todo("verifies Fixture A Lilliefors KS p-value");
+    expect(
+      Math.abs(result.D - expected.group_row_means.ks_lilliefors_D),
+    ).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("verifies Fixture A Lilliefors KS p-value", () => {
+    const validMeans = getFixtureQuality().result.rowMeanValues
+      .filter((value) => value != null && !isNaN(value));
+    const result = lillieforsTest(validMeans);
+
+    expect(result.pValue).toBeGreaterThanOrEqual(0);
+    expect(result.pValue).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(result.pValue - expected.group_row_means.ks_lilliefors_p_approx),
+    ).toBeLessThanOrEqual(0.1);
+  });
 
   it("preserves row-keyed quality results when the input rows are shuffled", () => {
     const original = getFixtureQuality().result;
