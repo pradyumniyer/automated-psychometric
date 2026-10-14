@@ -1,11 +1,11 @@
-// Scoring engine — value mapping, reverse scoring, subscale scores, interpretation.
-// If no subscales are defined, all non-demographic columns are treated as one "Overall Scale".
+// Scoring engine — shared value normalization, reverse coding, scale scores, and Overall.
 
 export interface SubscaleItemConfig { column: string; order: number; reverse: boolean; }
 export interface ResponseScaleConfig {
   scaleType: 'numeric' | 'categorical';
   minValue?: number; maxValue?: number;
   labelMap?: { label: string; value: number }[];
+  allowedNonresponse?: string[];
 }
 export interface SubscaleConfig {
   id: string; name: string; items: SubscaleItemConfig[];
@@ -15,41 +15,224 @@ export interface SubscaleConfig {
 export interface BandConfig { name: string; minScore: number; maxScore: number; color: string; }
 import { evaluateFormula } from './formula';
 
+export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'out_of_range';
+
+export interface NormalizedMatrix {
+  values: Record<string, number | null>[];
+  states: Record<string, ItemValueState>[];
+}
+
+export interface ScaleScoreDetail {
+  sum: number | null;
+  mean: number | null;
+  score: number | null;
+  missingItems: number;
+  observedItems: number;
+  prorated: boolean;
+}
+
+export interface ScoringOptions {
+  rowIds?: string[];
+  allowedNonresponse?: string[];
+  proration?: { enabled?: boolean; maxMissingPercent?: number };
+  outputs?: Record<string, { sum?: boolean; mean?: boolean }>;
+  overall?: {
+    enabled?: boolean;
+    source?: 'subscales' | 'items';
+    method?: 'sum' | 'mean';
+    flippedSubscaleIds?: string[];
+    includedSubscaleIds?: string[];
+  };
+}
+
 export interface ScoringResult {
   headers: string[];
   rows: Record<string, number | string | null>[];
   subscaleScores: Record<string, (number | null)[]>;
+  scaleScores: Record<string, Record<string, ScaleScoreDetail>>;
   interpretationLabels: Record<string, (string | null)[]>;
   overallScaleScore?: (number | null)[];
+  rowIds: string[];
+  normalizedMatrix: NormalizedMatrix;
   excludedRowIndices: number[];
   configSnapshot: { subscales: SubscaleConfig[]; bands: Record<string, BandConfig[]> };
 }
 
-function mapValue(raw: unknown, scale: ResponseScaleConfig): number | null {
-  if (raw == null || raw === '') return null;
-  const num = Number(raw);
-  if (!isNaN(num) && isFinite(num)) {
-    if (scale.scaleType === 'numeric') {
-      if (scale.minValue != null && num < scale.minValue) return null;
-      if (scale.maxValue != null && num > scale.maxValue) return null;
+interface ScaleRange { min: number; max: number; }
+
+function scaleRange(scale: ResponseScaleConfig): ScaleRange {
+  if (scale.scaleType === 'numeric'
+    && Number.isFinite(scale.minValue)
+    && Number.isFinite(scale.maxValue)
+    && scale.minValue! <= scale.maxValue!) {
+    return { min: scale.minValue!, max: scale.maxValue! };
+  }
+  if (scale.labelMap?.length) {
+    const values = scale.labelMap.map((entry) => entry.value);
+    if (values.every(Number.isFinite)) {
+      return { min: Math.min(...values), max: Math.max(...values) };
     }
-    return num;
   }
-  if (scale.scaleType === 'categorical' && scale.labelMap) {
-    const rawStr = String(raw).trim();
-    const entry = scale.labelMap.find((e) => e.label.trim().toLowerCase() === rawStr.toLowerCase());
-    if (entry) return entry.value;
-  }
-  return null;
+  throw new Error('Set the response scale min/max before scoring.');
 }
 
-function applyReverse(value: number, scale: ResponseScaleConfig): number {
-  if (scale.scaleType === 'numeric') return (scale.minValue ?? 0) + (scale.maxValue ?? 0) - value;
-  if (scale.scaleType === 'categorical' && scale.labelMap?.length) {
-    const values = scale.labelMap.map((e) => e.value);
-    return Math.min(...values) + Math.max(...values) - value;
+function scaleSignature(scale: ResponseScaleConfig): string {
+  return JSON.stringify({
+    scaleType: scale.scaleType,
+    range: scaleRange(scale),
+    labels: scale.labelMap?.map(({ label, value }) => [label.trim().toLowerCase(), value]).sort(),
+    allowed: scale.allowedNonresponse?.map((value) => value.trim().toLowerCase()).sort(),
+  });
+}
+
+function parseNumericString(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mapValue(
+  raw: unknown,
+  scale: ResponseScaleConfig,
+  range: ScaleRange,
+  allowedNonresponse: Set<string>,
+): { value: number | null; state: ItemValueState } {
+  if (raw == null || (typeof raw === 'string' && raw.trim() === '')) {
+    return { value: null, state: 'blank' };
   }
-  return value;
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return { value: null, state: 'blank' };
+  }
+
+  const text = String(raw).trim();
+  if (allowedNonresponse.has(text.toLowerCase())) return { value: null, state: 'allowed' };
+
+  let value: number | null = null;
+  if (scale.scaleType === 'categorical' && scale.labelMap) {
+    const entry = scale.labelMap.find((candidate) => candidate.label.trim().toLowerCase() === text.toLowerCase());
+    if (entry) value = entry.value;
+  }
+  if (value === null) {
+    value = typeof raw === 'number' && Number.isFinite(raw)
+      ? raw
+      : typeof raw === 'string'
+        ? parseNumericString(raw)
+        : null;
+  }
+  if (value === null) return { value: null, state: 'blank' };
+  if (value < range.min || value > range.max) return { value: null, state: 'out_of_range' };
+  return { value, state: 'valid' };
+}
+
+export function normalizeResponseMatrix(
+  rawRows: Record<string, unknown>[],
+  subscales: SubscaleConfig[],
+  allowedNonresponse: string[] = [],
+): NormalizedMatrix {
+  const columnScales = new Map<string, ResponseScaleConfig>();
+  for (const subscale of subscales) {
+    const signature = scaleSignature(subscale.responseScale);
+    for (const item of subscale.items) {
+      const existing = columnScales.get(item.column);
+      if (existing && scaleSignature(existing) !== signature) {
+        throw new Error(`Conflicting response scales configured for item "${item.column}".`);
+      }
+      columnScales.set(item.column, subscale.responseScale);
+    }
+  }
+
+  const ranges = new Map<string, ScaleRange>();
+  const allowedByColumn = new Map<string, Set<string>>();
+  for (const [column, scale] of columnScales) {
+    ranges.set(column, scaleRange(scale));
+    allowedByColumn.set(
+      column,
+      new Set([...allowedNonresponse, ...(scale.allowedNonresponse || [])].map((value) => value.trim().toLowerCase())),
+    );
+  }
+
+  const values: Record<string, number | null>[] = [];
+  const states: Record<string, ItemValueState>[] = [];
+  for (const row of rawRows) {
+    const valueRow: Record<string, number | null> = {};
+    const stateRow: Record<string, ItemValueState> = {};
+    for (const [column, scale] of columnScales) {
+      const mapped = mapValue(row[column], scale, ranges.get(column)!, allowedByColumn.get(column)!);
+      valueRow[column] = mapped.value;
+      stateRow[column] = mapped.state;
+    }
+    values.push(valueRow);
+    states.push(stateRow);
+  }
+  return { values, states };
+}
+
+function reverseValue(value: number, range: ScaleRange): number {
+  return range.min + range.max - value;
+}
+
+function deriveRowIds(rawRows: Record<string, unknown>[], suppliedIds?: string[]): string[] {
+  const ids = suppliedIds ?? rawRows.map((row, index) => {
+    const id = row.ID;
+    const text = typeof id === 'string' || typeof id === 'number' ? String(id) : '';
+    return text.trim() ? text : `row-${index}`;
+  });
+  if (ids.length !== rawRows.length || ids.some((id) => !id.trim())) {
+    throw new Error('Scoring row IDs must be non-empty and match the number of rows.');
+  }
+  if (new Set(ids).size !== ids.length) throw new Error('Scoring row IDs must be unique.');
+  return [...ids];
+}
+
+function scoreValues(values: (number | null)[], method: SubscaleConfig['scoringMethod'], options: ScoringOptions): ScaleScoreDetail {
+  const observed = values.filter((value): value is number => value !== null);
+  const missingItems = values.length - observed.length;
+  const observedItems = observed.length;
+  const total = observed.reduce((sum, value) => sum + value, 0);
+  if (values.length === 0) {
+    return { sum: null, mean: null, score: null, missingItems: 0, observedItems: 0, prorated: false };
+  }
+  let sum: number | null = null;
+  let mean: number | null = null;
+  let prorated = false;
+  const threshold = options.proration?.maxMissingPercent ?? 20;
+  if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100) {
+    throw new Error('Proration threshold must be an integer from 0 to 100.');
+  }
+
+  if (missingItems === 0) {
+    mean = total / values.length;
+    sum = total;
+  } else if (
+    options.proration?.enabled === true
+    && method !== 'custom'
+    && observedItems >= 1
+    && missingItems * 100 <= threshold * values.length
+  ) {
+    mean = total / observedItems;
+    sum = mean * values.length;
+    prorated = true;
+  }
+
+  const score = method === 'mean' ? mean : method === 'sum' ? sum : null;
+  return { sum, mean, score, missingItems, observedItems, prorated };
+}
+
+function outputScore(
+  row: Record<string, number | string | null>,
+  subscale: SubscaleConfig,
+  detail: ScaleScoreDetail,
+  options: ScoringOptions,
+): void {
+  const outputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
+  if (!outputs) {
+    row[`${subscale.name} Score`] = detail.score;
+    return;
+  }
+  if (outputs.sum) row[`${subscale.name} Sum`] = detail.sum;
+  if (outputs.mean) row[`${subscale.name} Mean`] = detail.mean;
+  if (subscale.scoringMethod === 'custom') row[`${subscale.name} Score`] = detail.score;
 }
 
 export function scoreDataset(
@@ -58,76 +241,151 @@ export function scoreDataset(
   subscales: SubscaleConfig[],
   bands: Record<string, BandConfig[]>,
   excludedRowIndices: number[] = [],
+  options: ScoringOptions = {},
 ): ScoringResult {
+  if (new Set(subscales.map((subscale) => subscale.id)).size !== subscales.length) {
+    throw new Error('Subscale IDs must be unique for scoring.');
+  }
+  const prorationThreshold = options.proration?.maxMissingPercent ?? 20;
+  if (!Number.isInteger(prorationThreshold) || prorationThreshold < 0 || prorationThreshold > 100) {
+    throw new Error('Proration threshold must be an integer from 0 to 100.');
+  }
+  const normalizedMatrix = normalizeResponseMatrix(rawRows, subscales, options.allowedNonresponse);
+  const rowIds = deriveRowIds(rawRows, options.rowIds);
+  const ranges = new Map(subscales.map((subscale) => [subscale.id, scaleRange(subscale.responseScale)]));
   const excludedSet = new Set(excludedRowIndices);
-  const scoreHeaders = subscales.map((s) => `${s.name} Score`);
-  const labelHeaders = subscales.map((s) => `${s.name} Interpretation`);
-  const headers = [...rawHeaders, ...scoreHeaders, ...labelHeaders];
-  const outputRows: Record<string, number | string | null>[] = [];
+  const headers = [...rawHeaders];
   const subscaleScores: Record<string, (number | null)[]> = {};
+  const scaleScores: Record<string, Record<string, ScaleScoreDetail>> = {};
   const interpretationLabels: Record<string, (string | null)[]> = {};
-  for (const sub of subscales) { subscaleScores[sub.name] = []; interpretationLabels[sub.name] = []; }
+  const outputRows: Record<string, number | string | null>[] = [];
 
-  for (let rowIdx = 0; rowIdx < rawRows.length; rowIdx++) {
-    const rawRow = rawRows[rowIdx];
-    const isExcluded = excludedSet.has(rowIdx);
+  for (const subscale of subscales) {
+    subscaleScores[subscale.name] = [];
+    scaleScores[subscale.id] = {};
+    interpretationLabels[subscale.name] = [];
+    const outputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
+    if (outputs) {
+      if (outputs.sum) headers.push(`${subscale.name} Sum`);
+      if (outputs.mean) headers.push(`${subscale.name} Mean`);
+      if (subscale.scoringMethod === 'custom') headers.push(`${subscale.name} Score`);
+    } else {
+      headers.push(`${subscale.name} Score`);
+    }
+    headers.push(`${subscale.name} Interpretation`);
+  }
+
+  const overall = options.overall
+    ? options.overall
+    : { enabled: subscales.length > 1, source: 'subscales' as const, method: 'sum' as const };
+  const selectedSubscales = subscales.filter((subscale) =>
+    !overall.includedSubscaleIds || overall.includedSubscaleIds.includes(subscale.id),
+  );
+  if (
+    overall.enabled
+    && (overall.flippedSubscaleIds || []).some((id) =>
+      selectedSubscales.some((subscale) => subscale.id === id && subscale.scoringMethod === 'custom'),
+    )
+  ) {
+    throw new Error('Custom subscales cannot be flipped in Overall.');
+  }
+  if (overall.enabled && selectedSubscales.length >= 2) headers.push('Overall Scale Score');
+
+  const overallScores: (number | null)[] = [];
+  const normalizedSubscaleValues: Record<string, (number | null)[]> = {};
+  for (const subscale of subscales) normalizedSubscaleValues[subscale.id] = [];
+
+  for (let rowIndex = 0; rowIndex < rawRows.length; rowIndex++) {
     const outRow: Record<string, number | string | null> = {};
-    for (const h of rawHeaders) outRow[h] = rawRow[h] != null ? String(rawRow[h]) : null;
+    for (const header of rawHeaders) {
+      const raw = rawRows[rowIndex][header];
+      outRow[header] = raw == null ? null : String(raw);
+    }
 
-    for (const sub of subscales) {
-      const scoreKey = `${sub.name} Score`, labelKey = `${sub.name} Interpretation`;
-      if (isExcluded) {
-        outRow[scoreKey] = null; outRow[labelKey] = 'Excluded';
-        subscaleScores[sub.name].push(null); interpretationLabels[sub.name].push(null);
-        continue;
+    for (const subscale of subscales) {
+      const excluded = excludedSet.has(rowIndex);
+      const values = subscale.items.map((item) => {
+        const mapped = normalizedMatrix.values[rowIndex][item.column];
+        return mapped !== null && item.reverse ? reverseValue(mapped, ranges.get(subscale.id)!) : mapped;
+      });
+      let detail = excluded
+        ? { sum: null, mean: null, score: null, missingItems: values.filter((value) => value === null).length, observedItems: 0, prorated: false }
+        : scoreValues(values, subscale.scoringMethod, options);
+      if (!excluded && subscale.scoringMethod === 'custom' && subscale.customFormula && detail.missingItems === 0) {
+        const formulaValues: Record<string, number | null> = {};
+        subscale.items.forEach((item, itemIndex) => { formulaValues[item.column] = values[itemIndex]; });
+        const formulaResult = evaluateFormula(subscale.customFormula, formulaValues);
+        detail = { ...detail, score: formulaResult.value };
       }
-      const itemValues: number[] = [];
-      for (const item of sub.items) {
-        let mapped = mapValue(rawRow[item.column], sub.responseScale);
-        if (mapped !== null) { if (item.reverse) mapped = applyReverse(mapped, sub.responseScale); itemValues.push(mapped); }
-      }
-      let score: number | null = null;
-      if (sub.scoringMethod === 'custom' && sub.customFormula) {
-        const valueMap: Record<string, number | null> = {};
-        for (const item of sub.items) {
-          let mapped = mapValue(rawRow[item.column], sub.responseScale);
-          if (mapped !== null && item.reverse) mapped = applyReverse(mapped, sub.responseScale);
-          valueMap[item.column] = mapped;
-        }
-        const result = evaluateFormula(sub.customFormula, valueMap);
-        score = result.value;
-      } else if (itemValues.length > 0) {
-        score = sub.scoringMethod === 'mean'
-          ? itemValues.reduce((s, v) => s + v, 0) / itemValues.length
-          : itemValues.reduce((s, v) => s + v, 0);
-      }
-      outRow[scoreKey] = score;
-      subscaleScores[sub.name].push(score);
+      scaleScores[subscale.id][rowIds[rowIndex]] = detail;
+      subscaleScores[subscale.name].push(excluded ? null : detail.score);
+      normalizedSubscaleValues[subscale.id].push(excluded ? null : detail.score);
+      outputScore(outRow, subscale, detail, options);
+
       let label: string | null = null;
-      if (score !== null) {
-        const subBands = bands[sub.name] || bands[sub.id];
-        if (subBands) { const band = subBands.find((b) => score! >= b.minScore && score! <= b.maxScore); if (band) label = band.name; }
+      if (!excluded && detail.score !== null) {
+        const subBands = bands[subscale.name] || bands[subscale.id];
+        const band = subBands?.find((candidate) => detail.score! >= candidate.minScore && detail.score! <= candidate.maxScore);
+        if (band) label = band.name;
       }
-      outRow[labelKey] = label;
-      interpretationLabels[sub.name].push(label);
+      outRow[`${subscale.name} Interpretation`] = excluded ? 'Excluded' : label;
+      interpretationLabels[subscale.name].push(excluded ? null : label);
     }
     outputRows.push(outRow);
   }
 
-  // Compute overall scale score when multiple subscales exist
-  let overallScaleScore: (number | null)[] | undefined;
-  if (subscales.length > 1) {
-    overallScaleScore = [];
-    for (let i = 0; i < rawRows.length; i++) {
-      if (excludedSet.has(i)) { overallScaleScore.push(null); continue; }
-      const rowScores = subscales.map((s) => subscaleScores[s.name][i]).filter((v): v is number => v !== null);
-      overallScaleScore.push(rowScores.length > 0 ? rowScores.reduce((s, v) => s + v, 0) : null);
+  if (overall.enabled && selectedSubscales.length >= 2) {
+    const flippedIds = new Set(overall.flippedSubscaleIds || []);
+    for (let rowIndex = 0; rowIndex < rawRows.length; rowIndex++) {
+      let score: number | null = null;
+      if (!excludedSet.has(rowIndex)) {
+        if (overall.source === 'items') {
+          const itemColumns = selectedSubscales.flatMap((subscale) => subscale.items.map((item) => ({
+            item,
+            flipped: flippedIds.has(subscale.id),
+            range: ranges.get(subscale.id)!,
+          })));
+          const values = itemColumns.map(({ item, flipped, range }) => {
+            const rawValue = normalizedMatrix.values[rowIndex][item.column];
+            if (rawValue === null) return null;
+            const reverse = item.reverse !== flipped;
+            return reverse ? reverseValue(rawValue, range) : rawValue;
+          });
+          score = scoreValues(values, overall.method || 'sum', options).score;
+        } else {
+          const values = selectedSubscales.map((subscale) => {
+            const value = normalizedSubscaleValues[subscale.id][rowIndex];
+            if (value === null) return null;
+            if (!flippedIds.has(subscale.id)) return value;
+            const range = ranges.get(subscale.id)!;
+            const itemCount = subscale.items.length;
+            const min = subscale.scoringMethod === 'sum' ? itemCount * range.min : range.min;
+            const max = subscale.scoringMethod === 'sum' ? itemCount * range.max : range.max;
+            return min + max - value;
+          });
+          if (values.every((value): value is number => value !== null)) {
+            const total = values.reduce((sum, value) => sum + value, 0);
+            score = overall.method === 'mean' ? total / values.length : total;
+          }
+        }
+      }
+      overallScores.push(score);
+      outputRows[rowIndex]['Overall Scale Score'] = score;
     }
-    headers.push('Overall Scale Score');
-    outputRows.forEach((row, i) => { row['Overall Scale Score'] = overallScaleScore![i] ?? null; });
   }
 
-  return { headers, rows: outputRows, subscaleScores, interpretationLabels, overallScaleScore, excludedRowIndices, configSnapshot: { subscales, bands } };
+  return {
+    headers,
+    rows: outputRows,
+    subscaleScores,
+    scaleScores,
+    interpretationLabels,
+    overallScaleScore: overall.enabled && selectedSubscales.length >= 2 ? overallScores : undefined,
+    rowIds,
+    normalizedMatrix,
+    excludedRowIndices,
+    configSnapshot: { subscales, bands },
+  };
 }
 
 // Build an implicit "Overall Scale" from all non-demographic columns when no subscales are defined
@@ -135,11 +393,11 @@ export function buildAutoScale(
   allHeaders: string[],
   demographicColumns: string[],
 ): SubscaleConfig {
-  const itemColumns = allHeaders.filter((h) => !demographicColumns.includes(h));
+  const itemColumns = allHeaders.filter((header) => !demographicColumns.includes(header));
   return {
     id: 'auto-overall',
     name: 'Overall Scale',
-    items: itemColumns.map((col, i) => ({ column: col, order: i, reverse: false })),
+    items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
     scoringMethod: 'sum',
     responseScale: { scaleType: 'numeric' },
   };

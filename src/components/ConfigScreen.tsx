@@ -187,7 +187,7 @@ export function ConfigScreen({
       if (sharedExcludedRows.size === 0 && sr.excluded_rows && sr.excluded_rows.length > 0) {
         onSetExcludedRows(new Set(sr.excluded_rows));
       }
-      setScoringResult({ headers: sr.headers, rows: sr.rows as Record<string, number | string | null>[], subscaleScores: {}, interpretationLabels: {}, excludedRowIndices: sr.excluded_rows || [], configSnapshot: { subscales: [], bands: {} } });
+      setScoringResult({ headers: sr.headers, rows: sr.rows as Record<string, number | string | null>[], subscaleScores: {}, scaleScores: {}, interpretationLabels: {}, overallScaleScore: undefined, rowIds: [], normalizedMatrix: { values: [], states: [] }, excludedRowIndices: sr.excluded_rows || [], configSnapshot: { subscales: [], bands: {} } });
     } else {
       setScoringResult(null);
     }
