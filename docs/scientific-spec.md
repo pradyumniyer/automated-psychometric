@@ -23,6 +23,10 @@
 
 **Scale range.** `L` and `H` are the lowest and highest possible response values. They come from the configured response scale (numeric min/max, or min/max of the label map). They are **never silently inferred** for scoring. If missing, scoring is blocked with a visible message ("Set the response scale min/max"). DQ may infer from data for display, labelled "inferred".
 
+**One normalized matrix.** Scoring, data quality, reliability, descriptives, outliers and item analysis must all read the **same normalized data matrix**, produced by one function that applies the state table above (value mapping, range check, allowed non-response). No module may call `Number()` on raw cells itself. (Fixes the old disagreement between scoring and reliability for text responses.)
+
+**Numeric parsing.** Trim whitespace including non-breaking spaces. The import preview has a **number format** setting: *decimal point* (default) or *decimal comma*. `1,5` is read as 1.5 only under decimal comma; otherwise it is flagged, never guessed. Thousands separators are removed only under the chosen format. Spreadsheet date serials and booleans in item columns are flagged, not silently converted.
+
 **Precision.** Do not round internally. Round only for display. Compare thresholds using integer arithmetic where possible (see 1.3).
 
 **Estimators (fixed, match jamovi/SPSS):**
@@ -121,6 +125,8 @@ Flags are **suggestions**; the user decides on exclusion.
 - Histogram with normal curve; Q–Q plot optional.
 - **Kolmogorov–Smirnov, Lilliefors-corrected** (Lilliefors, 1967) is shown next to Shapiro–Wilk: statistic D exact; p-value by the Dallal & Wilkinson (1986) approximation as in R `nortest::lillie.test`; computed for n ≥ 5. Plain KS with estimated parameters must never be shown. The existing `lillieforsTest` already follows this method; it must pass Fixture A and be cross-checked against R (`nortest::lillie.test`) when R is available.
 - **Never exclude for non-normality, and the product does not offer removing observations to improve a test result.** Exclusions are rule-based (2.1–2.5), logged and user-approved. Copy must say what the test does and does not mean in plain language, and that large samples reject trivially.
+- **No binary "normal / not normal" verdict** anywhere (screen, report, export). Show the statistic and p-value with wording such as "p < .05 suggests a departure from normality; read it alongside the plots and the sample size".
+- **Accurate distribution functions.** p-values and critical values must use accurate algorithms: the normal CDF per R/Cody (not the Abramowitz–Stegun 7.1.26 approximation), an exact Student-t quantile for 95% confidence intervals (not a normal correction), and functions that honour any `log.p`-style argument they expose (or do not expose it). Each must agree with SciPy/R to 1e-9 on a test grid that includes the tails. A vetted library may be used with approval (rule 6).
 
 ### 2.8 Candidate checks (need UI approval before building; thresholds are conventions, editable)
 - **Duplicate respondents:** rows sharing the same respondent ID, or identical answers on all items. Flag only; the user decides.
@@ -225,6 +231,9 @@ Negative corrected `r_it`; difficulty p < 0.10 or > 0.90. No automatic verbal la
 One row per person per item: person ID, item, raw response, scored value, scale.
 Not in v1: IRT parameters.
 
+## 9. Provenance and stale results
+Every computed result stores: dataset version (hash of the normalized matrix), configuration hash, spec version, library version, missing-data policy, timestamp. Exports state these. **A saved result whose dataset or configuration hash no longer matches is never shown or exported**; the user sees "Scores are out of date. Run scoring again." (Fixes silent stale scores.)
+
 ## Appendix A — Known differences between the existing Bolt code and this spec (fix during rebuild)
 
 | # | Area | Existing code | This spec |
@@ -240,6 +249,13 @@ Not in v1: IRT parameters.
 | A9 | Band matching with fractional scores | Inclusive min/max, fractional scores can fall in gaps | Round to band precision (1.5) |
 | A10 | Cronbach's α | `reliability.ts` exists, not wired to UI | Wired in Phase 1 (section 3) |
 | A11 | KS / MAD / Mahalanobis modules | Present in `src/scientific/`; KS not shown in the UI | KS (Lilliefors) is shown in Data quality (2.6); MAD / Mahalanobis stay out of the v1 UI |
+| A12 | `pnorm` | Abramowitz–Stegun 7.1.26 approximation | Accurate algorithm (2.6) |
+| A13 | `tCritical` for 95% CIs | Normal-quantile correction, no error bounds | Exact Student-t quantile (2.6) |
+| A14 | Reliability input | `Number()` on raw cells, so text responses become NaN | Same normalized matrix as scoring (§0) |
+| A15 | `_logP` argument | Accepted but ignored | Honour it or remove it |
+| A16 | Normality conclusion | Binary `isNormal` | Statistic + p + plain-language note, no verdict (2.6) |
+| A17 | Stale saved scores | Shown if exclusion state matches | Hash check, blocked when stale (§9) |
+| A18 | Exclusions | Row positions | Stable row IDs (`DATABASE.md`) |
 
 ## Appendix B — References (verify before citing)
 Aiken (1985) *Educational and Psychological Measurement*; Ayre & Scally (2014) *Measurement and Evaluation in Counseling and Development*; Cronbach (1951) *Psychometrika*; Downey & King (1998) *Journal of General Psychology*; Greenleaf (1992) *Public Opinion Quarterly*; Hyndman & Fan (1996) *The American Statistician* (quantile types); Joanes & Gill (1998) *The Statistician*; Johnson (2005) *Journal of Research in Personality*; Lawshe (1975) *Personnel Psychology*; Lilliefors (1967) *JASA*; Meade & Craig (2012) *Psychological Methods*; Royston (1995) *Applied Statistics* (AS R94); Tukey (1977) *Exploratory Data Analysis*.

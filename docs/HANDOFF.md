@@ -13,7 +13,7 @@
 8. DATABASE.md, TRD.md: storage and stack
 9. ui-design-brief.md: look and workbench layout
 10. IMPLEMENTATION_PLAN.md: order of work
-11. acceptance-phase1.md, security/*: when it is done and safe
+11. acceptance-phase1.md, security/*, **audit/**: when it is done and safe; `audit/` holds the independent review of the prototype and how each finding is addressed
 12. DECISIONS.md and decisions/: locked and open decisions
 
 ## Non-negotiables

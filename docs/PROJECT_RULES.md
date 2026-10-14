@@ -22,6 +22,7 @@ Browser-based, **local-first** workbench for questionnaire and expert-panel data
 13. APA/results text is **draft only**, built from computed numbers; never fabricated statistics.
 14. Template libraries: license-safe instruments only.
 15. Privacy copy must match the code.
+17. **AI is never the authority for numbers.** If AI features are ever added, they only propose (mappings, formulas, explanations); deterministic, tested code computes every score and statistic; outputs need explicit user approval and are logged; no raw respondent data goes to a third-party model by default.
 16. **No feature may remove or alter observations merely to improve a statistical test result.** Exclusions are rule-based, logged, and user-approved (ADR 0013). If analytics or error tools are added, disclose them.
 
 ## Before saying "done"

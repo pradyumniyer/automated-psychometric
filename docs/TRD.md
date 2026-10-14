@@ -93,6 +93,9 @@ None until Phase 1h. Then: public keys only in the client (`VITE_*`), webhook se
 - Upload: allow-list of types (CSV, XLSX), **size cap**, **decompressed-size and sheet/row/column caps** for XLSX (zip-bomb guard), parse in memory only.
 - Export: **neutralize spreadsheet formula injection**: any cell string starting with `=`, `+`, `-` (when not a number) or `@` is prefixed with an apostrophe/space in CSV and written as a string type in XLSX.
 - No `eval` / `new Function` anywhere (test enforces).
+- Upload validation checks extension **and** file signature; drag-and-drop uses the same validator. Parsing, scoring and quality checks run in a **Web Worker** with cancellation so large files do not freeze the UI.
+- Global React error boundary; every async loader has pending/success/error states; export errors are shown.
+- Header and template matching normalize text (Unicode NFKC + case-fold) and only *suggest*; low-confidence matches are never applied automatically.
 - Error reporting (if added) must never capture cell contents.
 - Dependencies: lockfile, `npm audit` in CI, Dependabot or equivalent, review before adding any package.
 

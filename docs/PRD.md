@@ -77,7 +77,7 @@ Tenancy early on: one browser profile, local projects. An account (later) exists
 | P1-13 | Custom-formula fixes F1–F3 (`FORMULA_SPEC.md`) |
 | P1-14 | Conformance with scientific-spec Appendix A, proven by fixtures |
 | P1-15 | Replace the vulnerable spreadsheet dependency (ADR 0005) |
-| P1-16 | Loading / empty / error states on every data screen; no silent failures |
+| P1-16 | Loading / empty / error states on every data screen; **global error boundary**; atomic imports and saves; export failures always shown; no silent failures |
 | P1-17 | Accounts: sign up / sign in via a proven auth provider; account holds email + plan only |
 | P1-18 | Subscription billing (provider per O1) with verified, idempotent webhooks |
 | P1-19 | Server-side license/entitlements (`GET /api/license`); Pro features gated by it |
@@ -87,6 +87,8 @@ Tenancy early on: one browser profile, local projects. An account (later) exists
 | P1-23 | Diagnostics report workbook (Excel, one sheet per section: descriptives, reliability, normality, response quality, missing data, exclusions) |
 | P1-24 | Overall composition (combine subscale scores with optional flip, or from all items) and optional sum / mean / both outputs (ADR 0012) |
 | P1-25 | Kolmogorov–Smirnov (Lilliefors) shown beside Shapiro–Wilk in Data quality |
+| P1-26 | Locale-aware number import (decimal point or comma, confirmed in import preview); header and template matching only suggest, with Unicode normalization, and the user confirms |
+| P1-27 | Provenance on every result and export; stale results blocked; stable row IDs for exclusions |
 
 ### 4.3 Content validity + item analysis (Phase 2)
 | ID | Feature |
@@ -134,7 +136,8 @@ Cloud warehouse for raw responses; full SEM/IRT suite; full EMA capture app; CAQ
 | Privacy | Grids never required on our backend; Privacy Policy matches the code |
 | Performance | Usable at thesis/lab sizes in-browser; clear limits messaging; virtualized grid |
 | Security | No secrets in the client beyond public keys; CSP/HSTS on host; upload validation; dependency audit in CI |
-| Accessibility | Keyboard, labels, contrast (WCAG 2.1 AA direction) |
+| Accessibility | Keyboard, labels, contrast (WCAG 2.1 AA direction); modal dialogs with focus trap, Escape and restore; state never conveyed by colour alone |
+| Supported environments | Modern desktop browsers; phones/tablets best-effort (the grid is wide by design) |
 | Reliability | No silent failures on import/export; visible errors |
 | Compliance posture | DPDP (India) / GDPR-minded; user is controller of files processed locally; no certification claims |
 

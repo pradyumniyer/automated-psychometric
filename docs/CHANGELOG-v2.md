@@ -30,6 +30,8 @@ Local-first grids with accounts, billing, server-side plans (Phase 1h) · cloud 
 
 18. **Cloud resume accepted** (ADR 0011). Feature defaults for content validity, item analysis (now with answer-key scoring, discrimination index, distractor analysis), longitudinal (multi-file, composite key, ID-match suggestions) and EMA (lags) **decided by SME recommendation** (you delegated); new `PAINPOINT_BACKLOG.md` and pre-processing add-ons (cleaning log, codebook, import presets, extra DQ flags, export pack).
 
+19. **Independent code review folded in** (`audit/`): exclusions now use stable row IDs instead of positions; results carry provenance hashes and stale results are blocked; one normalized data matrix for all statistics; accurate normal/t functions; locale-aware number import; no binary "normal" verdict; atomic imports; error boundary and Web Worker; extra upload and matching rules.
+
 ## B. Conflicts fixed
 - `data-model.md` vs `DATABASE.md` (proration unit, field names, template scope/kind, project types, "encrypted backup") → one `DATABASE.md`; proration stored as an integer percent.
 - IndexedDB/OPFS vs Dexie → Dexie.

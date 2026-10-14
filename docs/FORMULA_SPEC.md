@@ -27,6 +27,7 @@ factor = number | identifier | '(' expr ')' | '-' factor | '+' factor
 | F1 | Column names with spaces or hyphens (e.g. `Item 1`) cannot be written as identifiers | Allow referencing by a **column alias** (auto-generated safe name such as `Item_1`) or by quoting: `"Item 1"` |
 | F2 | A numeric literal like `1.2.3` is silently parsed as `1.2` | Reject with a syntax error |
 | F3 | Validation evaluates with all items = 1, so `x / (a - b)` falsely reports "could not evaluate" | Validate **syntax and identifiers** only; do not reject on evaluation of dummy values |
+| F5 | Invalid formulas, missing inputs and divide-by-zero become silent nulls | Show a per-scale summary of how many rows failed and why (missing input / divide by zero), with a way to list those rows |
 | F4 | No documented way to say "mean of these items" | Not in v1. If wanted, add as an ADR (e.g. `SUM(...)`, `MEAN(...)`) with tests |
 
 ## Tests

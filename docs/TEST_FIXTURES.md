@@ -42,6 +42,15 @@ Machine-readable expected values for **every** row: `docs/fixtures/fixture_A_exp
 
 Lawshe and Aiken **critical values** are not listed here on purpose: fill them from the published tables in Phase 2 (see scientific-spec section 4).
 
+### 2b. Invariant (metamorphic) tests, in addition to known answers
+- Reversing an item twice restores the original values.
+- Shuffling row order does not change any aggregate statistic or any flag for a given row.
+- Duplicating every observation leaves means, correlations and α unchanged (variances change only by the n/(n−1) factor).
+- A categorical scale mapped to numbers gives the same scores, reliability and DQ results as the equivalent numeric dataset.
+- Adding a constant to all responses of a scale changes means by that constant and leaves SD, correlations and α unchanged.
+- The same normalized matrix feeds scoring and reliability (no module differs on a given cell).
+- A saved result is rejected after any change to data or configuration (hash mismatch).
+
 ## 3. Fixture A: edge-case rows (expected)
 
 | Row | What it tests | Key expected values |

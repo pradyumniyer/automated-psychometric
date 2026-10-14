@@ -27,6 +27,7 @@ What changed from v1 and what needs your sign-off: [CHANGELOG-v2.md](./CHANGELOG
 | [roadmap.md](./roadmap.md) | Phases overview |
 | [DECISIONS.md](./DECISIONS.md) + [decisions/](./decisions/) | Locked and open decisions |
 | [security/](./security/) | Threat model + checklist |
+| [audit/](./audit/) | Independent code review of the prototype + mapping of each finding to the docs |
 
 ## Folded into other files (the old files were removed)
 `system-design.md` → PRD §2, §5–7 · `architecture.md` → TRD §1, §4–5, §10 · `data-model.md` → DATABASE · `user-flows.md` → APP_FLOW.

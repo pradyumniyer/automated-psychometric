@@ -25,7 +25,7 @@ This file replaces the old `data-model.md`.
 | last_tab | string? | UX restore |
 
 ### `datasets`
-| id (PK) | project_id (FK, indexed) | name | sheet_name? | headers: string[] | rows: JSON (array of row arrays; **one representation, row arrays**) | row_meta? | import_meta? (file name, header_row, data_start_row) | created_at |
+| id (PK) | project_id (FK, indexed) | name | sheet_name? | headers: string[] | rows: JSON (array of row arrays; **one representation, row arrays**) | row_ids: string[] (stable ID per row, assigned at import, never reused or renumbered) | row_meta? | import_meta? (file name, header_row, data_start_row) | created_at |
 
 ### `survey_configs` (one per dataset)
 | Column | Type | Notes |
@@ -45,10 +45,10 @@ This file replaces the old `data-model.md`.
 | updated_at | number | |
 
 ### `exclusion_state` (one per dataset)
-`dataset_id` (PK), `excluded_row_indices: number[]` (0-based indices into `datasets.rows`).
+`dataset_id` (PK), `excluded_row_ids: string[]` (stable row IDs from `datasets.row_ids`; **never positions**, so re-imports, filtering or reordering cannot shift exclusions onto other people).
 
 ### `score_results` (cache, optional)
-`dataset_id` (PK), `computed_at`, `payload` JSON (per-row scores, band labels, `prorated`, `n_imputed_items`). Always recomputable from rows + config.
+`dataset_id` (PK), `computed_at`, `dataset_hash`, `config_hash`, `spec_version`, `payload` JSON (per-row scores keyed by row ID, band labels, `prorated`, `n_imputed_items`). Always recomputable from rows + config; **stale hashes block display and export** (scientific-spec §9).
 
 ### `templates`
 `id` (PK), `name`, `kind` (`instrument` \| `import` \| `dq`), `payload` (config snapshot **without rows**; includes proration threshold if the instrument manual prescribes one), `created_at`. Free tier: count ≤ 2, enforced in app logic.
@@ -68,6 +68,8 @@ dataset_id, id_column, timestamp_column, item_columns[], bin_rules JSON.
 
 ### `settings` (key–value)
 `key` (PK), `value` JSON. Keys: `theme`, `tour_seen`, `schema_version`.
+
+**Atomic writes:** an import writes dataset, row IDs, config and history in **one Dexie transaction**; auto-save of configuration is also one transaction. Partial imports and half-saved configurations must be impossible.
 
 ## 3. Relationships
 ```
