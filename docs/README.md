@@ -7,6 +7,7 @@ What changed from v1 and what needs your sign-off: [CHANGELOG-v2.md](./CHANGELOG
 | Doc | Purpose |
 |-----|---------|
 | [PRODUCT.md](./PRODUCT.md) | **Product walkthrough: what users see, click and get** |
+| [PROGRESS.md](./PROGRESS.md) | **Where the build stands (steps done, findings, open items)** |
 | [PHASE1_BRIEF.md](./PHASE1_BRIEF.md) | One-page scope of the first release |
 | [UI_FREEZE.md](./UI_FREEZE.md) | **The Bolt UI is frozen**; what may and may not change |
 | [AS_BUILT.md](./AS_BUILT.md) | What the Bolt app does, plus a code audit |

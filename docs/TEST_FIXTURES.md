@@ -79,7 +79,7 @@ Rows `P01`–`P24` are generated; their expected values are in the JSON. Four of
 | Shapiro–Wilk W | 0.980381 |
 | Shapiro–Wilk p | 0.835585 |
 | Lilliefors KS D | 0.110600 |
-| Lilliefors KS p (Dallal–Wilkinson approx.) | 0.452928 |
+| Lilliefors KS p (statsmodels reference; **our exact nortest value is 0.458574**, see §9.3) | 0.452928 |
 
 ## 5. Fixture A: reliability (listwise complete cases, reverse-coded, no proration)
 
@@ -99,7 +99,7 @@ Per-item α-if-deleted and corrected item–total r are in the JSON under `relia
 | Shapiro–Wilk W | absolute 1e-4 |
 | Shapiro–Wilk p | absolute 1e-3 |
 | Lilliefors D | absolute 1e-9 |
-| Lilliefors p | absolute 1e-3 |
+| Lilliefors p | absolute 1e-3 only when both our p and the reference p are ≤ 0.1; otherwise a loose sanity band (§9.3) |
 | Flags and counts | exact |
 
 ## 7. How to use these in the build
@@ -137,6 +137,11 @@ This file has text and out-of-range values blanked, reverse-coded copies `Q3r`, 
 2. **Exploration → Descriptives** on `RowMean` with skewness, kurtosis, Shapiro–Wilk, quartiles → compare with section 4.
 3. Compare the per-item α-if-dropped and item–rest r with `fixture_A_expected.json` → `reliability`.
 Record the outcome here.
+
+### 9.3 Normality and distribution references (October 2026)
+- Independent reference files: `docs/fixtures/distributions_reference.json` (pnorm, qnorm, pt, qt; relative tolerance 1e-9, 590 assertions) and `docs/fixtures/normality_reference.json` (17 datasets, n = 3 to 2000: Shapiro–Wilk W 1e-6 / p 1e-4; Lilliefors D 1e-9). Regenerate with `docs/fixtures/generate_reference_files.py`.
+- **Lilliefors p:** our implementation follows R's `nortest::lillie.test` exactly. statsmodels differs above p = 0.1 (simulation table; e.g. Fixture A: nortest 0.4586 vs statsmodels 0.4529; `normal_n500`: 0.665 vs 0.735). Tests compare strictly (1e-3) only when both p-values are ≤ 0.1; above that they check p in [0, 1], within 0.1 of the reference, and monotone in D for fixed n. `normal_n12` (nortest 0.10097 vs statsmodels 0.09767) has an explicit exact-value test. To be cross-checked in R when available.
+- **Shapiro–Wilk fix:** the old W = 0.0024 for Fixture A came from the `qnorm` sign bug (spec Appendix A19), not from the AS R94 algorithm. Correct values: W = 0.980381, p = 0.835585.
 
 ## 8. Regenerating
 

@@ -1,6 +1,6 @@
 # Psychometric Prep: instructions for coding agents
 
-Read `docs/PROJECT_RULES.md` first, then `docs/HANDOFF.md`. Build only the current step of `docs/IMPLEMENTATION_PLAN.md`.
+Read `docs/PROJECT_RULES.md` first, then `docs/HANDOFF.md` and `docs/PROGRESS.md` (current build state). Build only the current step of `docs/IMPLEMENTATION_PLAN.md`.
 
 Non-negotiables:
 - Local-first: respondent data never leaves the user's browser. No server-side grid storage.

@@ -1,7 +1,7 @@
 # Handoff Guide (v2)
 
 ## Reading order for a new builder (human or AI)
-0. PRODUCT.md: the product walkthrough (what the app is and does)
+0. PRODUCT.md: the product walkthrough (what the app is and does); PROGRESS.md: where the build currently stands
 1. HANDOFF.md (this file)
 2. PHASE1_BRIEF.md: what is in and out for the first release
 3. PROJECT_RULES.md: standing constraints

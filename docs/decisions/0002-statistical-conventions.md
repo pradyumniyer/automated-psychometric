@@ -11,5 +11,7 @@
 - DQ missingness flag: strictly greater than 20%.
 - Row means use reverse-coded values once a config exists.
 
+- Lilliefors p-values follow R's `nortest::lillie.test` exactly (R is the reference); statsmodels is used for comparison only below p = 0.1.
+
 **Why:** reproducibility, standard practice, and testability against reference software.
 **Consequence:** the existing code differs in several places (spec Appendix A); fixtures decide.
