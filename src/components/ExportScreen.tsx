@@ -169,14 +169,6 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     return null;
   }, [dataset, savedScoringResult, savedExclusionsStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
 
-  // ── Exclusion filtering ──
-  // Drop excluded: omit excluded rows entirely.
-  // Keep with flag: include ALL rows with complete data — no "excluded" column appended.
-  function applyExclusions<T extends Record<string, unknown>>(rows: T[]): T[] {
-    if (keepExcluded) return rows;
-    return rows.filter((_, i) => !excludedRows.has(i));
-  }
-
   // ── Filename helper ──
   const fileName = (type: ExportType, ext: 'csv' | 'xlsx'): string => {
     const proj = project.name.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
@@ -184,7 +176,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   };
 
   // ── Export handlers ──
-  const doExport = (type: ExportType, fmt: 'csv' | 'xlsx') => {
+  const doExport = async (type: ExportType, fmt: 'csv' | 'xlsx') => {
     if (!dataset) return;
     const key = `${type}_${fmt}`;
     setExporting(key);
@@ -194,30 +186,28 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
 
       if (type === 'cleaned_raw') {
         headers = dataset.headers;
-        rows = applyExclusions(dataset.rows as Record<string, unknown>[]);
+        rows = dataset.rows as Record<string, unknown>[];
       } else if (type === 'items_only') {
         headers = itemColumns;
-        const itemRows = (dataset.rows as Record<string, unknown>[]).map((row) => {
+        rows = (dataset.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of itemColumns) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(itemRows);
       } else if (type === 'scored') {
         if (!scoredResult) throw new Error('Scoring not available');
         headers = scoredResult.headers;
-        rows = applyExclusions(scoredResult.rows as Record<string, unknown>[]);
+        rows = scoredResult.rows as Record<string, unknown>[];
       } else if (type === 'scores_demo') {
         if (!scoredResult) throw new Error('Scoring not available');
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
         const scoreCols = scoredResult.headers.filter((h) => !dataset.headers.includes(h));
         headers = [...demoList, ...scoreCols];
-        const filteredRows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
+        rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(filteredRows);
       } else if (type === 'scores_only') {
         if (!scoredResult) throw new Error('Scoring not available');
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
@@ -225,23 +215,24 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
           .filter((h) => !dataset.headers.includes(h))
           .filter((h) => !h.endsWith(' Interpretation'));
         headers = [...demoList, ...scoreCols];
-        const filteredRows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
+        rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
           return out;
         });
-        rows = applyExclusions(filteredRows);
       } else {
         return;
       }
 
       const fn = fileName(type, fmt);
-      if (fmt === 'csv') exportToCSV(headers, rows, fn);
-      else exportToXLSX(headers, rows, fn);
-    } catch (e) {
-      // surfaced by disabling state; ignore
+      const exportOptions = { excludedRows, keepExcluded };
+      if (fmt === 'csv') exportToCSV(headers, rows, fn, exportOptions);
+      else await exportToXLSX(headers, rows, fn, exportOptions);
+    } catch (error) {
+      console.error('Failed to export dataset.', error);
+    } finally {
+      setExporting(null);
     }
-    setExporting(null);
   };
 
   // ── Empty / loading states ──

@@ -652,11 +652,16 @@ export function ConfigScreen({
     setStatusMsg({ type: 'info', text: 'Template unlinked. Changes will no longer update the template.' });
   };
 
-  const handleExport = (fmt: 'csv' | 'xlsx') => {
+  const handleExport = async (fmt: 'csv' | 'xlsx') => {
     if (!scoringResult || !dataset) return;
     const fn = `${project.name}_${dataset.sheet_name || 'data'}_scored.${fmt}`;
-    if (fmt === 'csv') exportToCSV(scoringResult.headers, scoringResult.rows, fn);
-    else exportToXLSX(scoringResult.headers, scoringResult.rows, fn);
+    const exportOptions = { excludedRows: sharedExcludedRows, keepExcluded: true };
+    try {
+      if (fmt === 'csv') exportToCSV(scoringResult.headers, scoringResult.rows, fn, exportOptions);
+      else await exportToXLSX(scoringResult.headers, scoringResult.rows, fn, exportOptions);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Export failed: ${(error as Error).message}` });
+    }
   };
 
   const undoAction = async (action: ActionHistory) => {

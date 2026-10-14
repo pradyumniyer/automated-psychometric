@@ -1,7 +1,7 @@
 // File parsing — CSV and XLSX import with multi-tab support.
 import Papa from 'papaparse';
 import readXlsxFile from 'read-excel-file/browser';
-import writeXlsxFile from 'write-excel-file/browser';
+import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/browser';
 import { validateImportFile, validateParsedSheets } from './importLimits';
 
 export interface ParsedSheet {
@@ -379,23 +379,91 @@ export async function parseFile(file: File): Promise<ParsedSheet> {
   return parseSheet(file, info.sheets[0].name);
 }
 
+export interface ExportOptions {
+  excludedRows?: ReadonlySet<number>;
+  keepExcluded?: boolean;
+}
+
+function sanitizeCsvText(value: string): string {
+  if (/^[=+@]/.test(value) || (value.startsWith('-') && !Number.isFinite(Number(value)))) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+function csvValue(value: unknown): unknown {
+  return typeof value === 'string' ? sanitizeCsvText(value) : value ?? '';
+}
+
+export function createCsvContent(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  options: ExportOptions = {},
+): string {
+  const excludedRows = options.excludedRows ?? new Set<number>();
+  const keepExcluded = options.keepExcluded ?? false;
+  const outputHeaders = keepExcluded ? [...headers, 'Excluded'] : headers;
+  const outputRows = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ index }) => keepExcluded || !excludedRows.has(index))
+    .map(({ row, index }) => [
+      ...headers.map((header) => csvValue(row[header])),
+      ...(keepExcluded ? [excludedRows.has(index)] : []),
+    ]);
+  return Papa.unparse([
+    outputHeaders.map(sanitizeCsvText),
+    ...outputRows,
+  ]);
+}
+
+function xlsxCell(value: unknown): Cell {
+  if (typeof value === 'number' && Number.isFinite(value)) return { value, type: Number };
+  if (typeof value === 'boolean') return { value, type: Boolean };
+  return { value: value == null ? '' : String(value), type: String };
+}
+
+export function createXlsxSheetData(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  options: ExportOptions = {},
+): SheetData {
+  const excludedRows = options.excludedRows ?? new Set<number>();
+  const keepExcluded = options.keepExcluded ?? false;
+  const sheetData: SheetData = [headers.map((header) => xlsxCell(header))];
+  rows.forEach((row, index) => {
+    if (!keepExcluded && excludedRows.has(index)) return;
+    sheetData.push(headers.map((header) => {
+      const cell = xlsxCell(row[header]);
+      return keepExcluded && excludedRows.has(index) && typeof cell === 'object' && cell
+        ? { ...cell, backgroundColor: '#FFFF00' }
+        : cell;
+    }));
+  });
+  return sheetData;
+}
+
 // Export to CSV
-export function exportToCSV(headers: string[], rows: Record<string, unknown>[], fileName: string) {
-  const data = [headers, ...rows.map((row) => headers.map((header) => row[header] ?? null))];
-  const blob = new Blob([Papa.unparse(data)], { type: 'text/csv;charset=utf-8' });
+export function exportToCSV(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  fileName: string,
+  options: ExportOptions = {},
+) {
+  const blob = new Blob([createCsvContent(headers, rows, options)], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = fileName;
   anchor.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 // Export to XLSX
-export function exportToXLSX(headers: string[], rows: Record<string, unknown>[], fileName: string): Promise<void> {
-  const data = [
-    headers,
-    ...rows.map((row) => headers.map((header) => row[header] ?? null)),
-  ];
-  return writeXlsxFile(data, { sheet: 'Scored Data' }).toFile(fileName);
+export function exportToXLSX(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  fileName: string,
+  options: ExportOptions = {},
+): Promise<void> {
+  return writeXlsxFile(createXlsxSheetData(headers, rows, options), { sheet: 'Scored Data' }).toFile(fileName);
 }
