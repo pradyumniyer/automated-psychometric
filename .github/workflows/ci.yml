@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck && npm exec -- tsc --noEmit -p tsconfig.node.json
+
+      - name: Build
+        run: npm run build
+
+      # Becomes blocking at the end of Phase 0; known failure: 17 lint errors.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      # Becomes blocking at the end of Phase 0; known high advisories in xlsx and ws.
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
