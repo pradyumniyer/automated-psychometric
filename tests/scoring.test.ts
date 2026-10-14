@@ -322,4 +322,48 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
     });
     expect(flipped.overallScaleScore).toEqual([4]);
   });
+
+  it("defaults Overall to the mean when all subscales use mean", () => {
+    const positive = makeSubscale("Positive", ["P1", "P2", "P3", "P4"]);
+    positive.scoringMethod = "mean";
+    const negative = makeSubscale("Negative", ["N1", "N2", "N3", "N4", "N5", "N6"]);
+    negative.scoringMethod = "mean";
+    const row = {
+      P1: "4", P2: "4", P3: "4", P4: "4",
+      N1: "2", N2: "2", N3: "2", N4: "2", N5: "2", N6: "2",
+    };
+
+    const result = scoreDataset([row], Object.keys(row), [positive, negative], {});
+
+    expect(result.overallScaleScore).toEqual([3]);
+    expect(result.rows[0]["Overall Scale Score"]).toBe(3);
+  });
+
+  it("defaults Overall to the sum when all subscales use sum", () => {
+    const positive = makeSubscale("Positive", ["P1", "P2", "P3", "P4"]);
+    const negative = makeSubscale("Negative", ["N1", "N2", "N3", "N4", "N5", "N6"]);
+    const row = {
+      P1: "4", P2: "4", P3: "4", P4: "4",
+      N1: "2", N2: "2", N3: "2", N4: "2", N5: "2", N6: "2",
+    };
+
+    const result = scoreDataset([row], Object.keys(row), [positive, negative], {});
+
+    expect(result.overallScaleScore).toEqual([28]);
+    expect(result.rows[0]["Overall Scale Score"]).toBe(28);
+  });
+
+  it("keeps the default Overall sum when subscale methods are mixed", () => {
+    const positive = makeSubscale("Positive", ["P1", "P2", "P3", "P4"]);
+    positive.scoringMethod = "mean";
+    const negative = makeSubscale("Negative", ["N1", "N2", "N3", "N4", "N5", "N6"]);
+    const row = {
+      P1: "4", P2: "4", P3: "4", P4: "4",
+      N1: "2", N2: "2", N3: "2", N4: "2", N5: "2", N6: "2",
+    };
+
+    const result = scoreDataset([row], Object.keys(row), [positive, negative], {});
+
+    expect(result.overallScaleScore).toEqual([16]);
+  });
 });

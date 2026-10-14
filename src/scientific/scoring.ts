@@ -275,9 +275,15 @@ export function scoreDataset(
     headers.push(`${subscale.name} Interpretation`);
   }
 
-  const overall = options.overall
-    ? options.overall
-    : { enabled: subscales.length > 1, source: 'subscales' as const, method: 'sum' as const };
+  const defaultOverallMethod = subscales.every((subscale) => subscale.scoringMethod === 'mean')
+    ? 'mean'
+    : 'sum';
+  // Mixed scoring methods are not meaningfully comparable, so retain the existing sum fallback.
+  const overall: NonNullable<ScoringOptions['overall']> = options.overall ?? {
+    enabled: subscales.length > 1,
+    source: 'subscales',
+    method: defaultOverallMethod,
+  };
   const selectedSubscales = subscales.filter((subscale) =>
     !overall.includedSubscaleIds || overall.includedSubscaleIds.includes(subscale.id),
   );
