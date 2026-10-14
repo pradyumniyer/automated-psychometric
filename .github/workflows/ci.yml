@@ -26,8 +26,20 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (UTC)
         run: npm test
+        env:
+          TZ: UTC
+
+      - name: Test (America/Los_Angeles)
+        run: npm test
+        env:
+          TZ: America/Los_Angeles
+
+      - name: Test (Asia/Kolkata)
+        run: npm test
+        env:
+          TZ: Asia/Kolkata
 
       # Becomes blocking at the end of Phase 0; known failure: 17 lint errors.
       - name: Lint

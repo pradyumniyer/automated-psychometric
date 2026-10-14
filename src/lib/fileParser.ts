@@ -68,9 +68,25 @@ async function readRawSheets(file: File): Promise<{ sheet: string; data: unknown
 
 function normalizeSpreadsheetValue(value: unknown): unknown {
   if (value instanceof Date) {
-    return (value.getTime() - Date.UTC(1899, 11, 30)) / 86_400_000;
+    return formatSpreadsheetDate(value);
   }
   return value;
+}
+
+export function formatSpreadsheetDate(value: Date): string {
+  const year = String(value.getUTCFullYear()).padStart(4, '0');
+  const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(value.getUTCDate()).padStart(2, '0');
+  const date = `${year}-${month}-${day}`;
+  const hours = value.getUTCHours();
+  const minutes = value.getUTCMinutes();
+  const seconds = value.getUTCSeconds();
+
+  if (hours === 0 && minutes === 0 && seconds === 0 && value.getUTCMilliseconds() === 0) {
+    return date;
+  }
+
+  return `${date} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function parseCsvGrid(contents: string): unknown[][] {

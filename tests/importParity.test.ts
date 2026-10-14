@@ -14,6 +14,13 @@ const parityCases = JSON.parse(
 ) as ParityCase[];
 
 const ownerApprovedDifferences: Record<string, Record<string, unknown[][]>> = {
+  'xlsx-dates-and-types': {
+    Dates: [
+      ['id', 'date', 'number', 'text'],
+      ['001', '2024-02-29', 12, '0012'],
+      ['002', '2026-10-14', 3.5, '3.50'],
+    ],
+  },
   'csv-unicode': {
     Sheet1: [
       ['name', 'language'],
@@ -31,6 +38,7 @@ const ownerApprovedDifferences: Record<string, Record<string, unknown[][]>> = {
 };
 
 describe('spreadsheet import parity', () => {
+  // ISO dates are an intentional difference from the legacy parser's Excel serials.
   it.each(parityCases)('$name matches the recorded legacy grid or approved difference', async ({ name, fileName, sheets }) => {
     const file = new File(
       [readFileSync(new URL(fileName, fixtureDirectory))],
