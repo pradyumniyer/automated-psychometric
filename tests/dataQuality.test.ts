@@ -5,7 +5,9 @@ import {
   DEFAULT_ALLOWED_NON_RESPONSE,
   DEFAULT_THRESHOLDS,
 } from "../src/scientific/dataQuality";
+import { kurtosis, skewness } from "../src/scientific/descriptives";
 import { scoreDataset, SubscaleConfig } from "../src/scientific/scoring";
+import { shapiroWilk } from "../src/scientific/shapiroWilk";
 
 const fixtureDirectory = new URL("../docs/fixtures/", import.meta.url);
 const csv = readFileSync(new URL("fixture_A.csv", fixtureDirectory), "utf8");
@@ -29,6 +31,10 @@ const expected = JSON.parse(
   >;
   group_row_means: {
     n_row_means: number;
+    skewness_G1: number;
+    excess_kurtosis_G2: number;
+    shapiro_W: number;
+    shapiro_p: number;
     q1: number;
     q3: number;
     iqr: number;
@@ -160,6 +166,33 @@ describe("data quality per scientific-spec sections 2.1–2.5 and 2.7", () => {
       item.unexpectedMissingCount + item.allowedNonResponseCount + item.outOfRangeCount + item.validCount === 30,
     )).toBe(true);
   });
+
+  it("verifies Fixture A normality statistics and shape standard errors", () => {
+    const { result } = getFixtureQuality();
+    const fixture = expected.group_row_means;
+    const values = result.rowMeanValues;
+    const validMeans = values.filter((value) => value != null && !isNaN(value));
+    const n = fixture.n_row_means;
+    const shapiro = shapiroWilk(validMeans);
+    const seSkewness = Math.sqrt((6 * n * (n - 1)) / ((n - 2) * (n + 1) * (n + 3)));
+    const seKurtosis = 2 * seSkewness * Math.sqrt(((n ** 2) - 1) / ((n - 3) * (n + 5)));
+
+    expect.soft(validMeans).toHaveLength(n);
+    expect.soft(result.normality.W).toBe(shapiro.W);
+    expect.soft(result.normality.pValue).toBe(shapiro.pValue);
+    expect.soft(shapiro.W).toBeCloseTo(fixture.shapiro_W, 4);
+    expect.soft(shapiro.pValue).toBeCloseTo(fixture.shapiro_p, 3);
+    expect.soft(skewness(values, 2)).toBeCloseTo(fixture.skewness_G1, 9);
+    expect.soft(kurtosis(values, 2)).toBeCloseTo(fixture.excess_kurtosis_G2, 9);
+    expect.soft(seSkewness).toBeCloseTo(0.426892396, 9);
+    expect.soft(seKurtosis).toBeCloseTo(0.832745618, 9);
+  });
+
+  // Deferred until after first users; KS is not shown in the UI. D differs by 4e-8 because pnorm is approximate; p looks wrong versus Dallal-Wilkinson. See step 2d.
+  it.todo("verifies Fixture A Lilliefors KS D");
+
+  // Deferred until after first users; KS is not shown in the UI. D differs by 4e-8 because pnorm is approximate; p looks wrong versus Dallal-Wilkinson. See step 2d.
+  it.todo("verifies Fixture A Lilliefors KS p-value");
 
   it("preserves row-keyed quality results when the input rows are shuffled", () => {
     const original = getFixtureQuality().result;

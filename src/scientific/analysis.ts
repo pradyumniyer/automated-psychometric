@@ -3,7 +3,7 @@
 
 import { descriptiveStats, DescriptiveStats } from './descriptives';
 import { intelligentNormalityTest, NormalityTestResult } from './normalityTest';
-import { cronbachAlpha, ReliabilityResult } from './reliability';
+import { cronbachAlphaFromNormalizedMatrix, ReliabilityResult } from './reliability';
 import { iqrOutliers, zscoreOutliers, madOutliers, mahalanobisDistance, MahalanobisResult, OutlierFlag } from './outliers';
 import { scoreDataset, ScoringResult, SubscaleConfig, BandConfig, buildAutoScale } from './scoring';
 
@@ -48,13 +48,12 @@ export function runFullAnalysis(
     const scoreValues = includedIndices.map((i) => scoring.subscaleScores[sub.name][i]).filter((v): v is number => v != null && !isNaN(v));
     const desc = descriptiveStats(scoreValues);
     const normality = intelligentNormalityTest(scoreValues);
-    const itemRows = includedIndices.map((i) => {
-      const row: Record<string, number> = {};
-      for (const item of sub.items) { const num = Number(rawRows[i][item.column]); row[item.column] = isNaN(num) ? NaN : num; }
-      return row;
-    });
     const itemNames = sub.items.map((item) => item.column);
-    const reliability = cronbachAlpha(itemRows, itemNames);
+    const reliability = cronbachAlphaFromNormalizedMatrix(
+      scoring.normalizedMatrix,
+      sub,
+      includedIndices,
+    );
     const iqr = iqrOutliers(scoreValues, sub.name);
     const zs = zscoreOutliers(scoreValues, sub.name, 2.5);
     const mad = madOutliers(scoreValues, sub.name, 3.5);

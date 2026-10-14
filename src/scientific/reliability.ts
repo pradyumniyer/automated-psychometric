@@ -1,5 +1,6 @@
 // Reliability analysis — Cronbach's alpha matching R's psych::alpha() and SPSS.
 import { variance, mean, pearsonCorrelation, sd } from './descriptives';
+import { responseScaleRange, NormalizedMatrix, SubscaleConfig } from './scoring';
 
 export interface ItemStats {
   itemName: string; n: number; itemMean: number; itemSd: number;
@@ -12,12 +13,34 @@ export interface ReliabilityResult {
   mean: number; sd: number; itemStats: ItemStats[]; alphaIfDeleted: number[];
 }
 
+export function cronbachAlphaFromNormalizedMatrix(
+  normalizedMatrix: NormalizedMatrix,
+  subscale: Pick<SubscaleConfig, 'items' | 'responseScale'>,
+  includedRowIndices: number[] = normalizedMatrix.values.map((_, index) => index),
+): ReliabilityResult {
+  const range = responseScaleRange(subscale.responseScale);
+  const itemNames = subscale.items.map((item) => item.column);
+  const itemData = includedRowIndices.map((rowIndex) => {
+    const values: Record<string, number | null> = {};
+    for (const item of subscale.items) {
+      const value = normalizedMatrix.values[rowIndex]?.[item.column] ?? null;
+      values[item.column] = value === null
+        ? null
+        : item.reverse
+          ? range.min + range.max - value
+          : value;
+    }
+    return values;
+  });
+  return cronbachAlpha(itemData, itemNames);
+}
+
 export function cronbachAlpha(
-  itemData: Record<string, number>[],
+  itemData: Record<string, number | null>[],
   itemNames: string[],
 ): ReliabilityResult {
-  const completeCases = itemData.filter((row) =>
-    itemNames.every((name) => { const v = row[name]; return v != null && !isNaN(v); })
+  const completeCases = itemData.filter((row): row is Record<string, number> =>
+    itemNames.every((name) => Number.isFinite(row[name]))
   );
   const nCases = completeCases.length, k = itemNames.length;
 

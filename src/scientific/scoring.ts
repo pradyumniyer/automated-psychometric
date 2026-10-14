@@ -58,9 +58,9 @@ export interface ScoringResult {
   configSnapshot: { subscales: SubscaleConfig[]; bands: Record<string, BandConfig[]> };
 }
 
-interface ScaleRange { min: number; max: number; }
+export interface ScaleRange { min: number; max: number; }
 
-function scaleRange(scale: ResponseScaleConfig): ScaleRange {
+export function responseScaleRange(scale: ResponseScaleConfig): ScaleRange {
   if (scale.scaleType === 'numeric'
     && Number.isFinite(scale.minValue)
     && Number.isFinite(scale.maxValue)
@@ -79,7 +79,7 @@ function scaleRange(scale: ResponseScaleConfig): ScaleRange {
 function scaleSignature(scale: ResponseScaleConfig): string {
   return JSON.stringify({
     scaleType: scale.scaleType,
-    range: scaleRange(scale),
+    range: responseScaleRange(scale),
     labels: scale.labelMap?.map(({ label, value }) => [label.trim().toLowerCase(), value]).sort(),
     allowed: scale.allowedNonresponse?.map((value) => value.trim().toLowerCase()).sort(),
   });
@@ -145,7 +145,7 @@ export function normalizeResponseMatrix(
   const ranges = new Map<string, ScaleRange>();
   const allowedByColumn = new Map<string, Set<string>>();
   for (const [column, scale] of columnScales) {
-    ranges.set(column, scaleRange(scale));
+    ranges.set(column, responseScaleRange(scale));
     allowedByColumn.set(
       column,
       new Set([...allowedNonresponse, ...(scale.allowedNonresponse || [])].map((value) => value.trim().toLowerCase())),
@@ -252,7 +252,7 @@ export function scoreDataset(
   }
   const normalizedMatrix = normalizeResponseMatrix(rawRows, subscales, options.allowedNonresponse);
   const rowIds = deriveRowIds(rawRows, options.rowIds);
-  const ranges = new Map(subscales.map((subscale) => [subscale.id, scaleRange(subscale.responseScale)]));
+  const ranges = new Map(subscales.map((subscale) => [subscale.id, responseScaleRange(subscale.responseScale)]));
   const excludedSet = new Set(excludedRowIndices);
   const headers = [...rawHeaders];
   const subscaleScores: Record<string, (number | null)[]> = {};
