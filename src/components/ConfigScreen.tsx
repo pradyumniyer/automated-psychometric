@@ -887,7 +887,7 @@ export function ConfigScreen({
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
+      <input ref={fileInputRef} type="file" accept=".csv,.xlsx" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }} />
 
       {statusMsg && (

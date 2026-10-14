@@ -1,5 +1,8 @@
-// File parsing — CSV and XLSX import with multi-tab support via SheetJS
-import * as XLSX from 'xlsx';
+// File parsing — CSV and XLSX import with multi-tab support.
+import Papa from 'papaparse';
+import readXlsxFile from 'read-excel-file/browser';
+import writeXlsxFile from 'write-excel-file/browser';
+import { validateImportFile, validateParsedSheets } from './importLimits';
 
 export interface ParsedSheet {
   sheetName: string;
@@ -33,25 +36,52 @@ export interface EmptyColumnReport {
 
 // Get list of sheet names and dimensions from a workbook (for multi-tab selection)
 export async function getSheetInfo(file: File): Promise<{ fileName: string; sheets: SheetInfo[] }> {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  const sheets = wb.SheetNames.map((name) => {
-    const sheet = wb.Sheets[name];
-    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][];
-    const rows = aoa.length > 1 ? aoa.length - 1 : 0;
-    const cols = aoa[0]?.length || 0;
-    return { name, rows, cols };
-  });
+  const rawSheets = await readRawSheets(file);
+  const sheets = rawSheets.map(({ sheet: name, data }) => ({
+    name,
+    rows: data.length > 1 ? data.length - 1 : 0,
+    cols: data[0]?.length || 0,
+  }));
   return { fileName: file.name, sheets };
 }
 
 /** Read a sheet as a raw grid (array-of-arrays) with no header assumption */
 export async function getRawSheet(file: File, sheetName: string): Promise<unknown[][]> {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  const sheet = wb.Sheets[sheetName];
+  const sheets = await readRawSheets(file);
+  const sheet = sheets.find(({ sheet: name }) => name === sheetName);
   if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
-  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][];
+  return sheet.data;
+}
+
+async function readRawSheets(file: File): Promise<{ sheet: string; data: unknown[][] }[]> {
+  await validateImportFile(file);
+  const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+  const sheets = extension === 'csv'
+    ? [{ sheet: 'Sheet1', data: parseCsvGrid(await file.text()) }]
+    : (await readXlsxFile(file)).map(({ sheet, data }) => ({
+      sheet,
+      data: data.map((row) => row.map(normalizeSpreadsheetValue)),
+    }));
+  validateParsedSheets(sheets);
+  return sheets;
+}
+
+function normalizeSpreadsheetValue(value: unknown): unknown {
+  if (value instanceof Date) {
+    return (value.getTime() - Date.UTC(1899, 11, 30)) / 86_400_000;
+  }
+  return value;
+}
+
+function parseCsvGrid(contents: string): unknown[][] {
+  const parsed = Papa.parse<unknown[]>(contents, {
+    dynamicTyping: true,
+    skipEmptyLines: false,
+  });
+  const rows = parsed.data.map((row) => row.map((value) => value === '' ? null : value));
+  while (rows.length > 0 && rows[rows.length - 1].every((value) => value == null)) rows.pop();
+  const columnCount = rows.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+  return rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? null));
 }
 
 function isRowEmpty(row: unknown[]): boolean {
@@ -351,22 +381,21 @@ export async function parseFile(file: File): Promise<ParsedSheet> {
 
 // Export to CSV
 export function exportToCSV(headers: string[], rows: Record<string, unknown>[], fileName: string) {
-  const ws = XLSX.utils.json_to_sheet(
-    rows.map((r) => { const out: Record<string, unknown> = {}; headers.forEach((h) => (out[h] = r[h])); return out; }),
-    { header: headers },
-  );
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Data');
-  XLSX.writeFile(wb, fileName);
+  const data = [headers, ...rows.map((row) => headers.map((header) => row[header] ?? null))];
+  const blob = new Blob([Papa.unparse(data)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 // Export to XLSX
-export function exportToXLSX(headers: string[], rows: Record<string, unknown>[], fileName: string) {
-  const ws = XLSX.utils.json_to_sheet(
-    rows.map((r) => { const out: Record<string, unknown> = {}; headers.forEach((h) => (out[h] = r[h])); return out; }),
-    { header: headers },
-  );
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Scored Data');
-  XLSX.writeFile(wb, fileName);
+export function exportToXLSX(headers: string[], rows: Record<string, unknown>[], fileName: string): Promise<void> {
+  const data = [
+    headers,
+    ...rows.map((row) => headers.map((header) => row[header] ?? null)),
+  ];
+  return writeXlsxFile(data, { sheet: 'Scored Data' }).toFile(fileName);
 }

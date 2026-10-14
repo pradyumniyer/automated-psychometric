@@ -31,7 +31,7 @@ Locked decisions live in `decisions/` as ADRs. **A coding agent must not overrid
 | O4 | Aiken/CVR decision bands and the 0.70 floor; whether to add I-CVI / S-CVI | Phase 2 | spec §4.3 |
 | O5 | Static host choice (Cloudflare Pages / Vercel / Netlify) and billing alerts | Phase 1f | |
 | O6 | Analytics: none, or a privacy-respecting tool? If any, disclose in the Privacy Policy | Phase 1e | Default: none |
-| O7 | Spreadsheet library choice (ADR 0005 options) | Phase 0d | Agent presents options |
+| O7 | ~~Spreadsheet library choice~~ **Resolved:** PapaParse 5.7.0, read-excel-file 9.3.12, write-excel-file 4.1.1; exact versions, npm `xlsx` removed | Phase 0d | Owner approved; two documented CSV parity differences accepted |
 | O8 | ~~Overall score~~ **Resolved** (ADR 0012) | n/a | |
 | O9 | Custom-formula functions such as `SUM()`/`MEAN()` | After Phase 1 | FORMULA_SPEC F4 |
 | O10 | Repo visibility and licensing (private recommended) | Phase 0a | |
