@@ -40,6 +40,15 @@ export interface SurveyConfigRepository {
   save(datasetId: string, config: SurveyConfigRecord): Promise<void>;
 }
 
+export interface TemplateInput {
+  name: string;
+  description: string;
+  instrument: string;
+  definition: Template['definition'];
+  kind?: TemplateRecord['kind'];
+  version?: number;
+}
+
 export interface ExclusionRepository {
   get(datasetId: string): Promise<ExclusionStateRecord | null>;
   replace(datasetId: string, rowIds: Iterable<string>): Promise<void>;
@@ -57,8 +66,13 @@ export interface ScoreRepository {
 export interface TemplateRepository {
   list(): Promise<Template[]>;
   get(templateId: string): Promise<Template | null>;
-  save(template: Omit<TemplateRecord, 'id' | 'created_at' | 'updated_at'>): Promise<Template>;
-  update(templateId: string, template: Partial<TemplateRecord>): Promise<void>;
+  save(template: TemplateInput): Promise<Template>;
+  update(templateId: string, template: Partial<TemplateInput>): Promise<void>;
+  applyToDataset(
+    templateId: string,
+    datasetId: string,
+    config: SurveyConfigRecord,
+  ): Promise<void>;
 }
 
 export interface HistoryRepository {
@@ -107,6 +121,19 @@ function toDataset(record: DatasetRecord): Dataset {
     col_count: record.headers.length,
     linked_template_id: null,
     created_at: new Date(record.created_at).toISOString(),
+  };
+}
+
+function toTemplate(record: TemplateRecord): Template {
+  return {
+    id: record.id,
+    name: record.name,
+    description: record.description,
+    instrument: record.instrument,
+    definition: record.payload,
+    version: record.version,
+    created_at: new Date(record.created_at).toISOString(),
+    updated_at: new Date(record.updated_at).toISOString(),
   };
 }
 
@@ -246,6 +273,103 @@ export const datasetRepository: DatasetRepository = {
         await db.exclusion_state.delete(datasetId);
         await db.score_results.delete(datasetId);
         await db.history.where('dataset_id').equals(datasetId).delete();
+      },
+    );
+  },
+};
+
+export const surveyConfigRepository: SurveyConfigRepository = {
+  async get(datasetId) {
+    return (await db.survey_configs.get(datasetId)) ?? null;
+  },
+
+  async save(datasetId, config) {
+    await db.transaction('rw', db.survey_configs, async () => {
+      await db.survey_configs.put({
+        ...config,
+        dataset_id: datasetId,
+        updated_at: Date.now(),
+      });
+    });
+  },
+};
+
+export const templateRepository: TemplateRepository = {
+  async list() {
+    const records = await db.templates.orderBy('name').toArray();
+    return records.map(toTemplate);
+  },
+
+  async get(templateId) {
+    const record = await db.templates.get(templateId);
+    return record ? toTemplate(record) : null;
+  },
+
+  async save(input) {
+    const now = Date.now();
+    const record: TemplateRecord = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      description: input.description,
+      instrument: input.instrument,
+      kind: input.kind ?? 'instrument',
+      payload: input.definition,
+      version: input.version ?? 1,
+      created_at: now,
+      updated_at: now,
+    };
+    await db.transaction('rw', db.templates, async () => {
+      await db.templates.add(record);
+    });
+    return toTemplate(record);
+  },
+
+  async update(templateId, input) {
+    await db.transaction('rw', db.templates, async () => {
+      const existing = await db.templates.get(templateId);
+      if (!existing) throw new Error(`Template "${templateId}" was not found.`);
+      const updated: TemplateRecord = {
+        ...existing,
+        name: input.name ?? existing.name,
+        description: input.description ?? existing.description,
+        instrument: input.instrument ?? existing.instrument,
+        kind: input.kind ?? existing.kind,
+        payload: input.definition ?? existing.payload,
+        version: input.version ?? existing.version,
+        updated_at: Date.now(),
+      };
+      await db.templates.put(updated);
+    });
+  },
+
+  async applyToDataset(templateId, datasetId, config) {
+    await db.transaction(
+      'rw',
+      [db.templates, db.datasets, db.survey_configs, db.history],
+      async () => {
+        const [template, dataset] = await Promise.all([
+          db.templates.get(templateId),
+          db.datasets.get(datasetId),
+        ]);
+        if (!template) throw new Error(`Template "${templateId}" was not found.`);
+        if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
+        const now = Date.now();
+        await db.survey_configs.put({
+          ...config,
+          dataset_id: datasetId,
+          linked_template_id: templateId,
+          updated_at: now,
+        });
+        await db.history.add({
+          id: crypto.randomUUID(),
+          project_id: dataset.project_id,
+          dataset_id: datasetId,
+          action_type: 'template_apply',
+          description: `Applied template: ${template.name} (v${template.version})`,
+          payload: { templateId, templateVersion: template.version },
+          undo_data: null,
+          ts: now,
+        });
       },
     );
   },
