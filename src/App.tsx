@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { ProjectList } from '@/components/ProjectList';
 import { ConfigScreen } from '@/components/ConfigScreen';
 import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { ExportScreen } from '@/components/ExportScreen';
 import { ReportScreen } from '@/components/ReportScreen';
-import { Project } from '@/lib/supabase';
+import type { Project } from '@/types/domain';
+import { datasetRepository, exclusionRepository } from '@/storage/repositories';
 import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
 
 type View = 'list' | 'config' | 'quality' | 'export' | 'report';
@@ -15,8 +16,62 @@ export default function App() {
   const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [showSummarySum, setShowSummarySum] = useState(false);
   const [showSummaryMean, setShowSummaryMean] = useState(false);
+
+  const changeActiveDataset = useCallback((datasetId: string | null) => {
+    setExcludedRows(new Set());
+    setActiveDatasetId(datasetId);
+    setStorageError(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeDatasetId) {
+      setExcludedRows(new Set());
+      setStorageError(null);
+      return;
+    }
+    exclusionRepository.getExcludedIndices(activeDatasetId)
+      .then((indices) => {
+        if (!cancelled) {
+          setExcludedRows(new Set(indices));
+          setStorageError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setExcludedRows(new Set());
+          setStorageError(`Failed to load row exclusions: ${(error as Error).message}`);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [activeDatasetId]);
+
+  const persistExcludedRows = useCallback(async (rows: Set<number>) => {
+    if (!activeDatasetId) {
+      setExcludedRows(rows);
+      return;
+    }
+    try {
+      const dataset = await datasetRepository.get(activeDatasetId);
+      if (!dataset) throw new Error(`Dataset "${activeDatasetId}" was not found.`);
+      const rowIds = [...rows].map((index) => dataset.row_ids[index]);
+      if (rowIds.some((rowId) => rowId === undefined)) {
+        throw new Error('One or more excluded rows have no stable ID.');
+      }
+      await exclusionRepository.replace(
+        activeDatasetId,
+        rowIds.filter((rowId): rowId is string => rowId !== undefined),
+      );
+      setExcludedRows(rows);
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to save row exclusions: ${(error as Error).message}`);
+      throw error;
+    }
+  }, [activeDatasetId]);
 
   const openProject = (p: Project) => {
     setProject(p);
@@ -28,6 +83,7 @@ export default function App() {
     setView('list');
     setExcludedRows(new Set());
     setActiveDatasetId(null);
+    setStorageError(null);
   };
 
   const goToConfig = useCallback((rowIndex?: number) => {
@@ -47,26 +103,22 @@ export default function App() {
     setView('report');
   }, []);
 
-  const toggleRowExclusion = useCallback((rowIndex: number) => {
-    setExcludedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowIndex)) next.delete(rowIndex);
-      else next.add(rowIndex);
-      return next;
-    });
-  }, []);
+  const toggleRowExclusion = useCallback(async (rowIndex: number) => {
+    const next = new Set(excludedRows);
+    if (next.has(rowIndex)) next.delete(rowIndex);
+    else next.add(rowIndex);
+    await persistExcludedRows(next);
+  }, [excludedRows, persistExcludedRows]);
 
-  const bulkExclude = useCallback((indices: number[]) => {
-    setExcludedRows((prev) => {
-      const next = new Set(prev);
-      for (const idx of indices) next.add(idx);
-      return next;
-    });
-  }, []);
+  const bulkExclude = useCallback(async (indices: number[]) => {
+    const next = new Set(excludedRows);
+    for (const index of indices) next.add(index);
+    await persistExcludedRows(next);
+  }, [excludedRows, persistExcludedRows]);
 
-  const setExcludedRowsDirect = useCallback((rows: Set<number>) => {
-    setExcludedRows(rows);
-  }, []);
+  const setExcludedRowsDirect = useCallback((rows: Set<number>) => (
+    persistExcludedRows(rows)
+  ), [persistExcludedRows]);
 
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
@@ -124,6 +176,11 @@ export default function App() {
 
       {/* Screen content */}
       <div className="flex-1 overflow-hidden">
+        {storageError && (
+          <div role="alert" className="px-4 py-2 bg-error-50 text-sm text-error-700 border-b border-error-200">
+            {storageError}
+          </div>
+        )}
         {view === 'config' && (
           <ConfigScreen
             project={project}
@@ -134,7 +191,7 @@ export default function App() {
             onSetExcludedRows={setExcludedRowsDirect}
             onGoToQuality={goToQuality}
             sharedDatasetId={activeDatasetId}
-            onDatasetChange={setActiveDatasetId}
+            onDatasetChange={changeActiveDataset}
             showSummarySum={showSummarySum}
             showSummaryMean={showSummaryMean}
             onToggleSummarySum={() => setShowSummarySum((v) => !v)}
@@ -151,7 +208,7 @@ export default function App() {
             onInspectRow={(rowIndex) => goToConfig(rowIndex)}
             onGoToExport={goToExport}
             sharedDatasetId={activeDatasetId}
-            onDatasetChange={setActiveDatasetId}
+            onDatasetChange={changeActiveDataset}
           />
         )}
         {view === 'export' && (
@@ -159,7 +216,7 @@ export default function App() {
             project={project}
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
-            onDatasetChange={setActiveDatasetId}
+            onDatasetChange={changeActiveDataset}
           />
         )}
         {view === 'report' && (
@@ -167,7 +224,7 @@ export default function App() {
             project={project}
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
-            onDatasetChange={setActiveDatasetId}
+            onDatasetChange={changeActiveDataset}
           />
         )}
       </div>

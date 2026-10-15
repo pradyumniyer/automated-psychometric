@@ -5,9 +5,9 @@ import {
   FileDown, FileSpreadsheet, Table, FileText, BarChart3, Users, Hash,
   Check, AlertCircle, Info, Loader2, Download,
 } from 'lucide-react';
-import {
-  supabase, Project, Dataset, DemographicColumn, SubscaleGroup, ResponseScale, SubscaleItem,
-} from '@/lib/supabase';
+import type { Project, Dataset, DemographicColumn, SubscaleGroup, ResponseScale, SubscaleItem } from '@/types/domain';
+import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/storage/repositories';
+import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { Button, Card } from './ui';
@@ -27,17 +27,23 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleGroups, setSubscaleGroups] = useState<SubscaleGroup[]>([]);
   const [responseScales, setResponseScales] = useState<ResponseScale[]>([]);
-  const [savedScoringResult, setSavedScoringResult] = useState<{ headers: string[]; rows: Record<string, unknown>[]; excluded_rows: number[] } | null>(null);
+  const [savedScoringResult, setSavedScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
+  const [scoreCacheStale, setScoreCacheStale] = useState(false);
   const [keepExcluded, setKeepExcluded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   // ── Load datasets ──
   const loadDatasets = useCallback(async () => {
-    const { data } = await supabase.from('datasets').select('*').eq('project_id', project.id).order('created_at', { ascending: true });
-    const dsList = (data || []) as Dataset[];
-    setDatasets(dsList);
-    if (dsList.length > 0 && !sharedDatasetId) onDatasetChange(dsList[0].id);
+    try {
+      const dsList = await datasetRepository.list(project.id);
+      setDatasets(dsList);
+      if (dsList.length > 0 && !sharedDatasetId) onDatasetChange(dsList[0].id);
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to load datasets: ${(error as Error).message}`);
+    }
   }, [project.id, sharedDatasetId, onDatasetChange]);
 
   useEffect(() => { loadDatasets(); }, [loadDatasets]);
@@ -52,44 +58,59 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     setDataset(ds);
     setLoading(true);
 
+    let cancelled = false;
     (async () => {
-      const [{ data: demoData }, { data: subData }, { data: scoreData }] = await Promise.all([
-        supabase.from('demographic_columns').select('*').eq('dataset_id', activeDatasetId),
-        supabase.from('subscale_groups').select('*').eq('dataset_id', activeDatasetId).order('display_order'),
-        supabase.from('scoring_results').select('*').eq('dataset_id', activeDatasetId).order('version', { ascending: false }).limit(1).maybeSingle(),
-      ]);
-
-      setDemoCols((demoData || []) as DemographicColumn[]);
-      const subs = (subData || []) as SubscaleGroup[];
-      setSubscaleGroups(subs);
-
-      // Load response scales for each subscale
-      const scales: ResponseScale[] = [];
-      for (const sub of subs) {
-        const { data: scaleData } = await supabase.from('response_scales').select('*').eq('subscale_id', sub.id).maybeSingle();
-        if (scaleData) scales.push(scaleData as ResponseScale);
-      }
-      setResponseScales(scales);
-
-      if (scoreData) {
-        setSavedScoringResult({
-          headers: (scoreData as { headers: string[] }).headers,
-          rows: (scoreData as { rows: Record<string, unknown>[] }).rows,
-          excluded_rows: (scoreData as { excluded_rows: number[] }).excluded_rows || [],
+      try {
+        const config = await surveyConfigRepository.get(activeDatasetId);
+        if (!config) throw new Error('Dataset configuration is missing.');
+        const latest = await scoreRepository.getLatest(activeDatasetId);
+        const excludedRowIds = [...excludedRows].map((index) => {
+          const rowId = ds.row_ids[index];
+          if (!rowId) throw new Error(`Excluded row ${index + 1} has no stable ID.`);
+          return rowId;
         });
-      } else {
-        setSavedScoringResult(null);
+        const hashes = await createScoreHashes(ds, config, buildSubscaleConfigs(config), excludedRowIds);
+        const current = await scoreRepository.getCurrent(activeDatasetId, hashes);
+        const result = current?.payload.result as ReturnType<typeof scoreDataset> | undefined;
+        const resultIsValid = !!result && Array.isArray(result.headers) && Array.isArray(result.rows);
+
+        if (cancelled) return;
+        setDemoCols(config.demographic_columns);
+        setSubscaleGroups(config.subscales);
+        setResponseScales(config.subscales.flatMap((subscale) => subscale.response_scale ? [subscale.response_scale] : []));
+        const bands: Record<string, BandConfig[]> = {};
+        for (const subscale of config.subscales) {
+          if (subscale.bands?.length) {
+            bands[subscale.name] = subscale.bands.map((band) => ({
+              name: band.name,
+              minScore: band.min_score,
+              maxScore: band.max_score,
+              color: band.color,
+            }));
+          }
+        }
+        setBandConfigs(bands);
+        setSavedScoringResult(resultIsValid ? result : null);
+        setScoreCacheStale(!!latest && (!current || !resultIsValid));
+        setStorageError(null);
+      } catch (error) {
+        if (!cancelled) {
+          setSavedScoringResult(null);
+          setScoreCacheStale(false);
+          setStorageError(`Failed to load dataset configuration: ${(error as Error).message}`);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     })();
-  }, [activeDatasetId, datasets]);
+    return () => { cancelled = true; };
+  }, [activeDatasetId, datasets, excludedRows]);
 
   // ── Derived state ──
   const demoColumnNames = useMemo(() => new Set(demoCols.map((d) => d.column_name)), [demoCols]);
   const itemColumns = useMemo(() => (dataset?.headers || []).filter((c) => !demoColumnNames.has(c)), [dataset, demoColumnNames]);
 
   const hasSubscaleConfig = subscaleGroups.length > 0 && subscaleGroups.some((s) => s.items && s.items.length > 0);
-  const scoringAvailable = !!savedScoringResult || hasSubscaleConfig;
 
   const totalRows = dataset?.rows.length ?? 0;
   const excludedCount = excludedRows.size;
@@ -118,40 +139,19 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     });
   }, [subscaleGroups, responseScales]);
 
-  // ── Band configs (loaded from DB as needed) ──
   const [bandConfigs, setBandConfigs] = useState<Record<string, BandConfig[]>>({});
 
-  useEffect(() => {
-    if (subscaleGroups.length === 0) { setBandConfigs({}); return; }
-    (async () => {
-      const bands: Record<string, BandConfig[]> = {};
-      for (const sub of subscaleGroups) {
-        const { data: bandData } = await supabase.from('interpretation_bands').select('*').eq('subscale_id', sub.id).order('display_order');
-        if (bandData) bands[sub.name] = (bandData as { name: string; min_score: number; max_score: number; color: string }[]).map((b) => ({
-          name: b.name, minScore: b.min_score, maxScore: b.max_score, color: b.color,
-        }));
-      }
-      setBandConfigs(bands);
-    })();
-  }, [subscaleGroups]);
-
   // ── Compute scored result (use saved or recompute) ──
-  const savedExclusionsStale = useMemo(() => {
-    if (!savedScoringResult) return false;
-    const saved = new Set(savedScoringResult.excluded_rows);
-    if (saved.size !== excludedRows.size) return true;
-    for (const idx of excludedRows) if (!saved.has(idx)) return true;
-    return false;
-  }, [savedScoringResult, excludedRows]);
-
+  const scoringAvailable = !!savedScoringResult || (!scoreCacheStale && hasSubscaleConfig);
   const scoredResult = useMemo(() => {
     if (!dataset) return null;
-    if (savedScoringResult && !savedExclusionsStale) {
+    if (savedScoringResult) {
       return {
         headers: savedScoringResult.headers,
         rows: savedScoringResult.rows as Record<string, number | string | null>[],
       };
     }
+    if (scoreCacheStale) return null;
     if (hasSubscaleConfig && subConfigs.length > 0) {
       try {
         const result = scoreDataset(
@@ -167,7 +167,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
     }
     return null;
-  }, [dataset, savedScoringResult, savedExclusionsStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
 
   // ── Filename helper ──
   const fileName = (type: ExportType, ext: 'csv' | 'xlsx'): string => {
@@ -229,7 +229,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       if (fmt === 'csv') exportToCSV(headers, rows, fn, exportOptions);
       else await exportToXLSX(headers, rows, fn, exportOptions);
     } catch (error) {
-      console.error('Failed to export dataset.', error);
+      setStorageError(`Failed to export dataset: ${(error as Error).message}`);
     } finally {
       setExporting(null);
     }
@@ -240,6 +240,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     return (
       <div className="h-full flex items-center justify-center bg-secondary-50">
         <div className="text-center">
+          {storageError && <p role="alert" className="mb-3 text-sm text-error-700">{storageError}</p>}
           <div className="w-16 h-16 rounded-2xl bg-secondary-100 flex items-center justify-center mx-auto mb-4">
             <FileDown className="w-8 h-8 text-secondary-400" />
           </div>
@@ -273,6 +274,11 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-auto">
+        {storageError && (
+          <div role="alert" className="mx-6 mt-4 px-4 py-2 bg-error-50 text-sm text-error-700 rounded-lg">
+            {storageError}
+          </div>
+        )}
         {/* ── Header + summary ── */}
         <div className="px-6 py-4 bg-white border-b border-secondary-200">
           <h1 className="text-xl font-bold text-secondary-900">Export</h1>
@@ -322,7 +328,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
               disabled={!scoringAvailable || noIncludedRows}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
+              disabledReason={!scoringAvailable ? (scoreCacheStale || hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
               onExportCSV={() => doExport('scored', 'csv')}
               onExportXLSX={() => doExport('scored', 'xlsx')}
               exporting={exporting}
@@ -338,7 +344,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
               disabled={!scoringAvailable || noIncludedRows}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
+              disabledReason={!scoringAvailable ? (scoreCacheStale || hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
               onExportCSV={() => doExport('scores_demo', 'csv')}
               onExportXLSX={() => doExport('scores_demo', 'xlsx')}
               exporting={exporting}
@@ -354,7 +360,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
               badge={scoringAvailable ? 'Ready' : 'Scoring required'}
               badgeColor={scoringAvailable ? 'success' : 'neutral'}
               disabled={!scoringAvailable || noIncludedRows}
-              disabledReason={!scoringAvailable ? (hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
+              disabledReason={!scoringAvailable ? (scoreCacheStale || hasSubscaleConfig ? 'Run scoring on the Configure screen to generate scored data.' : 'Configure scales with items on the Configure screen first.') : exclusionBlockedReason}
               onExportCSV={() => doExport('scores_only', 'csv')}
               onExportXLSX={() => doExport('scores_only', 'xlsx')}
               exporting={exporting}
@@ -369,7 +375,6 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <p className="text-xs text-info-700">
               Raw imported data is never modified. Exclusions are applied at export time based on the current exclusion state.
               {scoringAvailable && !savedScoringResult && ' Scores are computed on-the-fly from your current subscale configuration. Run scoring on the Configure screen to save a scoring version.'}
-              {savedExclusionsStale && ' Saved scores were computed with a different exclusion set. Scores have been recomputed using current exclusions.'}
             </p>
           </div>
         </div>

@@ -9,7 +9,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Line, ComposedChart, Scatter, ReferenceLine,
 } from 'recharts';
-import { supabase, Dataset, DemographicColumn, SubscaleGroup, ResponseScale } from '@/lib/supabase';
+import type { Dataset, DemographicColumn, Project, SubscaleGroup, ResponseScale } from '@/types/domain';
+import { datasetRepository, surveyConfigRepository } from '@/storage/repositories';
 
 import {
   computeDataQuality, histogramData, qqPlotData, boxplotData,
@@ -18,7 +19,6 @@ import {
 } from '@/scientific/dataQuality';
 import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
 import { Button, Card } from './ui';
-import { Project } from '@/lib/supabase';
 
 interface SubscaleState {
   id: string; name: string;
@@ -47,9 +47,9 @@ function configuredRange(subscale: SubscaleState): { min: number; max: number } 
 interface Props {
   project: Project;
   excludedRows: Set<number>;
-  onToggleRow: (rowIndex: number) => void;
-  onBulkExclude: (indices: number[]) => void;
-  onSetExcludedRows: (rows: Set<number>) => void;
+  onToggleRow: (rowIndex: number) => Promise<void>;
+  onBulkExclude: (indices: number[]) => Promise<void>;
+  onSetExcludedRows: (rows: Set<number>) => Promise<void>;
   onInspectRow: (rowIndex: number) => void;
   onGoToExport: () => void;
   sharedDatasetId: string | null;
@@ -68,16 +68,21 @@ export function DataQualityScreen({
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [thresholds, setThresholds] = useState<QualityThresholds>(DEFAULT_THRESHOLDS);
   const [allowedNonResponse, setAllowedNonResponse] = useState<AllowedNonResponse>(DEFAULT_ALLOWED_NON_RESPONSE);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [newTextValue, setNewTextValue] = useState('');
   const [newSentinelValue, setNewSentinelValue] = useState('');
 
   // ── Load datasets ──
   const loadDatasets = useCallback(async () => {
-    const { data } = await supabase.from('datasets').select('*').eq('project_id', project.id).order('created_at', { ascending: true });
-    const dsList = (data || []) as Dataset[];
-    setDatasets(dsList);
-    if (dsList.length > 0 && !activeDatasetId) setActiveDatasetId(dsList[0].id);
+    try {
+      const dsList = await datasetRepository.list(project.id);
+      setDatasets(dsList);
+      if (dsList.length > 0 && !activeDatasetId) setActiveDatasetId(dsList[0].id);
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to load datasets: ${(error as Error).message}`);
+    }
   }, [project.id, activeDatasetId]);
 
   // When datasets load and no active dataset is set, pick the first
@@ -94,32 +99,29 @@ export function DataQualityScreen({
     if (!ds) { setDataset(null); return; }
     setDataset(ds);
 
+    let cancelled = false;
     (async () => {
-      const [{ data: demoData }, { data: subData }] = await Promise.all([
-        supabase.from('demographic_columns').select('*').eq('dataset_id', activeDatasetId),
-        supabase.from('subscale_groups').select('*').eq('dataset_id', activeDatasetId).order('display_order'),
-      ]);
-      setDemoCols((demoData || []) as DemographicColumn[]);
-      if (subData) {
-        const subs: SubscaleState[] = [];
-        for (const sub of subData as SubscaleGroup[]) {
-          const { data: scaleData } = await supabase.from('response_scales').select('*').eq('subscale_id', sub.id).maybeSingle();
-          const scale = scaleData as ResponseScale | null;
-          subs.push({
-            id: sub.id, name: sub.name,
-            items: sub.items || [],
-            scoringMethod: sub.scoring_method,
-            minValue: scale?.min_value ?? null,
-            maxValue: scale?.max_value ?? null,
-            scaleType: (scale?.scale_type as 'numeric' | 'categorical') || 'numeric',
-            labelMap: scale?.label_map || [],
-          });
-        }
-        setSubscaleStates(subs);
-      } else {
-        setSubscaleStates([]);
+      try {
+        const config = await surveyConfigRepository.get(activeDatasetId);
+        if (!config) throw new Error('Dataset configuration is missing.');
+        if (cancelled) return;
+        setDemoCols(config.demographic_columns);
+        setSubscaleStates(config.subscales.map((subscale) => ({
+          id: subscale.id,
+          name: subscale.name,
+          items: subscale.items ?? [],
+          scoringMethod: subscale.scoring_method,
+          minValue: subscale.response_scale?.min_value ?? null,
+          maxValue: subscale.response_scale?.max_value ?? null,
+          scaleType: subscale.response_scale?.scale_type ?? 'numeric',
+          labelMap: subscale.response_scale?.label_map ?? [],
+        })));
+        setStorageError(null);
+      } catch (error) {
+        if (!cancelled) setStorageError(`Failed to load dataset configuration: ${(error as Error).message}`);
       }
     })();
+    return () => { cancelled = true; };
   }, [activeDatasetId, datasets]);
 
   // ── Derived state ──
@@ -233,11 +235,7 @@ export function DataQualityScreen({
       allowedNonResponse,
       thresholds,
       {
-        rowIds: rows.map((row, index) => {
-          const id = row.ID;
-          const value = typeof id === 'string' || typeof id === 'number' ? String(id).trim() : '';
-          return value || `row-${index}`;
-        }),
+        rowIds: dataset.row_ids,
         normalizedMatrix: qualityNormalization?.normalizedMatrix,
         reverseRangesByColumn: qualityNormalization?.reverseRangesByColumn,
         responseOptionCount: qualityNormalization?.responseOptionCount ?? undefined,
@@ -250,28 +248,47 @@ export function DataQualityScreen({
   const excludedCount = excludedRows.size;
 
   // ── Handlers ──
-  const handleBulkExclude = (category: FlagCategory) => {
+  const handleBulkExclude = async (category: FlagCategory) => {
     if (!qualityResult) return;
     const indices = qualityResult.flags
       .filter((f) => f.categories.has(category) && !excludedRows.has(f.rowIndex))
       .map((f) => f.rowIndex);
     if (indices.length === 0) return;
-    onBulkExclude(indices);
+    try {
+      await onBulkExclude(indices);
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to save row exclusions: ${(error as Error).message}`);
+    }
   };
 
   // Exclude all flagged rows, or include all if every row is already excluded
-  const handleExcludeAllToggle = () => {
+  const handleExcludeAllToggle = async () => {
     if (!qualityResult) return;
     const flaggedIndices = qualityResult.flags.map((f) => f.rowIndex);
     const allFlaggedExcluded = flaggedIndices.length > 0 && flaggedIndices.every((idx) => excludedRows.has(idx));
-    if (allFlaggedExcluded) {
-      // Un-exclude all flagged rows
-      const next = new Set(excludedRows);
-      for (const idx of flaggedIndices) next.delete(idx);
-      onSetExcludedRows(next);
-    } else {
-      // Exclude all flagged rows that aren't already excluded
-      onBulkExclude(flaggedIndices.filter((idx) => !excludedRows.has(idx)));
+    try {
+      if (allFlaggedExcluded) {
+        // Un-exclude all flagged rows
+        const next = new Set(excludedRows);
+        for (const idx of flaggedIndices) next.delete(idx);
+        await onSetExcludedRows(next);
+      } else {
+        // Exclude all flagged rows that aren't already excluded
+        await onBulkExclude(flaggedIndices.filter((idx) => !excludedRows.has(idx)));
+      }
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to save row exclusions: ${(error as Error).message}`);
+    }
+  };
+
+  const toggleRow = async (rowIndex: number) => {
+    try {
+      await onToggleRow(rowIndex);
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Failed to save row exclusion: ${(error as Error).message}`);
     }
   };
 
@@ -311,6 +328,7 @@ export function DataQualityScreen({
     return (
       <div className="h-full flex items-center justify-center bg-secondary-50">
         <div className="text-center">
+          {storageError && <p role="alert" className="mb-3 text-sm text-error-700">{storageError}</p>}
           <div className="w-16 h-16 rounded-2xl bg-secondary-100 flex items-center justify-center mx-auto mb-4">
             <ShieldCheck className="w-8 h-8 text-secondary-400" />
           </div>
@@ -324,7 +342,9 @@ export function DataQualityScreen({
   if (!dataset) {
     return (
       <div className="h-full flex items-center justify-center bg-secondary-50">
-        <div className="text-sm text-secondary-500">Loading data quality analysis...</div>
+        <div className="text-sm text-secondary-500" role={storageError ? 'alert' : undefined}>
+          {storageError ?? 'Loading data quality analysis...'}
+        </div>
       </div>
     );
   }
@@ -370,6 +390,11 @@ export function DataQualityScreen({
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-auto">
+        {storageError && (
+          <div role="alert" className="mx-6 mt-4 px-4 py-2 bg-error-50 text-sm text-error-700 rounded-lg">
+            {storageError}
+          </div>
+        )}
         {/* ── Header ── */}
         <div className="px-6 py-4 bg-white border-b border-secondary-200">
           <div className="flex items-start justify-between">
@@ -588,7 +613,7 @@ export function DataQualityScreen({
                           {flag.reasons.join(' · ')}
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <button onClick={() => onToggleRow(flag.rowIndex)}
+                          <button onClick={() => toggleRow(flag.rowIndex)}
                             className={`px-2.5 py-1 text-xs rounded-full font-medium transition-colors ${excludedRows.has(flag.rowIndex) ? 'bg-success-100 text-success-700 hover:bg-success-200' : 'bg-error-100 text-error-700 hover:bg-error-200'}`}>
                             {excludedRows.has(flag.rowIndex) ? 'Include' : 'Exclude'}
                           </button>

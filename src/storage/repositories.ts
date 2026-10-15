@@ -38,7 +38,7 @@ export interface DatasetRepository {
 
 export interface SurveyConfigRepository {
   get(datasetId: string): Promise<SurveyConfigRecord | null>;
-  save(datasetId: string, config: SurveyConfigRecord): Promise<void>;
+  save(datasetId: string, config: SurveyConfigRecord): Promise<SurveyConfigRecord>;
 }
 
 export interface TemplateInput {
@@ -58,6 +58,7 @@ export interface ExclusionRepository {
 }
 
 export interface ScoreRepository {
+  getLatest(datasetId: string): Promise<ScoreResultRecord | null>;
   getCurrent(
     datasetId: string,
     hashes: Pick<ScoreResultRecord, 'dataset_hash' | 'config_hash' | 'spec_version'>,
@@ -314,12 +315,14 @@ export const surveyConfigRepository: SurveyConfigRepository = {
   },
 
   async save(datasetId, config) {
-    await db.transaction('rw', db.survey_configs, async () => {
-      await db.survey_configs.put({
+    return db.transaction('rw', db.survey_configs, async () => {
+      const saved = {
         ...config,
         dataset_id: datasetId,
         updated_at: Date.now(),
-      });
+      };
+      await db.survey_configs.put(saved);
+      return saved;
     });
   },
 };
@@ -463,8 +466,12 @@ export const exclusionRepository: ExclusionRepository = {
 };
 
 export const scoreRepository: ScoreRepository = {
+  async getLatest(datasetId) {
+    return (await db.score_results.get(datasetId)) ?? null;
+  },
+
   async getCurrent(datasetId, hashes) {
-    const result = await db.score_results.get(datasetId);
+    const result = await this.getLatest(datasetId);
     if (!result) return null;
     if (
       result.dataset_hash !== hashes.dataset_hash ||

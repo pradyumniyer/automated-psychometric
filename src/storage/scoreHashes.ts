@@ -1,8 +1,27 @@
-import { normalizeResponseMatrix, type SubscaleConfig } from '@/scientific/scoring';
-import type { Dataset } from '@/types/domain';
+import { normalizeResponseMatrix, type SubscaleConfig } from '../scientific/scoring';
+import type { Dataset } from '../types/domain';
 import type { ScoreResultRecord, SurveyConfigRecord } from './schema';
 
 export const SCIENTIFIC_SPEC_VERSION = 'scientific-spec-v2';
+
+export function buildSubscaleConfigs(config: SurveyConfigRecord): SubscaleConfig[] {
+  const scales = config.subscales.length > 0
+    ? config.subscales
+    : config.overall_scale ? [config.overall_scale] : [];
+  return scales.map((subscale) => ({
+    id: subscale.id,
+    name: subscale.name,
+    items: subscale.items,
+    scoringMethod: subscale.scoring_method,
+    customFormula: subscale.scoring_method === 'custom' ? subscale.custom_formula : null,
+    responseScale: {
+      scaleType: subscale.response_scale?.scale_type ?? 'numeric',
+      minValue: subscale.response_scale?.min_value ?? undefined,
+      maxValue: subscale.response_scale?.max_value ?? undefined,
+      labelMap: subscale.response_scale?.label_map ?? [],
+    },
+  }));
+}
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;

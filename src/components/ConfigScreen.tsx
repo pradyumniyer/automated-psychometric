@@ -60,8 +60,8 @@ export function ConfigScreen({
   highlightRowIndex: number | null;
   onClearHighlight: () => void;
   excludedRows: Set<number>;
-  onToggleRowExclusion: (rowIndex: number) => void;
-  onSetExcludedRows: (rows: Set<number>) => void;
+  onToggleRowExclusion: (rowIndex: number) => Promise<void>;
+  onSetExcludedRows: (rows: Set<number>) => Promise<void>;
   onGoToQuality: () => void;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
@@ -138,8 +138,7 @@ export function ConfigScreen({
         : overrides.overallScale,
       linkedTemplateId: overrides.linkedTemplateId,
     }, existing);
-    await surveyConfigRepository.save(dataset.id, config);
-    return config;
+    return surveyConfigRepository.save(dataset.id, config);
   };
 
   // ── Import preview state ──
@@ -199,7 +198,7 @@ export function ConfigScreen({
 
       const excludedRowIds = (await exclusionRepository.get(activeDatasetId))?.excluded_row_ids ?? [];
       const excludedIndices = await exclusionRepository.getExcludedIndices(activeDatasetId);
-      onSetExcludedRows(new Set(excludedIndices));
+      await onSetExcludedRows(new Set(excludedIndices));
 
       const effectiveOverall = adapted.overallScale ?? (() => {
         const itemColumns = ds.headers.filter((header) =>
@@ -565,7 +564,7 @@ export function ConfigScreen({
     }
     const wasExcluded = sharedExcludedRows.has(rowIndex);
     try {
-      onToggleRowExclusion(rowIndex);
+      await onToggleRowExclusion(rowIndex);
       await logAction(project.id, 'row_exclude_toggle',
         `${wasExcluded ? 'Included' : 'Excluded'} row ${rowIndex + 1}`,
         { rowId, action: wasExcluded ? 'include' : 'exclude' },
@@ -796,7 +795,7 @@ export function ConfigScreen({
         }
         const newSet = new Set(sharedExcludedRows);
         if (newSet.has(rowIndex)) newSet.delete(rowIndex); else newSet.add(rowIndex);
-        onSetExcludedRows(newSet);
+        await onSetExcludedRows(newSet);
         await deleteAction(action.id);
         const hist = await fetchHistory(dataset.id); setHistory(hist);
         setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
