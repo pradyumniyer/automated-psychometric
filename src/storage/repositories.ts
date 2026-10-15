@@ -53,6 +53,7 @@ export interface ExclusionRepository {
   get(datasetId: string): Promise<ExclusionStateRecord | null>;
   replace(datasetId: string, rowIds: Iterable<string>): Promise<void>;
   toggle(datasetId: string, rowId: string): Promise<void>;
+  getExcludedIndices(datasetId: string, orderedRowIds?: readonly string[]): Promise<number[]>;
 }
 
 export interface ScoreRepository {
@@ -76,8 +77,8 @@ export interface TemplateRepository {
 }
 
 export interface HistoryRepository {
-  append(event: Omit<HistoryRecord, 'id' | 'ts'>): Promise<void>;
-  list(datasetId: string): Promise<HistoryRecord[]>;
+  append(event: Omit<import('@/types/domain').ActionHistory, 'id' | 'created_at'>): Promise<void>;
+  list(datasetId: string): Promise<import('@/types/domain').ActionHistory[]>;
   delete(actionId: string): Promise<void>;
 }
 
@@ -134,6 +135,19 @@ function toTemplate(record: TemplateRecord): Template {
     version: record.version,
     created_at: new Date(record.created_at).toISOString(),
     updated_at: new Date(record.updated_at).toISOString(),
+  };
+}
+
+function toHistory(record: HistoryRecord) {
+  return {
+    id: record.id,
+    project_id: record.project_id,
+    dataset_id: record.dataset_id ?? null,
+    action_type: record.action_type,
+    description: record.summary,
+    payload: record.payload,
+    undo_data: record.undo_data,
+    created_at: new Date(record.ts).toISOString(),
   };
 }
 
@@ -238,7 +252,7 @@ export const datasetRepository: DatasetRepository = {
       project_id: input.projectId,
       dataset_id: id,
       action_type: 'import',
-      description: `Imported ${input.fileName} [${input.sheetName}] (${input.rows.length} rows, ${input.headers.length} cols)`,
+      summary: `Imported ${input.fileName} [${input.sheetName}] (${input.rows.length} rows, ${input.headers.length} cols)`,
       payload: {
         fileName: input.fileName,
         sheetName: input.sheetName,
@@ -365,13 +379,125 @@ export const templateRepository: TemplateRepository = {
           project_id: dataset.project_id,
           dataset_id: datasetId,
           action_type: 'template_apply',
-          description: `Applied template: ${template.name} (v${template.version})`,
+          summary: `Applied template: ${template.name} (v${template.version})`,
           payload: { templateId, templateVersion: template.version },
           undo_data: null,
           ts: now,
         });
       },
     );
+  },
+};
+
+export const exclusionRepository: ExclusionRepository = {
+  async get(datasetId) {
+    return (await db.exclusion_state.get(datasetId)) ?? null;
+  },
+
+  async replace(datasetId, rowIds) {
+    const requestedIds = [...new Set(rowIds)];
+    await db.transaction(
+      'rw',
+      [db.datasets, db.exclusion_state],
+      async () => {
+        const dataset = await db.datasets.get(datasetId);
+        if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
+        const knownIds = new Set(dataset.row_ids);
+        const unknownIds = requestedIds.filter((rowId) => !knownIds.has(rowId));
+        if (unknownIds.length > 0) {
+          throw new Error(`Unknown row ID(s) for dataset "${datasetId}": ${unknownIds.join(', ')}`);
+        }
+        await db.exclusion_state.put({
+          dataset_id: datasetId,
+          excluded_row_ids: requestedIds,
+        });
+      },
+    );
+  },
+
+  async toggle(datasetId, rowId) {
+    await db.transaction(
+      'rw',
+      [db.datasets, db.exclusion_state],
+      async () => {
+        const dataset = await db.datasets.get(datasetId);
+        if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
+        if (!dataset.row_ids.includes(rowId)) {
+          throw new Error(`Row ID "${rowId}" does not belong to dataset "${datasetId}".`);
+        }
+        const state = await db.exclusion_state.get(datasetId);
+        const excluded = new Set(state?.excluded_row_ids ?? []);
+        if (excluded.has(rowId)) excluded.delete(rowId);
+        else excluded.add(rowId);
+        await db.exclusion_state.put({
+          dataset_id: datasetId,
+          excluded_row_ids: [...excluded],
+        });
+      },
+    );
+  },
+
+  async getExcludedIndices(datasetId, orderedRowIds) {
+    const dataset = await db.datasets.get(datasetId);
+    if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
+    const rowIds = orderedRowIds ?? dataset.row_ids;
+    const excluded = new Set((await db.exclusion_state.get(datasetId))?.excluded_row_ids ?? []);
+    return rowIds.flatMap((rowId, index) => excluded.has(rowId) ? [index] : []);
+  },
+};
+
+export const scoreRepository: ScoreRepository = {
+  async getCurrent(datasetId, hashes) {
+    const result = await db.score_results.get(datasetId);
+    if (!result) return null;
+    if (
+      result.dataset_hash !== hashes.dataset_hash ||
+      result.config_hash !== hashes.config_hash ||
+      result.spec_version !== hashes.spec_version
+    ) return null;
+    return result;
+  },
+
+  async save(datasetId, result) {
+    return db.transaction('rw', db.score_results, async () => {
+      const previous = await db.score_results.get(datasetId);
+      const saved: ScoreResultRecord = {
+        ...result,
+        dataset_id: datasetId,
+        version: (previous?.version ?? 0) + 1,
+      };
+      await db.score_results.put(saved);
+      return saved;
+    });
+  },
+};
+
+export const historyRepository: HistoryRepository = {
+  async append(event) {
+    const record: HistoryRecord = {
+      id: crypto.randomUUID(),
+      project_id: event.project_id,
+      ...(event.dataset_id ? { dataset_id: event.dataset_id } : {}),
+      action_type: event.action_type,
+      summary: event.description,
+      payload: event.payload,
+      undo_data: event.undo_data,
+      ts: Date.now(),
+    };
+    await db.transaction('rw', db.history, async () => {
+      await db.history.add(record);
+    });
+  },
+
+  async list(datasetId) {
+    const records = await db.history.where('dataset_id').equals(datasetId).toArray();
+    return records.sort((left, right) => right.ts - left.ts).map(toHistory);
+  },
+
+  async delete(actionId) {
+    await db.transaction('rw', db.history, async () => {
+      await db.history.delete(actionId);
+    });
   },
 };
 

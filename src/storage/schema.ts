@@ -83,8 +83,14 @@ export interface TemplateRecord extends Omit<Template, 'created_at' | 'updated_a
   updated_at: number;
 }
 
-export interface HistoryRecord extends Omit<ActionHistory, 'created_at'> {
+export interface HistoryRecord {
+  id: string;
+  project_id: string;
+  dataset_id?: string;
   ts: number;
+  action_type: string;
+  summary: string;
+  payload: Record<string, unknown>;
   undo_data: { rowId?: string; [key: string]: unknown } | null;
 }
 
