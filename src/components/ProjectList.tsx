@@ -1,37 +1,53 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase, Project } from '@/lib/supabase';
+import { projectRepository } from '@/storage/repositories';
+import type { Project } from '@/types/domain';
 import { Button, Card, Modal, EmptyState } from './ui';
 import { Plus, FolderOpen, Trash2, FlaskConical, FileText, Calendar } from 'lucide-react';
 
 export function ProjectList({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from('projects').select('*').order('updated_at', { ascending: false });
-    if (!error && data) setProjects(data as Project[]);
-    setLoading(false);
+    try {
+      setProjects(await projectRepository.list());
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(`Failed to load projects: ${(error as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const createProject = async () => {
     if (!newName.trim()) return;
-    const { data, error } = await supabase.from('projects').insert({
-      name: newName.trim(), description: newDesc.trim(),
-    }).select().single();
-    if (!error && data) {
+    try {
+      const project = await projectRepository.create({
+        name: newName.trim(),
+        description: newDesc.trim(),
+      });
+      setErrorMessage(null);
       setShowCreate(false); setNewName(''); setNewDesc('');
-      onOpenProject(data as Project);
+      onOpenProject(project);
+    } catch (error) {
+      setErrorMessage(`Failed to create project: ${(error as Error).message}`);
     }
   };
 
   const deleteProject = async (id: string) => {
-    await supabase.from('projects').delete().eq('id', id);
-    setProjects(projects.filter((p) => p.id !== id));
+    try {
+      await projectRepository.delete(id);
+      setProjects(projects.filter((p) => p.id !== id));
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(`Failed to delete project: ${(error as Error).message}`);
+    }
   };
 
   return (
@@ -59,6 +75,8 @@ export function ProjectList({ onOpenProject }: { onOpenProject: (p: Project) => 
         {/* Project grid */}
         {loading ? (
           <div className="text-center py-16 text-secondary-400">Loading...</div>
+        ) : errorMessage ? (
+          <div role="alert" className="px-4 py-3 mb-4 bg-error-50 text-sm text-error-700 rounded-lg">{errorMessage}</div>
         ) : projects.length === 0 ? (
           <EmptyState
             icon={FolderOpen}
