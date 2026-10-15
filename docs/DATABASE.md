@@ -20,12 +20,13 @@ This file replaces the old `data-model.md`.
 |--------|------|-------|
 | id | string (uuid) | PK |
 | name | string | |
+| description | string | Optional project description shown in the project list |
 | project_type | string | `survey_scoring` \| `content_validity` \| `longitudinal` \| `ema_helpers` |
 | created_at / updated_at | number (epoch ms) | |
 | last_tab | string? | UX restore |
 
 ### `datasets`
-| id (PK) | project_id (FK, indexed) | name | sheet_name? | headers: string[] | rows: JSON (array of row arrays; **one representation, row arrays**) | row_ids: string[] (stable ID per row, assigned at import, never reused or renumbered) | row_meta? | import_meta? (file name, header_row, data_start_row) | created_at |
+| id (PK) | project_id (FK, indexed) | name | sheet_name? | headers: string[] | rows: JSON (array of row arrays; **one representation, row arrays**) | row_ids: string[] (stable ID per row, assigned once at import with `crypto.randomUUID()`, never reused, regenerated or renumbered) | row_meta? | column_meta (imported column labels) | import_meta? (file name, header_row, data_start_row) | created_at |
 
 ### `survey_configs` (one per dataset)
 | Column | Type | Notes |
@@ -42,16 +43,18 @@ This file replaces the old `data-model.md`.
 | proration_enabled | boolean | default **false** |
 | proration_max_missing_pct | integer | **20 \| 25 \| 50** (integer percent; never a fraction) |
 | dq_thresholds | JSON | overrides of the defaults in scientific-spec §2 |
+| linked_template_id | string? | Template applied to this dataset, if any |
 | updated_at | number | |
+`allowed_nonresponse` and `dq_thresholds` are schema fields; persistence from the screens is deferred.
 
 ### `exclusion_state` (one per dataset)
 `dataset_id` (PK), `excluded_row_ids: string[]` (stable row IDs from `datasets.row_ids`; **never positions**, so re-imports, filtering or reordering cannot shift exclusions onto other people).
 
-### `score_results` (cache, optional)
-`dataset_id` (PK), `computed_at`, `dataset_hash`, `config_hash`, `spec_version`, `payload` JSON (per-row scores keyed by row ID, band labels, `prorated`, `n_imputed_items`). Always recomputable from rows + config; **stale hashes block display and export** (scientific-spec §9).
+### `score_results` (latest cache, optional)
+`dataset_id` (PK), `version` integer (increments per scoring run), `computed_at`, `dataset_hash`, `config_hash`, `spec_version`, `payload` JSON (per-row scores keyed by row ID, band labels, `prorated`, `n_imputed_items`). Keep only the latest result. Always recomputable from rows + config; **stale hashes block display and export** (scientific-spec §9).
 
 ### `templates`
-`id` (PK), `name`, `kind` (`instrument` \| `import` \| `dq`), `payload` (config snapshot **without rows**; includes proration threshold if the instrument manual prescribes one), `created_at`. Free tier: count ≤ 2, enforced in app logic.
+`id` (PK), `name`, `description`, `instrument`, `kind` (`instrument` \| `import` \| `dq`), `version` integer, `payload` (definition/config snapshot **without rows**; includes proration threshold if the instrument manual prescribes one), `created_at`, `updated_at`. Free tier: count ≤ 2, enforced in app logic.
 
 ### `cv_datasets`, `cv_configs`, `cv_results` (Phase 2)
 - `cv_datasets`: id, project_id, headers, rows, row_types (item|dimension per row), import_meta.
@@ -64,7 +67,7 @@ dataset_id, person_id_column, wave_column, item_columns[], constant_columns[].
 dataset_id, id_column, timestamp_column, item_columns[], bin_rules JSON.
 
 ### `history` (undo)
-`id`, `dataset_id`, `ts`, `action_type`, `summary`, `undo_data` JSON?. Retain the last N entries per dataset (N set in code).
+`id`, `project_id`, `dataset_id`? (optional), `ts`, `action_type`, `summary`, `undo_data` JSON? (row exclusions are keyed by stable row ID, never position). Retain the last N entries per dataset (N set in code).
 
 ### `settings` (key–value)
 `key` (PK), `value` JSON. Keys: `theme`, `tour_seen`, `schema_version`.
