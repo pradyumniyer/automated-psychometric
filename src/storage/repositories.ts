@@ -18,8 +18,9 @@ export interface DatasetImportInput {
   headers: string[];
   rows: Record<string, unknown>[];
   columnMeta: Record<string, unknown>;
-  headerRow: number;
-  dataStartRow: number;
+  headerRow?: number;
+  dataStartRow?: number;
+  demographicColumns?: Omit<import('@/types/domain').DemographicColumn, 'id' | 'project_id' | 'dataset_id' | 'created_at'>[];
 }
 
 export interface ProjectRepository {
@@ -108,7 +109,7 @@ function toProject(record: ProjectRecord): Project {
   };
 }
 
-function toDataset(record: DatasetRecord): Dataset {
+function toDataset(record: DatasetRecord, linkedTemplateId: string | null = null): Dataset {
   return {
     id: record.id,
     project_id: record.project_id,
@@ -122,7 +123,7 @@ function toDataset(record: DatasetRecord): Dataset {
     row_ids: record.row_ids,
     row_count: record.rows.length,
     col_count: record.headers.length,
-    linked_template_id: null,
+    linked_template_id: linkedTemplateId,
     created_at: new Date(record.created_at).toISOString(),
   };
 }
@@ -200,12 +201,17 @@ export const projectRepository: ProjectRepository = {
 export const datasetRepository: DatasetRepository = {
   async list(projectId) {
     const records = await db.datasets.where('project_id').equals(projectId).sortBy('created_at');
-    return records.map(toDataset);
+    return Promise.all(records.map(async (record) => {
+      const config = await db.survey_configs.get(record.id);
+      return toDataset(record, config?.linked_template_id ?? null);
+    }));
   },
 
   async get(datasetId) {
     const record = await db.datasets.get(datasetId);
-    return record ? toDataset(record) : null;
+    if (!record) return null;
+    const config = await db.survey_configs.get(datasetId);
+    return toDataset(record, config?.linked_template_id ?? null);
   },
 
   async import(input) {
@@ -225,16 +231,24 @@ export const datasetRepository: DatasetRepository = {
       column_meta: input.columnMeta,
       import_meta: {
         file_name: input.fileName,
-        header_row: input.headerRow,
-        data_start_row: input.dataStartRow,
+        ...(input.headerRow !== undefined ? { header_row: input.headerRow } : {}),
+        ...(input.dataStartRow !== undefined ? { data_start_row: input.dataStartRow } : {}),
       },
       created_at: now,
     };
     const initialConfig: SurveyConfigRecord = {
       dataset_id: id,
       id_columns: [],
-      demographic_columns: [],
-      item_columns: [...input.headers],
+      demographic_columns: (input.demographicColumns ?? []).map((suggestion) => ({
+        ...suggestion,
+        id: crypto.randomUUID(),
+        project_id: input.projectId,
+        dataset_id: id,
+        created_at: new Date(now).toISOString(),
+      })),
+      item_columns: input.headers.filter((header) =>
+        !(input.demographicColumns ?? []).some((suggestion) => suggestion.column_name === header),
+      ),
       response_scale: { type: 'numeric' },
       subscales: [],
       bands: [],
@@ -258,8 +272,8 @@ export const datasetRepository: DatasetRepository = {
       payload: {
         fileName: input.fileName,
         sheetName: input.sheetName,
-        headerRow: input.headerRow,
-        dataStartRow: input.dataStartRow,
+        ...(input.headerRow !== undefined ? { headerRow: input.headerRow } : {}),
+        ...(input.dataStartRow !== undefined ? { dataStartRow: input.dataStartRow } : {}),
       },
       undo_data: null,
       ts: now,

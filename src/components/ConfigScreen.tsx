@@ -8,10 +8,23 @@ import {
   PanelLeftOpen, Sigma, TrendingUp, ShieldCheck,
 } from 'lucide-react';
 import {
-  supabase, Project, Dataset, DemographicColumn, SubscaleGroup, SubscaleItem,
-  ResponseScale, InterpretationBand, Template, TemplateDefinition,
   ActionHistory,
-} from '@/lib/supabase';
+  Dataset,
+  DemographicColumn,
+  Project,
+  SubscaleItem,
+  Template,
+  TemplateDefinition,
+} from '@/types/domain';
+import {
+  datasetRepository,
+  exclusionRepository,
+  scoreRepository,
+  surveyConfigRepository,
+  templateRepository,
+} from '@/storage/repositories';
+import { createScoreHashes } from '@/storage/scoreHashes';
+import { fromSurveyConfigRecord, toSurveyConfigRecord } from '@/storage/viewAdapters';
 import { logAction, fetchHistory, deleteAction } from '@/lib/history';
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
@@ -104,6 +117,30 @@ export function ConfigScreen({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const performAutoSaveRef = useRef<() => Promise<void>>(async () => {});
+  const persistSurveyConfig = async (overrides: {
+    demographicColumns?: DemographicColumn[];
+    subscales?: SubscaleState[];
+    bands?: Record<string, BandState[]>;
+    overallScale?: SubscaleState | null;
+    linkedTemplateId?: string | null;
+  } = {}) => {
+    if (!dataset) throw new Error('No active dataset to save.');
+    const existing = await surveyConfigRepository.get(dataset.id);
+    const config = toSurveyConfigRecord({
+      datasetId: dataset.id,
+      projectId: project.id,
+      headers: dataset.headers,
+      demographicColumns: overrides.demographicColumns ?? demoCols,
+      subscales: overrides.subscales ?? subscaleStates,
+      bands: overrides.bands ?? bandStates,
+      overallScale: overrides.overallScale === undefined
+        ? (subscaleStates.length === 0 ? overallScale : null)
+        : overrides.overallScale,
+      linkedTemplateId: overrides.linkedTemplateId,
+    }, existing);
+    await surveyConfigRepository.save(dataset.id, config);
+    return config;
+  };
 
   // ── Import preview state ──
   const [importPreviewRequest, setImportPreviewRequest] = useState<ImportPreviewRequest | null>(null);
@@ -119,12 +156,18 @@ export function ConfigScreen({
 
   // ── Load datasets ──
   const loadDatasets = useCallback(async () => {
-    const { data } = await supabase.from('datasets').select('*').eq('project_id', project.id).order('created_at', { ascending: true });
-    const dsList = (data || []) as Dataset[];
-    setDatasets(dsList);
-    if (dsList.length > 0 && !activeDatasetId) setActiveDatasetId(dsList[0].id);
-    const { data: tmplData } = await supabase.from('templates').select('*').order('name');
-    if (tmplData) setTemplates(tmplData as Template[]);
+    try {
+      const [dsList, tmplData] = await Promise.all([
+        datasetRepository.list(project.id),
+        templateRepository.list(),
+      ]);
+      setDatasets(dsList);
+      setTemplates(tmplData);
+      setStatusMsg(null);
+      if (dsList.length > 0 && !activeDatasetId) setActiveDatasetId(dsList[0].id);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to load project data: ${(error as Error).message}` });
+    }
   }, [project.id, activeDatasetId]);
 
   useEffect(() => { loadDatasets(); }, [loadDatasets]);
@@ -138,74 +181,67 @@ export function ConfigScreen({
     setConfigDirty(false);
     setShowUpdateTemplate(false);
 
-    // Load linked template
-    if (ds.linked_template_id) {
-      const { data: tmpl } = await supabase.from('templates').select('*').eq('id', ds.linked_template_id).maybeSingle();
-      setLinkedTemplate(tmpl as Template | null);
-    } else {
-      setLinkedTemplate(null);
-    }
+    try {
+      const config = await surveyConfigRepository.get(activeDatasetId);
+      if (!config) throw new Error('Dataset configuration is missing.');
+      const adapted = fromSurveyConfigRecord(config);
+      setDemoCols(adapted.demographicColumns);
+      setSubscaleStates(adapted.subscales);
+      setBandStates(adapted.bands);
+      setOverallScale(adapted.overallScale ?? {
+        id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
+        scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
+      });
+      const linked = config.linked_template_id
+        ? await templateRepository.get(config.linked_template_id)
+        : null;
+      setLinkedTemplate(linked);
 
-    const [{ data: demoData }, { data: subData }, { data: scoreData }] = await Promise.all([
-      supabase.from('demographic_columns').select('*').eq('dataset_id', activeDatasetId),
-      supabase.from('subscale_groups').select('*').eq('dataset_id', activeDatasetId).order('display_order'),
-      supabase.from('scoring_results').select('*').eq('dataset_id', activeDatasetId).order('version', { ascending: false }).limit(1).maybeSingle(),
-    ]);
-    if (demoData) setDemoCols(demoData as DemographicColumn[]);
-    else setDemoCols([]);
-    if (subData) {
-      const subs = subData as SubscaleGroup[];
-      const states: SubscaleState[] = [];
-      const bands: Record<string, BandState[]> = {};
-      for (const sub of subs) {
-        const [{ data: scaleData }, { data: bandData }] = await Promise.all([
-          supabase.from('response_scales').select('*').eq('subscale_id', sub.id).maybeSingle(),
-          supabase.from('interpretation_bands').select('*').eq('subscale_id', sub.id).order('display_order'),
-        ]);
-        const scale = scaleData as ResponseScale | null;
-        states.push({
-          id: sub.id, name: sub.name, items: sub.items || [],
-          scoringMethod: (sub.scoring_method as 'sum' | 'mean' | 'custom') || 'sum',
-          customFormula: sub.custom_formula || '',
-          scaleType: (scale?.scale_type as 'numeric' | 'categorical') || 'numeric',
-          minValue: scale?.min_value ?? null, maxValue: scale?.max_value ?? null,
-          labelMap: scale?.label_map || [],
-          displayOrder: sub.display_order || 0,
-        });
-        if (bandData) bands[sub.name] = (bandData as InterpretationBand[]).map((b) => ({ name: b.name, minScore: b.min_score, maxScore: b.max_score, color: b.color }));
-      }
-      setSubscaleStates(states);
-      setBandStates(bands);
-    } else {
-      setSubscaleStates([]);
-      setBandStates({});
-    }
-    if (scoreData) {
-      const sr = scoreData as { headers: string[]; rows: Record<string, unknown>[]; excluded_rows: number[] };
-      // Only hydrate App exclusions from saved scoring if App set is empty (first load).
-      // Never overwrite active DQ exclusions on tab switch.
-      if (sharedExcludedRows.size === 0 && sr.excluded_rows && sr.excluded_rows.length > 0) {
-        onSetExcludedRows(new Set(sr.excluded_rows));
-      }
-      setScoringResult({ headers: sr.headers, rows: sr.rows as Record<string, number | string | null>[], subscaleScores: {}, scaleScores: {}, interpretationLabels: {}, overallScaleScore: undefined, rowIds: [], normalizedMatrix: { values: [], states: [] }, excludedRowIndices: sr.excluded_rows || [], configSnapshot: { subscales: [], bands: {} } });
-    } else {
+      const excludedRowIds = (await exclusionRepository.get(activeDatasetId))?.excluded_row_ids ?? [];
+      const excludedIndices = await exclusionRepository.getExcludedIndices(activeDatasetId);
+      onSetExcludedRows(new Set(excludedIndices));
+
+      const effectiveOverall = adapted.overallScale ?? (() => {
+        const itemColumns = ds.headers.filter((header) =>
+          !adapted.demographicColumns.some((column) => column.column_name === header),
+        );
+        const detected = detectScale(ds.headers, ds.rows, itemColumns);
+        return {
+          id: 'overall', name: 'Overall Scale',
+          items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
+          scoringMethod: 'sum' as const, customFormula: '',
+          scaleType: detected.scaleType, minValue: detected.minValue, maxValue: detected.maxValue,
+          labelMap: detected.scaleType === 'categorical'
+            ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
+            : [],
+          displayOrder: 0,
+        };
+      })();
+      if (adapted.subscales.length === 0) setOverallScale(effectiveOverall);
+      const configs: SubscaleConfig[] = (adapted.subscales.length ? adapted.subscales : [effectiveOverall]).map((sub) => ({
+        id: sub.id,
+        name: sub.name,
+        items: sub.items,
+        scoringMethod: sub.scoringMethod,
+        customFormula: sub.scoringMethod === 'custom' ? sub.customFormula : null,
+        responseScale: {
+          scaleType: sub.scaleType,
+          minValue: sub.minValue ?? undefined,
+          maxValue: sub.maxValue ?? undefined,
+          labelMap: sub.labelMap,
+        },
+      }));
+      const hashes = await createScoreHashes(ds, config, configs, excludedRowIds);
+      const cached = await scoreRepository.getCurrent(activeDatasetId, hashes);
+      setScoringResult(cached?.payload.result as ReturnType<typeof scoreDataset> | null ?? null);
+      const hist = await fetchHistory(activeDatasetId);
+      setHistory(hist);
+      setStatusMsg(null);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to load dataset configuration: ${(error as Error).message}` });
       setScoringResult(null);
     }
-    if (subData && (subData as SubscaleGroup[]).length === 0 && ds) {
-      const demoNames = new Set((demoData || []).map((d) => d.column_name));
-      const itemCols = ds.headers.filter((h) => !demoNames.has(h));
-      if (itemCols.length > 0) {
-        const det = detectScale(ds.headers, ds.rows as Record<string, unknown>[], itemCols);
-        setOverallScale({
-          id: 'overall', name: 'Overall Scale', items: itemCols.map((col, i) => ({ column: col, order: i, reverse: false })),
-          scoringMethod: 'sum', customFormula: '', scaleType: det.scaleType, minValue: det.minValue, maxValue: det.maxValue,
-          labelMap: det.scaleType === 'categorical' ? det.uniqueValues.map((label, i) => ({ label, value: i + 1 })) : [], displayOrder: 0,
-        });
-      }
-    }
-    const hist = await fetchHistory(activeDatasetId);
-    setHistory(hist);
-  }, [activeDatasetId, datasets]);
+  }, [activeDatasetId, datasets, onSetExcludedRows]);
 
   useEffect(() => { loadDatasetConfig(); }, [loadDatasetConfig]);
 
@@ -220,33 +256,17 @@ export function ConfigScreen({
     if (!dataset || !configDirty) return;
     setSaveState('saving');
     try {
-      for (const sub of subscaleStates) {
-        await supabase.from('subscale_groups').update({
-          name: sub.name, items: sub.items, scoring_method: sub.scoringMethod,
-          custom_formula: sub.scoringMethod === 'custom' ? sub.customFormula : null,
-          display_order: sub.displayOrder,
-        }).eq('id', sub.id);
-        const { data: es } = await supabase.from('response_scales').select('id').eq('subscale_id', sub.id).maybeSingle();
-        const sd = { project_id: project.id, dataset_id: dataset.id, subscale_id: sub.id, scale_type: sub.scaleType, min_value: sub.minValue, max_value: sub.maxValue, label_map: sub.labelMap };
-        if (es) await supabase.from('response_scales').update(sd).eq('id', es.id);
-        else await supabase.from('response_scales').insert(sd);
-        await supabase.from('interpretation_bands').delete().eq('subscale_id', sub.id);
-        const bands = bandStates[sub.name] || [];
-        for (let i = 0; i < bands.length; i++) {
-          await supabase.from('interpretation_bands').insert({ project_id: project.id, dataset_id: dataset.id, subscale_id: sub.id, name: bands[i].name, min_score: bands[i].minScore, max_score: bands[i].maxScore, color: bands[i].color, display_order: i });
-        }
-      }
-      // Save excluded rows to the latest scoring result if it exists
+      await persistSurveyConfig();
       setConfigDirty(false);
       setShowUpdateTemplate(!!linkedTemplate);
       setSaveState('saved');
       if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
       saveStateTimerRef.current = setTimeout(() => setSaveState('idle'), 2000);
-    } catch {
+    } catch (error) {
       setSaveState('idle');
-      setStatusMsg({ type: 'error', text: 'Auto-save failed. Your changes may not be persisted.' });
+      setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
     }
-  }, [dataset, configDirty, subscaleStates, bandStates, project.id, linkedTemplate]);
+  }, [dataset, configDirty, subscaleStates, bandStates, project.id, linkedTemplate, demoCols, overallScale]);
   performAutoSaveRef.current = performAutoSave;
 
   // Debounce auto-save: trigger 1s after configDirty becomes true
@@ -295,24 +315,21 @@ export function ConfigScreen({
     const queueTotal = currentRequest?.queueTotal ?? 1;
     try {
       const parsed = result.parsed;
-      const { data: newDs, error } = await supabase.from('datasets').insert({
-        project_id: project.id, file_name: pendingFile.name, sheet_name: result.sheetName,
-        headers: parsed.headers, rows: parsed.rows, column_meta: parsed.columnMeta || {},
-        row_count: parsed.rowCount, col_count: parsed.colCount,
-      }).select().single();
-      if (error) throw error;
-      const newDataset = newDs as Dataset;
-
-      // Insert demographics — if this fails, clean up the orphan dataset row
-      try {
-        const demoSuggestions = detectDemographics(parsed.headers, parsed.rows);
-        for (const s of demoSuggestions) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: newDataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
-      } catch (demoErr) {
-        await supabase.from('datasets').delete().eq('id', newDataset.id);
-        throw new Error(`Import failed during demographic detection and was rolled back: ${(demoErr as Error).message}`);
-      }
-
-      await logAction(project.id, 'import', `Imported ${pendingFile.name} [${result.sheetName}] (${parsed.rowCount} rows, ${parsed.colCount} cols)`, { fileName: pendingFile.name, sheetName: result.sheetName }, null, newDataset.id);
+      const suggestions = detectDemographics(parsed.headers, parsed.rows);
+      const newDataset = await datasetRepository.import({
+        projectId: project.id,
+        fileName: pendingFile.name,
+        sheetName: result.sheetName,
+        headers: parsed.headers,
+        rows: parsed.rows,
+        columnMeta: parsed.columnMeta || {},
+        demographicColumns: suggestions.map((suggestion) => ({
+          column_name: suggestion.column,
+          detected_by: suggestion.rule,
+          confidence: suggestion.confidence,
+          confirmed: suggestion.confidence >= 0.5,
+        })),
+      });
 
       // Build success message with empty-row info
       const emptyNote = result.emptyRowsKept > 0 ? ` (${result.emptyRowsKept} empty row${result.emptyRowsKept > 1 ? 's' : ''} kept)` : '';
@@ -357,33 +374,54 @@ export function ConfigScreen({
   // ── Demographics ──
   const toggleDemographic = async (col: string, isDemo: boolean) => {
     if (!dataset) return;
-    if (isDemo) {
-      const existing = demoCols.find((d) => d.column_name === col);
-      if (existing) await supabase.from('demographic_columns').delete().eq('id', existing.id);
-    } else {
-      await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: dataset.id, column_name: col, detected_by: 'manual', confidence: 1.0, confirmed: true });
+    try {
+      const nextDemoCols = isDemo
+        ? demoCols.filter((demographic) => demographic.column_name !== col)
+        : [...demoCols, {
+            id: crypto.randomUUID(),
+            project_id: project.id,
+            dataset_id: dataset.id,
+            column_name: col,
+            detected_by: 'manual',
+            confidence: 1,
+            confirmed: true,
+            created_at: new Date().toISOString(),
+          }];
+      await persistSurveyConfig({ demographicColumns: nextDemoCols });
+      setDemoCols(nextDemoCols);
+      await logAction(project.id, 'demographic_toggle', `${isDemo ? 'Removed' : 'Added'} demographic: ${col}`, { column: col, action: isDemo ? 'remove' : 'add' }, null, dataset.id);
+      await loadDatasetConfig();
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to save demographic settings: ${(error as Error).message}` });
     }
-    await logAction(project.id, 'demographic_toggle', `${isDemo ? 'Removed' : 'Added'} demographic: ${col}`, { column: col, action: isDemo ? 'remove' : 'add' }, null, dataset.id);
-    await loadDatasetConfig();
   };
 
   const markAllAsItems = async () => {
     if (!dataset) return;
-    await supabase.from('demographic_columns').delete().eq('dataset_id', dataset.id);
-    await logAction(project.id, 'demographic_bulk', 'Marked all columns as items', {}, null, dataset.id);
-    await loadDatasetConfig();
+    try {
+      await persistSurveyConfig({ demographicColumns: [] });
+      setDemoCols([]);
+      await logAction(project.id, 'demographic_bulk', 'Marked all columns as items', {}, null, dataset.id);
+      await loadDatasetConfig();
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to save demographic settings: ${(error as Error).message}` });
+    }
   };
 
   const deleteDataset = async (dsId: string) => {
     const ds = datasets.find((d) => d.id === dsId);
     if (!ds) return;
     if (!window.confirm(`Delete sheet "${ds.sheet_name || ds.file_name}"? This removes all its configuration and scoring data.`)) return;
-    await supabase.from('datasets').delete().eq('id', dsId);
-    await logAction(project.id, 'sheet_delete', `Deleted sheet: ${ds.sheet_name || ds.file_name}`, { datasetId: dsId }, null, dsId);
-    const remaining = datasets.filter((d) => d.id !== dsId);
-    setDatasets(remaining);
-    if (activeDatasetId === dsId) setActiveDatasetId(remaining.length > 0 ? remaining[0].id : null);
-    setStatusMsg({ type: 'info', text: `Deleted sheet "${ds.sheet_name || ds.file_name}".` });
+    try {
+      await datasetRepository.delete(dsId);
+      await logAction(project.id, 'sheet_delete', `Deleted sheet: ${ds.sheet_name || ds.file_name}`, { datasetId: dsId });
+      const remaining = datasets.filter((d) => d.id !== dsId);
+      setDatasets(remaining);
+      if (activeDatasetId === dsId) setActiveDatasetId(remaining.length > 0 ? remaining[0].id : null);
+      setStatusMsg({ type: 'info', text: `Deleted sheet "${ds.sheet_name || ds.file_name}".` });
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to delete sheet: ${(error as Error).message}` });
+    }
   };
 
   // ── Subscales ──
@@ -391,31 +429,38 @@ export function ConfigScreen({
     if (!dataset) return;
     const name = `Subscale ${subscaleStates.length + 1}`;
     const order = subscaleStates.length;
-    const { data, error } = await supabase.from('subscale_groups').insert({ project_id: project.id, dataset_id: dataset.id, name, items: [], scoring_method: 'sum', display_order: order }).select().single();
-    if (error) return;
-    const newSub = data as SubscaleGroup;
-    setSubscaleStates([...subscaleStates, { id: newSub.id, name, items: [], scoringMethod: 'sum', customFormula: '', scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: order }]);
-    setActiveSubscaleId(newSub.id);
-    setActiveStep('subscales');
-    await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
-    const hist = await fetchHistory(dataset.id); setHistory(hist);
-    // Scroll the new subscale into view after render
-    setTimeout(() => {
-      const el = document.querySelector(`[data-subscale-id="${newSub.id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, labelMap: [], displayOrder: order };
+    try {
+      await persistSurveyConfig({ subscales: [...subscaleStates, newSub] });
+      setSubscaleStates([...subscaleStates, newSub]);
+      setActiveSubscaleId(newSub.id);
+      setActiveStep('subscales');
+      await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
+      const hist = await fetchHistory(dataset.id); setHistory(hist);
+      setTimeout(() => {
+        const el = document.querySelector(`[data-subscale-id="${newSub.id}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to create subscale: ${(error as Error).message}` });
+    }
   };
 
   const deleteSubscale = async (id: string) => {
     if (!dataset) return;
     const sub = subscaleStates.find((s) => s.id === id);
-    await supabase.from('subscale_groups').delete().eq('id', id);
     const updated = subscaleStates.filter((s) => s.id !== id).map((s, i) => ({ ...s, displayOrder: i }));
-    setSubscaleStates(updated);
-    if (sub) { const nb = { ...bandStates }; delete nb[sub.name]; setBandStates(nb); }
-    await logAction(project.id, 'subscale_delete', `Deleted subscale: ${sub?.name || id}`, {}, null, dataset.id);
-    const hist = await fetchHistory(dataset.id); setHistory(hist);
-    markDirty();
+    const nextBands = { ...bandStates };
+    if (sub) delete nextBands[sub.name];
+    try {
+      await persistSurveyConfig({ subscales: updated, bands: nextBands });
+      setSubscaleStates(updated);
+      setBandStates(nextBands);
+      await logAction(project.id, 'subscale_delete', `Deleted subscale: ${sub?.name || id}`, {}, null, dataset.id);
+      const hist = await fetchHistory(dataset.id); setHistory(hist);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to delete subscale: ${(error as Error).message}` });
+    }
   };
 
   const renameSubscale = (id: string, name: string) => {
@@ -513,15 +558,24 @@ export function ConfigScreen({
   // ── Row exclusion (delegates to shared state in App) ──
   const toggleRowExclusion = async (rowIndex: number) => {
     if (!dataset) return;
+    const rowId = dataset.row_ids[rowIndex];
+    if (!rowId) {
+      setStatusMsg({ type: 'error', text: 'Cannot save this exclusion because the row has no stable ID.' });
+      return;
+    }
     const wasExcluded = sharedExcludedRows.has(rowIndex);
-    onToggleRowExclusion(rowIndex);
-    await logAction(project.id, 'row_exclude_toggle',
-      `${wasExcluded ? 'Included' : 'Excluded'} row ${rowIndex + 1}`,
-      { rowIndex, action: wasExcluded ? 'include' : 'exclude' },
-      { rowIndex, wasExcluded },
-      dataset.id,
-    );
-    const hist = await fetchHistory(dataset.id); setHistory(hist);
+    try {
+      onToggleRowExclusion(rowIndex);
+      await logAction(project.id, 'row_exclude_toggle',
+        `${wasExcluded ? 'Included' : 'Excluded'} row ${rowIndex + 1}`,
+        { rowId, action: wasExcluded ? 'include' : 'exclude' },
+        { rowId, wasExcluded },
+        dataset.id,
+      );
+      const hist = await fetchHistory(dataset.id); setHistory(hist);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to save row exclusion: ${(error as Error).message}` });
+    }
   };
 
   // ── Scoring ──
@@ -546,11 +600,24 @@ export function ConfigScreen({
       } else {
         for (const sub of subscaleStates) bandConfigs[sub.name] = (bandStates[sub.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
       }
-      const result = scoreDataset(dataset.rows as Record<string, unknown>[], dataset.headers, subConfigs, bandConfigs, Array.from(sharedExcludedRows));
+      const config = await persistSurveyConfig();
+      const excludedRowIds = [...sharedExcludedRows].map((index) => dataset.row_ids[index]).filter((id): id is string => !!id);
+      const result = scoreDataset(
+        dataset.rows,
+        dataset.headers,
+        subConfigs,
+        bandConfigs,
+        Array.from(sharedExcludedRows),
+        { rowIds: dataset.row_ids },
+      );
+      const hashes = await createScoreHashes(dataset, config, subConfigs, excludedRowIds);
+      const saved = await scoreRepository.save(dataset.id, {
+        ...hashes,
+        computed_at: Date.now(),
+        payload: { result },
+      });
       setScoringResult(result);
-      const { data: ls } = await supabase.from('scoring_results').select('version').eq('dataset_id', dataset.id).order('version', { ascending: false }).limit(1).maybeSingle();
-      const nv = (ls?.version || 0) + 1;
-      await supabase.from('scoring_results').insert({ project_id: project.id, dataset_id: dataset.id, version: nv, headers: result.headers, rows: result.rows, config_snapshot: { subscales: subConfigs, bands: bandConfigs }, excluded_rows: Array.from(sharedExcludedRows) });
+      const nv = saved.version;
       await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
       setStatusMsg({ type: 'success', text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.` });
       const hist = await fetchHistory(dataset.id); setHistory(hist);
@@ -563,13 +630,18 @@ export function ConfigScreen({
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) return validation.error;
     const def = buildTemplateDefinition(subscaleStates, bandStates);
-    const { error } = await supabase.from('templates').insert({ name, description, instrument, definition: def, version: 1 });
-    if (error) return `Failed to save: ${error.message}`;
-    await logAction(project.id, 'template_save', `Saved template: ${name}`);
-    setStatusMsg({ type: 'success', text: `Template "${name}" saved.` });
-    setShowTemplateModal(false);
-    await loadDatasets();
-    return null;
+    try {
+      await templateRepository.save({ name, description, instrument, definition: def, version: 1 });
+      await logAction(project.id, 'template_save', `Saved template: ${name}`);
+      setStatusMsg({ type: 'success', text: `Template "${name}" saved.` });
+      setShowTemplateModal(false);
+      await loadDatasets();
+      return null;
+    } catch (error) {
+      const message = `Failed to save: ${(error as Error).message}`;
+      setStatusMsg({ type: 'error', text: message });
+      return message;
+    }
   };
 
   const [pendingApplyTemplate, setPendingApplyTemplate] = useState<Template | null>(null);
@@ -597,33 +669,69 @@ export function ConfigScreen({
     }
 
     const def = template.definition as TemplateDefinition;
-    await supabase.from('demographic_columns').delete().eq('dataset_id', dataset.id);
-    const ds = detectDemographics(dataset.headers, dataset.rows as Record<string, unknown>[]);
-    for (const s of ds) await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: dataset.id, column_name: s.column, detected_by: s.rule, confidence: s.confidence, confirmed: s.confidence >= 0.5 });
-    await supabase.from('subscale_groups').delete().eq('dataset_id', dataset.id);
-    const ns: SubscaleState[] = [];
-    for (const sd of def.subscales) {
-      const matched = report.matchedBySubscale[sd.name] || [];
+    const nextBands: Record<string, BandState[]> = {};
+    const nextSubscales: SubscaleState[] = [];
+    for (const definition of def.subscales) {
+      const matched = report.matchedBySubscale[definition.name] || [];
       if (matched.length === 0) continue;
-      const { data: ng } = await supabase.from('subscale_groups').insert({ project_id: project.id, dataset_id: dataset.id, name: sd.name, items: matched, scoring_method: sd.scoringMethod, custom_formula: sd.customFormula || null, display_order: ns.length }).select().single();
-      if (ng) {
-        const nid = (ng as SubscaleGroup).id;
-        const scaleDef = def.responseScales.find((rs) => rs.subscaleName === sd.name);
-        const bandDef = def.interpretationBands.find((ib) => ib.subscaleName === sd.name);
-        ns.push({ id: nid, name: sd.name, items: matched, scoringMethod: sd.scoringMethod, customFormula: sd.customFormula || '', scaleType: scaleDef?.scaleType || 'numeric', minValue: scaleDef?.minValue ?? null, maxValue: scaleDef?.maxValue ?? null, labelMap: scaleDef?.labelMap || [], displayOrder: ns.length });
-        if (scaleDef) await supabase.from('response_scales').insert({ project_id: project.id, dataset_id: dataset.id, subscale_id: nid, scale_type: scaleDef.scaleType, min_value: scaleDef.minValue, max_value: scaleDef.maxValue, label_map: scaleDef.labelMap });
-        if (bandDef) { for (let i = 0; i < bandDef.bands.length; i++) await supabase.from('interpretation_bands').insert({ project_id: project.id, dataset_id: dataset.id, subscale_id: nid, name: bandDef.bands[i].name, min_score: bandDef.bands[i].minScore, max_score: bandDef.bands[i].maxScore, color: bandDef.bands[i].color, display_order: i }); setBandStates((p) => ({ ...p, [sd.name]: bandDef.bands.map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color })) })); }
+      const scale = def.responseScales.find((item) => item.subscaleName === definition.name);
+      const band = def.interpretationBands.find((item) => item.subscaleName === definition.name);
+      nextSubscales.push({
+        id: crypto.randomUUID(),
+        name: definition.name,
+        items: matched,
+        scoringMethod: definition.scoringMethod,
+        customFormula: definition.customFormula || '',
+        scaleType: scale?.scaleType || 'numeric',
+        minValue: scale?.minValue ?? null,
+        maxValue: scale?.maxValue ?? null,
+        labelMap: scale?.labelMap || [],
+        displayOrder: nextSubscales.length,
+      });
+      if (band) {
+        nextBands[definition.name] = band.bands.map((item) => ({
+          name: item.name,
+          minScore: item.minScore,
+          maxScore: item.maxScore,
+          color: item.color,
+        }));
       }
     }
-    setSubscaleStates(ns);
-    await supabase.from('datasets').update({ linked_template_id: template.id }).eq('id', dataset.id);
-    setLinkedTemplate(template);
-    await logAction(project.id, 'template_apply', `Applied template: ${template.name} (v${template.version})`, { templateId: template.id }, null, dataset.id);
-    setStatusMsg({ type: 'success', text: formatMatchSummary(report) });
-    setPendingApplyTemplate(null);
-    setApplyMatchReport(null);
-    setShowTemplateModal(false);
-    await loadDatasetConfig();
+    const nextDemographics = detectDemographics(dataset.headers, dataset.rows).map((suggestion) => ({
+      id: crypto.randomUUID(),
+      project_id: project.id,
+      dataset_id: dataset.id,
+      column_name: suggestion.column,
+      detected_by: suggestion.rule,
+      confidence: suggestion.confidence,
+      confirmed: suggestion.confidence >= 0.5,
+      created_at: new Date().toISOString(),
+    }));
+    try {
+      const existing = await surveyConfigRepository.get(dataset.id);
+      const config = toSurveyConfigRecord({
+        datasetId: dataset.id,
+        projectId: project.id,
+        headers: dataset.headers,
+        demographicColumns: nextDemographics,
+        subscales: nextSubscales,
+        bands: nextBands,
+        overallScale: null,
+        linkedTemplateId: template.id,
+      }, existing);
+      await templateRepository.applyToDataset(template.id, dataset.id, config);
+      setDemoCols(nextDemographics);
+      setSubscaleStates(nextSubscales);
+      setBandStates(nextBands);
+      setLinkedTemplate(template);
+      setStatusMsg({ type: 'success', text: formatMatchSummary(report) });
+      setPendingApplyTemplate(null);
+      setApplyMatchReport(null);
+      setShowTemplateModal(false);
+      await loadDatasetConfig();
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to apply template: ${(error as Error).message}` });
+    }
   };
 
   const cancelApplyTemplate = () => {
@@ -636,20 +744,28 @@ export function ConfigScreen({
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) { setStatusMsg({ type: 'error', text: validation.error! }); return; }
     const def = buildTemplateDefinition(subscaleStates, bandStates);
-    await supabase.from('templates').update({ definition: def, version: linkedTemplate.version + 1 }).eq('id', linkedTemplate.id);
-    await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
-    setLinkedTemplate({ ...linkedTemplate, version: linkedTemplate.version + 1, definition: def });
-    setShowUpdateTemplate(false);
-    setStatusMsg({ type: 'success', text: `Template "${linkedTemplate.name}" updated to v${linkedTemplate.version + 1}.` });
-    await loadDatasets();
+    try {
+      await templateRepository.update(linkedTemplate.id, { definition: def, version: linkedTemplate.version + 1 });
+      await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
+      setLinkedTemplate({ ...linkedTemplate, version: linkedTemplate.version + 1, definition: def });
+      setShowUpdateTemplate(false);
+      setStatusMsg({ type: 'success', text: `Template "${linkedTemplate.name}" updated to v${linkedTemplate.version + 1}.` });
+      await loadDatasets();
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to update template: ${(error as Error).message}` });
+    }
   };
 
   const unlinkTemplate = async () => {
     if (!dataset) return;
-    await supabase.from('datasets').update({ linked_template_id: null }).eq('id', dataset.id);
-    setLinkedTemplate(null);
-    setShowUpdateTemplate(false);
-    setStatusMsg({ type: 'info', text: 'Template unlinked. Changes will no longer update the template.' });
+    try {
+      await persistSurveyConfig({ linkedTemplateId: null });
+      setLinkedTemplate(null);
+      setShowUpdateTemplate(false);
+      setStatusMsg({ type: 'info', text: 'Template unlinked. Changes will no longer update the template.' });
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to unlink template: ${(error as Error).message}` });
+    }
   };
 
   const handleExport = async (fmt: 'csv' | 'xlsx') => {
@@ -666,30 +782,51 @@ export function ConfigScreen({
 
   const undoAction = async (action: ActionHistory) => {
     if (!dataset) return;
-    if (action.action_type === 'row_exclude_toggle' && action.undo_data) {
-      const rowIndex = action.undo_data.rowIndex as number;
-      const newSet = new Set(sharedExcludedRows);
-      if (newSet.has(rowIndex)) newSet.delete(rowIndex); else newSet.add(rowIndex);
-      onSetExcludedRows(newSet);
-      await deleteAction(action.id);
-      const hist = await fetchHistory(dataset.id); setHistory(hist);
-      setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
-    } else if (action.action_type === 'demographic_toggle' && action.payload) {
-      const col = action.payload.column as string;
-      const wasAdd = action.payload.action === 'add';
-      if (wasAdd) {
-        const existing = demoCols.find((d) => d.column_name === col);
-        if (existing) await supabase.from('demographic_columns').delete().eq('id', existing.id);
+    try {
+      if (action.action_type === 'row_exclude_toggle' && action.undo_data) {
+        const rowId = action.undo_data.rowId;
+        if (!rowId) {
+          setStatusMsg({ type: 'error', text: 'Cannot undo: this history event has no stable row ID.' });
+          return;
+        }
+        const rowIndex = dataset.row_ids.indexOf(rowId);
+        if (rowIndex < 0) {
+          setStatusMsg({ type: 'error', text: 'Cannot undo: the affected row no longer exists in this dataset.' });
+          return;
+        }
+        const newSet = new Set(sharedExcludedRows);
+        if (newSet.has(rowIndex)) newSet.delete(rowIndex); else newSet.add(rowIndex);
+        onSetExcludedRows(newSet);
+        await deleteAction(action.id);
+        const hist = await fetchHistory(dataset.id); setHistory(hist);
+        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
+      } else if (action.action_type === 'demographic_toggle' && action.payload) {
+        const col = action.payload.column as string;
+        const wasAdd = action.payload.action === 'add';
+        const nextDemographics = wasAdd
+          ? demoCols.filter((demographic) => demographic.column_name !== col)
+          : [...demoCols, {
+              id: crypto.randomUUID(),
+              project_id: project.id,
+              dataset_id: dataset.id,
+              column_name: col,
+              detected_by: 'manual',
+              confidence: 1,
+              confirmed: true,
+              created_at: new Date().toISOString(),
+            }];
+        await persistSurveyConfig({ demographicColumns: nextDemographics });
+        setDemoCols(nextDemographics);
+        await deleteAction(action.id);
+        await loadDatasetConfig();
+        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
       } else {
-        await supabase.from('demographic_columns').insert({ project_id: project.id, dataset_id: dataset.id, column_name: col, detected_by: 'manual', confidence: 1.0, confirmed: true });
+        await loadDatasetConfig();
+        await deleteAction(action.id);
+        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
       }
-      await deleteAction(action.id);
-      await loadDatasetConfig();
-      setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
-    } else {
-      await loadDatasetConfig();
-      await deleteAction(action.id);
-      setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: `Failed to undo action: ${(error as Error).message}` });
     }
   };
 
