@@ -25,7 +25,7 @@ export interface DatasetRecord {
   name: string;
   sheet_name?: string;
   headers: string[];
-  rows: RowValue[][];
+  rows: unknown[][];
   row_ids: string[];
   row_meta?: Record<string, unknown>;
   column_meta: Record<string, unknown>;
