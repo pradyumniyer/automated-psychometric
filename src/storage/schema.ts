@@ -1,5 +1,4 @@
 import type {
-  ActionHistory,
   DemographicColumn,
   InterpretationBand,
   ResponseScale,
