@@ -90,7 +90,7 @@ export interface HistoryRecord {
   action_type: string;
   summary: string;
   payload: Record<string, unknown>;
-  undo_data: { rowId?: string; [key: string]: unknown } | null;
+  undo_data: { rowId: string; wasExcluded?: boolean } | null;
 }
 
 export interface SettingRecord {

@@ -77,7 +77,9 @@ export interface TemplateRepository {
 }
 
 export interface HistoryRepository {
-  append(event: Omit<import('@/types/domain').ActionHistory, 'id' | 'created_at'>): Promise<void>;
+  append(event: Omit<import('@/types/domain').ActionHistory, 'id' | 'created_at'> & {
+    undo_data: { rowId: string; wasExcluded?: boolean } | null;
+  }): Promise<void>;
   list(datasetId: string): Promise<import('@/types/domain').ActionHistory[]>;
   delete(actionId: string): Promise<void>;
 }
@@ -474,6 +476,12 @@ export const scoreRepository: ScoreRepository = {
 
 export const historyRepository: HistoryRepository = {
   async append(event) {
+    if (event.undo_data && (
+      typeof event.undo_data.rowId !== 'string' ||
+      'rowIndex' in event.undo_data
+    )) {
+      throw new Error('History undo data must identify rows by rowId, not row position.');
+    }
     const record: HistoryRecord = {
       id: crypto.randomUUID(),
       project_id: event.project_id,

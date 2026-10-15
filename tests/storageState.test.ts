@@ -114,4 +114,17 @@ describe('row-ID exclusions, score cache, and history repositories', () => {
     expect(event.undo_data).toEqual({ rowId, wasExcluded: false });
     expect(event.undo_data).not.toHaveProperty('rowIndex');
   });
+
+  it('rejects positional row undo data', async () => {
+    const dataset = await createDataset();
+
+    await expect(historyRepository.append({
+      project_id: dataset.project_id,
+      dataset_id: dataset.id,
+      action_type: 'row_exclude_toggle',
+      description: 'Excluded row',
+      payload: { action: 'exclude' },
+      undo_data: { rowIndex: 1, wasExcluded: false },
+    })).rejects.toThrow('rowId');
+  });
 });
