@@ -5,7 +5,7 @@
  * Demographics are detected per-dataset and must not be treated as fixed template content.
  */
 
-import type { TemplateDefinition } from '@/lib/supabase';
+import type { TemplateDefinition } from '@/types/domain';
 import { recognizeColumns } from '@/scientific/detection';
 
 export interface TemplateItemRef {

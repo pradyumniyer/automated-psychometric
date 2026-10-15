@@ -1,6 +1,6 @@
 # Psychometric Prep
 
-Psychometric Prep is a browser-based psychometric workbench for transforming messy questionnaire exports into analysis-ready, scored data. The app is being re-platformed as a local-first tool so respondent matrices stay on the user’s machine while the project workflow remains familiar and trustworthy.
+Psychometric Prep is a browser-based psychometric workbench for transforming messy questionnaire exports into analysis-ready, scored data. Project, dataset, configuration, exclusion, and scoring data are stored locally in the browser using IndexedDB; respondent data is not sent to a server.
 
 ## Run locally
 
