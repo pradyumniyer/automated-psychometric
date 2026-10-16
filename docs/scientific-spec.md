@@ -19,9 +19,11 @@
 | `valid` | numeric (or label-mapped to numeric) and within [L, H] | no | — |
 | `blank` | empty / whitespace / unparseable | **yes** | "unexpected missing" |
 | `allowed` | matches the user's allowed non-response list (N/A, Prefer not to say, -99, 99, 999, …) | **yes** | reported separately, **not** a DQ failure |
-| `out_of_range` | numeric but < L or > H | **yes** | reported separately as out-of-range |
+| `out_of_range` | numeric but < L or > H | **yes** (default; action per scale) | reported separately as out-of-range |
+| `special_scored` | a response the user gave a number outside the normal scale (e.g. N/A scored 0) | no (scored; **not reversed** unless ticked) | counted as valid |
+| `unmapped` | a word or code with no decision | **yes** (invalid until decided) | flagged |
 
-**Scale range.** `L` and `H` are the lowest and highest possible response values. They come from the configured response scale (numeric min/max, or min/max of the label map). They are **never silently inferred** for scoring. If missing, scoring is blocked with a visible message ("Set the response scale min/max"). DQ may infer from data for display, labelled "inferred".
+**Scale range.** `L` and `H` are the lowest and highest possible response values. They come from the response scale (detected by the conventional-range rule in `RESPONSE_SCALES.md` §4 and shown for confirmation, set manually, or implied by a preset/label map). The range is never widened to include stray values. If no range can be determined, scoring is blocked with a visible message. See `RESPONSE_SCALES.md` for how special responses and word labels resolve.
 
 **One normalized matrix.** Scoring, data quality, reliability, descriptives, outliers and item analysis must all read the **same normalized data matrix**, produced by one function that applies the state table above (value mapping, range check, allowed non-response). No module may call `Number()` on raw cells itself. (Fixes the old disagreement between scoring and reliability for text responses.)
 

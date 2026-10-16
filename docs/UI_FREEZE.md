@@ -22,6 +22,7 @@
 Note: the app's visible name is **Psychometric Workbench**; docs use the working name *Psychometric Prep*. Final name is open item O2.
 
 ## Owner-approved changes (hands-on testing, Oct 2026): see `FIX_LIST.md`
+Response Scales step redesign (Apply first to all on top, one combined card per subscale) and removal of the allowed non-response editor from Data Quality (`RESPONSE_SCALES.md`); simpler Data Quality summary with thresholds under "Advanced".
 Subscale builder popup flow (F6), import summary line with Adjust fallback (Import v2), unscored-rows status line (F2), export column order equals the grid (F3), neutral normality wording and axis formatting (F7), opaque row-number column (F5), reload persistence via routes (F4).
 
 ## Changes that ARE allowed

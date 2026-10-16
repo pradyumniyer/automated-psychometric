@@ -89,6 +89,8 @@ Tenancy early on: one browser profile, local projects. An account (later) exists
 | P1-25 | Kolmogorov–Smirnov (Lilliefors) shown beside Shapiro–Wilk in Data quality |
 | P1-26 | Locale-aware number import (decimal point or comma, confirmed in import preview); header and template matching only suggest, with Unicode normalization, and the user confirms |
 | P1-27 | Provenance on every result and export; stale results blocked; stable row IDs for exclusions |
+| P1-28 | Response Scales v2: detected range + other-responses table, special responses missing or scored, out-of-range handling (`RESPONSE_SCALES.md`) |
+| P1-29 | Import v2: automatic layout detection with a one-line summary (`IMPORT_DETECTION.md`) |
 
 ### 4.3 Content validity + item analysis (Phase 2)
 | ID | Feature |

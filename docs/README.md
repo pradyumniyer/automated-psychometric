@@ -7,6 +7,9 @@ What changed from v1 and what needs your sign-off: [CHANGELOG-v2.md](./CHANGELOG
 | Doc | Purpose |
 |-----|---------|
 | [PRODUCT.md](./PRODUCT.md) | **Product walkthrough: what users see, click and get** |
+| [RESPONSE_SCALES.md](./RESPONSE_SCALES.md) | Response Scales v2 spec (ADR 0015) |
+| [AGENT_PROMPTS.md](./AGENT_PROMPTS.md) | Ready-to-paste prompts for the coding agent, in order |
+| [CHAT_HANDOFF.md](./CHAT_HANDOFF.md) | Briefing to paste into a new Claude chat |
 | [FIX_LIST.md](./FIX_LIST.md) | **Owner fix list with acceptance criteria (current work)** |
 | [IMPORT_DETECTION.md](./IMPORT_DETECTION.md) | Import v2 spec: auto-detect layouts |
 | [PROGRESS.md](./PROGRESS.md) | **Where the build stands (steps done, findings, open items)** |

@@ -36,8 +36,8 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 - DQ thresholds, allowed non-responses and `last_tab` are in the schema but not yet persisted from the screens.
 - Math has been verified by tests; UI/UX was hand-checked by the owner after the storage wiring. A hand check of the Fixture A numbers through the UI is recommended (see owner checklist).
 
-## Current work: owner fix list (`FIX_LIST.md`)
-Batch 1 correctness (F1 missing-value codes before scale detection, F2 unscored-rows notice, F3 export = grid order and numeric cells, F4 reload persistence) → Batch 2 UX (F5–F8) → Batch 3 Import v2 (`IMPORT_DETECTION.md`). Scoring check: 26 of 30 Fixture A rows match the owner's Excel; the 4 that differ have missing/invalid items (Excel's SUM skips them).
+## Current work: owner fix list (`FIX_LIST.md`), prompts in `AGENT_PROMPTS.md`
+No fix prompt has been run yet (last agent work = commit 4bffbeb, Supabase removal). Order: Batch 1 (F2 unscored-rows notice and unassigned warning, F3 export = grid and numeric cells, F4 reload persistence, F5 opaque `#` column) → Response Scales v2 (F1, `RESPONSE_SCALES.md`) → Batch 2 (F6 subscale popup, F7 normality panel, F8 proration control) → Import v2 (`IMPORT_DETECTION.md`) → owner checks templates, history, rest of DQ, Export, Report → cleanup (lint blocking in CI) → deploy → accounts/billing/cloud resume. Scoring check: 26 of 30 Fixture A rows match the owner's Excel; the 4 that differ have missing/invalid items (Excel's SUM skips them).
 
 ## Next (revised for credit budget)
 1. Lint cleanup + CI gates (lint and production audit blocking).
