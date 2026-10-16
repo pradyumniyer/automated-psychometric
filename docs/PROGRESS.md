@@ -1,6 +1,6 @@
 # Build progress log (current state; read this to know where the build stands)
 
-Branch: `local-first-rebuild`. Updated 14 Oct 2026. Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
+Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
 
 ## Done (commits)
 | Step | What | Commit |
@@ -13,6 +13,10 @@ Branch: `local-first-rebuild`. Updated 14 Oct 2026. Rules for agents: `PROJECT_R
 | 0c-2b | Data quality per spec §2: row-ID keyed flags, 20% missingness, longstring, row means, Tukey, z opt-in | c8924db |
 | 0c-2c | Reliability on the normalized matrix (Fixture A α, α-if-deleted, item-total r) | 1e80f0e |
 | 0c-2d | Accurate pnorm/qnorm/pt/qt, fixed Shapiro–Wilk and Lilliefors | a549c1f |
+| 0d | Replaced vulnerable `xlsx` with papaparse + read-excel-file + write-excel-file; import limits (20 MB, 100 MB uncompressed, 100:1, 25 sheets, 100k rows, 2,000 cols, 5M cells); `.xls` dropped; formula-injection neutralization; yellow XLSX fill for kept excluded rows | fe12aee, 00ffdf1 |
+| 0d+ | XLSX dates as ISO text (UTC); CI tests under 3 time zones; working agreement in `.github/copilot-instructions.md` | 2f048d9 |
+| 1a (1–4) | Dexie storage layer: schema, atomic import with stable row IDs, config/template repositories, row-ID exclusions, hashed score cache, row-ID history | 0e6e117, d06dfb6, 81526c0, df93acd, 2707eb4, ec4056e |
+| 1a (5) | All screens wired to local storage; Supabase removed from the app (client, SDK, env); production audit clean | 1d5bc53, 8f7d10c, 7e86c32, 4bffbeb |
 
 ## Findings that changed numbers users saw in the old app
 - Shapiro–Wilk was broken (W ≈ 0.002 instead of 0.98) because of a `qnorm` sign bug; Q–Q plot theoretical quantiles were also wrong.
@@ -23,10 +27,21 @@ Branch: `local-first-rebuild`. Updated 14 Oct 2026. Rules for agents: `PROJECT_R
 ## Known open items (not yet done)
 - UI shows binary "normal / not normal" wording (DataQualityScreen: `status`, `mainText`, `Verdict StatBox`); needs an approved text change (spec §2.6).
 - No UI switch yet for z-score outliers, proration, Overall options, or the KS line (approved additions, step 1e).
-- Lint: 11 errors, 4 warnings in untouched UI/library files (cleanup during the ConfigScreen split).
+- Lint: 10 errors, 4 warnings in existing UI/library files; make lint blocking in CI after cleanup.
 - Dev-only audit advisories (Vitest 3 tree; fixes need Vite 6 + plugin-react upgrade): schedule as its own toolchain-upgrade step.
-- Production audit: `ws` and `xlsx` (high). `xlsx` replacement is step 0d (ADR 0005, options need owner approval).
+- Production audit is now clean (0 vulnerabilities). Respondent data no longer goes to any server.
 - `distributions` `pchisq` `_logP` argument removed; `pnorm`/`qnorm` honour `logP`.
 
-## Next
-0d `xlsx` replacement (plan first, owner approves) → 0e shell/tokens → 0f Dexie storage → Phase 1a onward (`IMPLEMENTATION_PLAN.md`).
+- `ConfigScreen.tsx` is still ~1,700+ lines (split deferred). `supabase/migrations/` kept as history only. No Supabase data was migrated (prototype data).
+- DQ thresholds, allowed non-responses and `last_tab` are in the schema but not yet persisted from the screens.
+- Math has been verified by tests; UI/UX was hand-checked by the owner after the storage wiring. A hand check of the Fixture A numbers through the UI is recommended (see owner checklist).
+
+## Current work: owner fix list (`FIX_LIST.md`)
+Batch 1 correctness (F1 missing-value codes before scale detection, F2 unscored-rows notice, F3 export = grid order and numeric cells, F4 reload persistence) → Batch 2 UX (F5–F8) → Batch 3 Import v2 (`IMPORT_DETECTION.md`). Scoring check: 26 of 30 Fixture A rows match the owner's Excel; the 4 that differ have missing/invalid items (Excel's SUM skips them).
+
+## Next (revised for credit budget)
+1. Lint cleanup + CI gates (lint and production audit blocking).
+2. Error boundary, "delete all my data", backup/restore (approved UI additions in the existing style).
+3. First free deployment (static host) for a few real users.
+4. Accounts, billing, server-side plan, cloud resume (Phase 1h/1i); then launch page, Privacy Policy and Terms review.
+5. Later: `ConfigScreen` split, dark mode, toolchain upgrade (Vite 6), Phase 2 features.

@@ -21,6 +21,9 @@
 
 Note: the app's visible name is **Psychometric Workbench**; docs use the working name *Psychometric Prep*. Final name is open item O2.
 
+## Owner-approved changes (hands-on testing, Oct 2026): see `FIX_LIST.md`
+Subscale builder popup flow (F6), import summary line with Adjust fallback (Import v2), unscored-rows status line (F2), export column order equals the grid (F3), neutral normality wording and axis formatting (F7), opaque row-number column (F5), reload persistence via routes (F4).
+
 ## Changes that ARE allowed
 1. **The owner's fix list** (to be provided; each fix is specified individually and approved before building).
 2. **Invisible architecture changes:** storage, state structure, file layout, math corrections (the numbers change where the old math was wrong; the screens do not).
