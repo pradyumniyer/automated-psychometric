@@ -70,6 +70,16 @@ describe("resolveResponse", () => {
         expect(result.labels.find((label) => label.text === "Strongly Agree")?.value).toBe(5);
       });
 
+      it("matches full-width letters, non-breaking spaces, extra spaces, and mixed case", () => {
+        const result = matchResponsePreset([
+          "ＳＴＲＯＮＧＬＹ　ＡＧＲＥＥ",
+          "Strongly\u00a0Agree",
+          "  sTrOnGlY   aGrEe  ",
+        ]);
+        expect(result.preset?.name).toBe("5-pt Agreement");
+        expect(result.labels.find((label) => label.text === "Strongly Agree")?.value).toBe(5);
+      });
+
       it("leaves non-matching words unmapped", () => {
         const result = matchResponsePreset(["Red", "Blue", "Green"]);
         expect(result.preset).toBeNull();
