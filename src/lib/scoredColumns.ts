@@ -163,8 +163,19 @@ export function buildScoredColumnData({
     const sourceRow = result?.rows[index] ?? rawRow;
     const projected: Record<string, unknown> = {};
     for (const group of groups) {
-      for (const column of group.columns) {
-        projected[column.key] = sourceRow[column.key] ?? null;
+      for (const [columnIndex, column] of group.columns.entries()) {
+        const value = sourceRow[column.key] ?? null;
+        if (column.type === 'interpretation' && value === null) {
+          const scoreColumn = group.columns
+            .slice(0, columnIndex)
+            .reverse()
+            .find((candidate) => candidate.type === 'score');
+          projected[column.key] = scoreColumn && typeof sourceRow[scoreColumn.key] === 'number'
+            ? 'No band'
+            : null;
+        } else {
+          projected[column.key] = value;
+        }
       }
     }
     return projected;

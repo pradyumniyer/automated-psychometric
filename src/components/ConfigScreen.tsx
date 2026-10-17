@@ -36,7 +36,7 @@ import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
-import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
+import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -700,9 +700,10 @@ export function ConfigScreen({
           })
         : undefined;
       const unscoredSummary = getUnscoredRowSummary(result, displayIds);
+      const outOfBandSummary = getOutOfBandSummary(result, displayIds);
       setStatusMsg({
         type: 'success',
-        text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.${unscoredSummary ? ` ${unscoredSummary}` : ''}`,
+        text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.${unscoredSummary ? ` ${unscoredSummary}` : ''}${outOfBandSummary ? ` ${outOfBandSummary}` : ''}`,
       });
       const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (e) { setStatusMsg({ type: 'error', text: `Scoring failed: ${(e as Error).message}` }); }

@@ -68,6 +68,9 @@ export function LiveGrid({
 
   const renderCell = (row: Record<string, unknown>, col: GridColumn) => {
     const val = row[col.key];
+    if (col.type === 'interpretation' && val === 'No band') {
+      return <span className="text-warning-700 font-medium">No band</span>;
+    }
     if (val != null && val !== '') return String(val);
     return <span className="text-secondary-300">—</span>;
   };

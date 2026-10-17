@@ -380,7 +380,7 @@ export function scoreDataset(
         const value = outputValues[output];
         if (!excluded && value !== null) {
           const outputRange = getOutputRange(output, subscale.items.length, ranges.get(subscale.id) ?? null);
-          label = classifyScore(value, outputBandList, outputRange?.kind ?? 'continuous');
+          label = classifyScore(value, outputBandList, outputRange?.kind ?? 'continuous') ?? 'No band';
         }
         const interpretationKey = interpretationColumnKey(groupName, output, shownOutputs.length);
         outRow[interpretationKey] = excluded ? 'Excluded' : label;

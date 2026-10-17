@@ -365,7 +365,11 @@ function IndividualReport({ dataset, scoredResult, subscaleGroups, bandConfigs, 
       return {
         scaleName: sub.name,
         score: typeof score === 'number' ? score : null,
-        band: typeof bandLabel === 'string' && bandLabel !== 'Excluded' ? bandLabel : null,
+        band: typeof bandLabel === 'string' && bandLabel !== 'Excluded'
+          ? bandLabel
+          : typeof score === 'number' && bands && bands.length > 0
+            ? 'No band'
+            : null,
         bands: bands || [],
         scoringMethod: scoreOutputLabel(output),
       };

@@ -235,12 +235,12 @@ export function ExportScreen({
         rows = scoredColumnData.rows;
         numericColumns = scoredColumnData.numericColumns;
       } else if (type === 'scores_demo') {
-        if (!scoredResult) throw new Error('Scoring not available');
+        if (!scoredResult || !scoredColumnData) throw new Error('Scoring not available');
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
         const scoreCols = scoredResult.headers.filter((h) => !dataset.headers.includes(h));
         headers = [...demoList, ...scoreCols];
         numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
-        rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
+        rows = scoredColumnData.rows.map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
           return out;
@@ -253,7 +253,7 @@ export function ExportScreen({
         );
         headers = [...demoList, ...scoreCols];
         numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
-        rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
+        rows = scoredColumnData.rows.map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
           return out;

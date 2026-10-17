@@ -3,7 +3,7 @@ import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import type { ScoringResult } from '../src/scientific/scoring';
 import { scoreDataset } from '../src/scientific/scoring';
-import { getUnassignedItemCount, getUnscoredRowSummary } from '../src/lib/scoringStatus';
+import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '../src/lib/scoringStatus';
 
 function scoringResult(
   rowIds: string[],
@@ -112,5 +112,30 @@ describe('scoring status', () => {
       ['Q1', 'Q2', 'Q3', 'Q4'],
       [{ items: [{ column: 'Q1' }, { column: 'Q3' }] }],
     )).toBe(2);
+  });
+
+  it('reports scored values outside every band without treating missing scores as No band', () => {
+    const result = scoringResult(['P01', 'P02', 'P03'], {
+      'Subscale 1 Mean': [3.6, null, 2],
+    });
+    result.headers = [
+      'Subscale 1 Mean',
+      'Subscale 1 Mean interpretation',
+    ];
+    result.rows = [
+      { 'Subscale 1 Mean': 3.6, 'Subscale 1 Mean interpretation': null },
+      { 'Subscale 1 Mean': null, 'Subscale 1 Mean interpretation': null },
+      { 'Subscale 1 Mean': 2, 'Subscale 1 Mean interpretation': 'Low' },
+    ];
+    expect(getOutOfBandSummary(result, result.rowIds)).toBe(
+      '1 scores fall outside every band: Subscale 1 Mean (P01)',
+    );
+    expect(getOutOfBandSummary({
+      ...result,
+      rows: result.rows.map((row) => ({
+        ...row,
+        'Subscale 1 Mean interpretation': row['Subscale 1 Mean'] === 3.6 ? 'Moderate' : row['Subscale 1 Mean interpretation'],
+      })),
+    }, result.rowIds)).toBeNull();
   });
 });

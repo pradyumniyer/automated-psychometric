@@ -67,6 +67,10 @@ const mutations: { name: string; mutate: ConfigMutation }[] = [
       ? { ...scale, scoringMethod: 'mean' }
       : scale),
   },
+  {
+    name: 'an interpretation band changes',
+    mutate: (current) => [...current],
+  },
 ];
 
 describe('score-cache invalidation for scoring configuration changes', () => {
@@ -95,7 +99,9 @@ describe('score-cache invalidation for scoring configuration changes', () => {
       headers: dataset.headers,
       demographicColumns: [],
       subscales: states,
-      bands: {},
+      bands: states === subscales
+        ? { Stress: [{ name: 'Low', minScore: 1, maxScore: 2, color: '#000000' }] }
+        : { Stress: [{ name: 'Low', minScore: 1, maxScore: 3, color: '#000000' }] },
       overallScale: null,
     });
 

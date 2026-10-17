@@ -93,6 +93,7 @@ describe('shared scored columns', () => {
         },
       },
     });
+
     const data = buildScoredColumnData({
       result: multiOutputResult,
       rawHeaders,
@@ -106,6 +107,45 @@ describe('shared scored columns', () => {
       'Stress Sum',
       'Stress Mean',
     ]);
+  });
+
+  it('keeps a numeric score visible as No band in shared grid/export rows', () => {
+    const meanSubscale = {
+      ...subscales[0],
+      name: 'Subscale 1',
+      scoringMethod: 'mean' as const,
+      showOutputs: ['mean'] as const,
+      items: [
+        { column: 'Q1', order: 0, reverse: false },
+        { column: 'Q2', order: 1, reverse: false },
+      ],
+    };
+    const meanResult = scoreDataset(
+      rows,
+      rawHeaders,
+      [meanSubscale],
+      {},
+      [],
+      {
+        bandsByOutput: {
+          stress: {
+            mean: [
+              { name: 'Low', minScore: 1, maxScore: 2 },
+              { name: 'High', minScore: 4, maxScore: 5 },
+            ],
+          },
+        },
+      },
+    );
+    const data = buildScoredColumnData({
+      result: meanResult,
+      rawHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant', 'Age'],
+      idColumns: ['Participant'],
+      subscales: [meanSubscale],
+    });
+    expect(data.rows[0]['Subscale 1 Interpretation']).toBe('No band');
   });
 
   it('preserves Fixture A scores and orders Sum, Mean and Custom outputs in the grid and export', () => {
