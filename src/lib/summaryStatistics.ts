@@ -6,6 +6,7 @@ export interface SummaryColumnStatistics {
   mean: number | null;
   nUsed: number;
   nNotCounted: number;
+  notCountedByKind?: Record<'blank' | 'special_missing' | 'out_of_range' | 'unmapped', number>;
 }
 
 export interface SummaryStatistics {
@@ -50,9 +51,28 @@ export function buildSummaryStatistics(
     const values = includedRows
       .map(({ row, index }) => {
         const state = itemStates?.[index]?.[column.key];
-        return state && state !== 'valid' ? null : numericCell(row[column.key]);
+        return state && state !== 'valid' && state !== 'special_scored'
+          ? null
+          : numericCell(row[column.key]);
       })
       .filter((value): value is number => value !== null);
+    const notCountedByKind = itemStates
+      ? includedRows.reduce((counts, { index }) => {
+          const state = itemStates[index]?.[column.key];
+          const kind = state === 'allowed' ? 'special_missing'
+            : state === 'blank' ? 'blank'
+              : state === 'out_of_range' ? 'out_of_range'
+                : state === 'unmapped' ? 'unmapped'
+                  : null;
+          if (kind) counts[kind]++;
+          return counts;
+        }, {
+          blank: 0,
+          special_missing: 0,
+          out_of_range: 0,
+          unmapped: 0,
+        })
+      : undefined;
     if (
       column.type === 'demo'
       && rows.every((row) => numericCell(row[column.key]) === null)
@@ -65,6 +85,7 @@ export function buildSummaryStatistics(
       mean: sum === null ? null : sum / values.length,
       nUsed: values.length,
       nNotCounted: includedRows.length - values.length,
+      ...(notCountedByKind ? { notCountedByKind } : {}),
     };
   }
 
@@ -125,7 +146,20 @@ export function buildSummaryExportContent(
     .filter((header) => statistics.columns[header].nNotCounted > 0)
     .map((header) => `${header} (${statistics.columns[header].nNotCounted})`);
   if (affectedColumns.length > 0) {
-    outputRows.push([`Not counted in this file: ${affectedColumns.join(', ')}`]);
+    const details = [...statistics.numericColumns]
+      .filter((header) => statistics.columns[header].nNotCounted > 0)
+      .map((header) => {
+        const breakdown = statistics.columns[header].notCountedByKind;
+        if (!breakdown) return `${header} (${statistics.columns[header].nNotCounted})`;
+        const kinds = Object.entries(breakdown)
+          .filter(([, count]) => count > 0)
+          .map(([kind, count]) => `${kind}: ${count}`)
+          .join(', ');
+        return kinds
+          ? `${header} (${statistics.columns[header].nNotCounted}) [${kinds}]`
+          : `${header} (${statistics.columns[header].nNotCounted})`;
+      });
+    outputRows.push([`Not counted in this file: ${details.join(', ')}`]);
   }
   outputRows.push([
     'Sum and Mean ignore not-counted cells, so a Sum can be lower than the full-sample total.',

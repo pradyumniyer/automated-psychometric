@@ -175,6 +175,8 @@ describe('summary statistics', () => {
     expect(notes.find((note) => note.startsWith('Not counted in this file:'))).toContain('Q4 (1)');
     const notCountedNote = notes.find((note) => note.startsWith('Not counted in this file:'));
     expect(notCountedNote).toContain('Overall Scale Score (3)');
+    expect(notCountedNote).toContain('Q4 (1) [out_of_range: 1]');
+    expect(notCountedNote).toContain('Q1 (1) [blank: 1]');
     expect(notCountedNote).not.toContain('Q5');
     expect(notes.at(-1)).toContain('Sum and Mean ignore not-counted cells');
 
