@@ -35,6 +35,7 @@ import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { validateBands, suggestBands } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridColumn, GridGroup } from './LiveGrid';
+import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -618,7 +619,11 @@ export function ConfigScreen({
       setScoringResult(result);
       const nv = saved.version;
       await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
-      setStatusMsg({ type: 'success', text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.` });
+      const unscoredSummary = getUnscoredRowSummary(result);
+      setStatusMsg({
+        type: 'success',
+        text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.${unscoredSummary ? ` ${unscoredSummary}` : ''}`,
+      });
       const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (e) { setStatusMsg({ type: 'error', text: `Scoring failed: ${(e as Error).message}` }); }
     setScoring(false);
@@ -1116,6 +1121,7 @@ export function ConfigScreen({
                     usedAutoScale={subscaleStates.length === 0 && !!dataset}
                     originalColCount={originalColCount} computedColCount={computedColCount}
                     hasSubscaleItems={subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom')}
+                    unassignedItemCount={subscaleStates.length > 0 ? getUnassignedItemCount(itemColumns, subscaleStates) : 0}
                   />
                 )}
               </div>
@@ -1681,12 +1687,13 @@ function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBa
 }
 
 // ── Scoring Panel ──
-function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount, hasSubscaleItems }: {
+function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount, hasSubscaleItems, unassignedItemCount }: {
   canScore: boolean; scoring: boolean; onRunScoring: () => void;
   scoringResult: ReturnType<typeof scoreDataset> | null; onExport: (f: 'csv' | 'xlsx') => void;
   excludedCount: number; subscaleCount: number; usedAutoScale: boolean;
   originalColCount: number; computedColCount: number;
   hasSubscaleItems: boolean;
+  unassignedItemCount: number;
 }) {
   return (
     <div className="p-3">
@@ -1712,6 +1719,14 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
       {!canScore && (
         <Card className="p-2.5 mb-3 border-warning-300 bg-warning-50/50">
           <div className="flex items-center gap-2 text-warning-700 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> {hasSubscaleItems ? 'All scales must have items assigned.' : 'No item columns available. Add non-demographic columns or assign items to a scale.'}</div>
+        </Card>
+      )}
+      {unassignedItemCount > 0 && (
+        <Card className="p-2.5 mb-3 border-warning-300 bg-warning-50/50">
+          <div className="flex items-center gap-2 text-warning-700 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {unassignedItemCount} item{unassignedItemCount === 1 ? '' : 's'} {unassignedItemCount === 1 ? 'is' : 'are'} not in any subscale and will not be scored.
+          </div>
         </Card>
       )}
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">
