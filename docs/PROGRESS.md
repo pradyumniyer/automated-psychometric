@@ -17,6 +17,7 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 | 0d+ | XLSX dates as ISO text (UTC); CI tests under 3 time zones; working agreement in `.github/copilot-instructions.md` | 2f048d9 |
 | 1a (1–4) | Dexie storage layer: schema, atomic import with stable row IDs, config/template repositories, row-ID exclusions, hashed score cache, row-ID history | 0e6e117, d06dfb6, 81526c0, df93acd, 2707eb4, ec4056e |
 | 1a (5) | All screens wired to local storage; Supabase removed from the app (client, SDK, env); production audit clean | 1d5bc53, 8f7d10c, 7e86c32, 4bffbeb |
+| P1 | F2 unscored-rows line and unassigned warning, F3 shared column builder and numeric export, F4 hash routes and reload persistence, F5 opaque # column, score-cache identity ignores DQ thresholds, cache invalidation tests (full suite 744 tests pass; lint 5 errors/3 warnings, down from 10/4) | 4477067, af989db, e264fc8, 7732db1, 9829418, e1f8c01 |
 
 ## Findings that changed numbers users saw in the old app
 - Shapiro–Wilk was broken (W ≈ 0.002 instead of 0.98) because of a `qnorm` sign bug; Q–Q plot theoretical quantiles were also wrong.
@@ -37,7 +38,7 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 - Math has been verified by tests; UI/UX was hand-checked by the owner after the storage wiring. A hand check of the Fixture A numbers through the UI is recommended (see owner checklist).
 
 ## Current work: owner fix list (`FIX_LIST.md`), prompts in `AGENT_PROMPTS.md`
-No fix prompt has been run yet (last agent work = commit 4bffbeb, Supabase removal). Order: Batch 1 (F2 unscored-rows notice and unassigned warning, F3 export = grid and numeric cells, F4 reload persistence, F5 opaque `#` column) → Response Scales v2 (F1, `RESPONSE_SCALES.md`) → Batch 2 (F6 subscale popup, F7 normality panel, F8 proration control) → Import v2 (`IMPORT_DETECTION.md`) → owner checks templates, history, rest of DQ, Export, Report → cleanup (lint blocking in CI) → deploy → accounts/billing/cloud resume. Scoring check: 26 of 30 Fixture A rows match the owner's Excel; the 4 that differ have missing/invalid items (Excel's SUM skips them).
+P1 done and hand-tested (17 Oct 2026). Hand test found: the unscored-rows line listed only P29 (must list P25, P26, P29, P30) and the toolbar had too many Sum/Mean controls. Next: P1b (F2 status-line fix, remove duplicate toolbar controls and Configure CSV/XLSX buttons, relabel, Summary sheet/file in the export) → P1c (subscale Show: Sum/Mean/Custom toggles, interpretation per column, bands per output) → P1d (Overall scale card, Overall bands and interpretation) → P2a-P2d Response Scales v2 (`RESPONSE_SCALES.md`, detection is a suggestion until confirmed) → P3 Batch 2 (F6 subscale popup, F7 normality panel, F8 proration) → P4 Import v2 → owner checks templates, history, rest of DQ, Export, Report → P5 cleanup (lint blocking in CI) → deploy → accounts/billing/cloud resume. Later, not specced: F11 Report rework (publication-ready APA-formatted section). Builder: Copilot Free (student plan sign-ups paused by GitHub).
 
 ## Next (revised for credit budget)
 1. Lint cleanup + CI gates (lint and production audit blocking).

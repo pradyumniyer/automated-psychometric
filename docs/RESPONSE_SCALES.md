@@ -36,13 +36,14 @@ Decimals present in a column → treated as continuous (slider): range from obse
 
 ## 6. Screen layout (the whole Response Scales step)
 - At the top: the **Apply first to all** button (copies range, labels, flip and start options from the first subscale to the others, then re-checks each one).
-- Below it: **one card per subscale**. Nothing else on the page.
+- Next to it: the **Overall scale** switch (section 11). When on, the Overall card sits above the subscale cards.
+- Below: **one card per subscale**. Nothing else on the page.
 - Inside each card, top to bottom:
   1. Header line: "Detected: 1–5 scale" with editable min and max and a **Confirm range** button (status: not confirmed / confirmed).
   2. Out-of-range message (only if needed) with links to the cells and the two actions: **Treat as missing** (default) or **Widen range**.
   3. **Other responses found** table (only if there are any): response, count, number box (empty = not scored). Built-in missing codes are grey, unknown responses amber. A small caption lists the built-in codes.
   4. **Word labels** section (shown automatically when words are found, otherwise behind a "Responses are words" link): preset dropdown, Flip order, Start at 0, the mapping rows, and a "values without a label" message.
-  5. Scoring method: sum, mean or custom formula (unchanged).
+  5. Score columns: **Show: Sum, Mean, Custom formula**, any combination, at least one (section 11).
 
 ## 7. Data Quality coordination
 - The old **allowed non-response editor is removed from Data Quality** (it is replaced by the per-card table). `special_missing` = allowed non-response (not an error); `special_scored` = valid; `out_of_range` and `unmapped` are flagged; `blank` = unexpected missing (thresholds and proration apply here).
@@ -72,3 +73,10 @@ Fixture A Q3/Q5 (detected 1–5; N/A and Prefer not to say as `special_missing`;
 14. Detection is a suggestion: Confirm range button and status; reverse-item subscales are not scored until confirmed.
 15. One-step-beyond rule: widened range that is itself a candidate defaults to Widen range; farther values default to Treat as missing.
 16. Apply first to all copies the confirmed state only if the first subscale is confirmed; templates carry confirmed ranges.
+
+## 11. Score outputs and the Overall card (owner design, 17 Oct 2026; built in P1c and P1d, kept by P2c)
+- Subscale card: toggles Show Sum / Mean / Custom formula (any combination, at least one). Per subscale, grid and export order: each shown score column followed by its own interpretation column (only when bands exist for that output), in the order Sum, Mean, Custom. Sum and Mean are always computable internally even when hidden. Old single method migrates to the matching toggle; old bands migrate to the first shown output.
+- Overall switch next to Apply first to all. On: Overall card above the subscale cards: **Based on** subscale Sums | Means | Custom scores (Custom only if every subscale has a custom formula) and **Combine by** Sum | Mean | Custom formula (formula refers to the chosen subscale values). Off: no card, no column, settings kept. Apply first to all never touches the Overall card. Strict: blank if any subscale value is blank (proration is F8). The Overall column has its own interpretation column once Overall bands are set.
+- Defaults reproduce today: switch on; Sums + Sum, or Means + Mean when every subscale is Mean-only.
+- Templates (section 8) also keep the Show toggles, the Overall settings and the bands per output.
+- Tests: Fixture A P01 Overall 37 (Sums, Sum), 18.5 (Sums, Mean); Sum of means; Mean of means; custom example; Custom disabled without subscale formulas; off removes the column; migration; cache invalidation on any of these settings.
