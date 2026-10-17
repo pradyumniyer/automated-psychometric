@@ -37,6 +37,7 @@ import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip 
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
+import { buildSummaryStatistics } from '@/lib/summaryStatistics';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -856,21 +857,20 @@ export function ConfigScreen({
   const summary = useMemo(() => {
     const sums: Record<string, number | null> = {};
     const means: Record<string, number | null> = {};
-    const includedRows = scoredColumnData.rows.filter((_, index) => !sharedExcludedRows.has(index));
-    for (const group of groups) {
-      for (const column of group.columns) {
-        if (column.type === 'interpretation') continue;
-        const values = includedRows
-          .map((row) => Number(row[column.key]))
-          .filter((value) => !Number.isNaN(value));
-        sums[column.key] = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null;
-        means[column.key] = values.length > 0
-          ? values.reduce((sum, value) => sum + value, 0) / values.length
-          : null;
-      }
+    const statistics = buildSummaryStatistics(
+      groups.flatMap((group) => group.columns),
+      scoredColumnData.rows,
+      sharedExcludedRows,
+      new Set(demoCols
+        .filter((column) => /\bID\b/i.test(column.detected_by))
+        .map((column) => column.column_name)),
+    );
+    for (const [key, column] of Object.entries(statistics.columns)) {
+      sums[key] = column.sum;
+      means[key] = column.mean;
     }
-    return { sums, means };
-  }, [scoredColumnData, sharedExcludedRows, groups]);
+    return { sums, means, numericColumns: statistics.numericColumns };
+  }, [scoredColumnData, sharedExcludedRows, groups, demoCols]);
 
   const displayRows = showExcludedOnly
     ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))
@@ -930,7 +930,13 @@ export function ConfigScreen({
           </div>
           <div className="w-px h-6 bg-secondary-200" />
           {/* Summary toggles */}
-          <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5">
+          <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5" aria-label="Summary rows">
+            <span
+              className="px-2 text-xs font-medium text-secondary-500 whitespace-nowrap"
+              title="Adds rows at the bottom of the grid with the sum / mean of each column across respondents. Blank and invalid cells are ignored."
+            >
+              Summary rows
+            </span>
             {([
               { key: 'sum' as const, icon: Sigma, label: 'Sum', active: showSummarySum, toggle: onToggleSummarySum },
               { key: 'mean' as const, icon: TrendingUp, label: 'Mean', active: showSummaryMean, toggle: onToggleSummaryMean },
@@ -1214,8 +1220,8 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
 }) {
   const steps: { name: StepName; icon: React.ComponentType<{ className?: string }>; label: string }[] = [
     { name: 'demographics', icon: Users, label: 'ID' },
-    { name: 'subscales', icon: Layers, label: 'Scales' },
-    { name: 'scales', icon: Sliders, label: 'Scales' },
+    { name: 'subscales', icon: Layers, label: 'Subscales' },
+    { name: 'scales', icon: Sliders, label: 'Response scales' },
     { name: 'bands', icon: Tag, label: 'Bands' },
     { name: 'scoring', icon: Calculator, label: 'Scoring' },
   ];

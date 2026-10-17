@@ -20,6 +20,7 @@ export interface GridGroup {
 export interface SummaryData {
   sums: Record<string, number | null>;
   means: Record<string, number | null>;
+  numericColumns: ReadonlySet<string>;
 }
 
 interface LiveGridProps {
@@ -196,7 +197,7 @@ export function LiveGrid({
                       <React.Fragment key={g.name + '-sum'}>
                         {g.columns.map((col) => (
                           <td key={col.key + '-sum'} className="px-2 py-2 text-sm text-secondary-800 border-r border-secondary-100 last:border-r-0">
-                            {summary.sums[col.key] != null ? summary.sums[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
+                            {!summary.numericColumns.has(col.key) ? '' : summary.sums[col.key] != null ? summary.sums[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
                           </td>
                         ))}
                       </React.Fragment>
@@ -204,7 +205,7 @@ export function LiveGrid({
                   ) : (
                     flatColumns.map((col) => (
                       <td key={col.key + '-sum'} className="px-2 py-2 text-sm text-secondary-800 border-r border-secondary-100 last:border-r-0">
-                        {summary.sums[col.key] != null ? summary.sums[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
+                        {!summary.numericColumns.has(col.key) ? '' : summary.sums[col.key] != null ? summary.sums[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
                       </td>
                     ))
                   )}
@@ -218,7 +219,7 @@ export function LiveGrid({
                       <React.Fragment key={g.name + '-mean'}>
                         {g.columns.map((col) => (
                           <td key={col.key + '-mean'} className="px-2 py-2 text-sm text-secondary-800 border-r border-secondary-100 last:border-r-0">
-                            {summary.means[col.key] != null ? summary.means[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
+                            {!summary.numericColumns.has(col.key) ? '' : summary.means[col.key] != null ? summary.means[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
                           </td>
                         ))}
                       </React.Fragment>
@@ -226,7 +227,7 @@ export function LiveGrid({
                   ) : (
                     flatColumns.map((col) => (
                       <td key={col.key + '-mean'} className="px-2 py-2 text-sm text-secondary-800 border-r border-secondary-100 last:border-r-0">
-                        {summary.means[col.key] != null ? summary.means[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
+                        {!summary.numericColumns.has(col.key) ? '' : summary.means[col.key] != null ? summary.means[col.key]!.toFixed(2) : <span className="text-secondary-300">—</span>}
                       </td>
                     ))
                   )}
