@@ -1748,6 +1748,9 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
                   {outputRange !== null && (
                     <button onClick={() => onAutoSuggest(sub.name, output, outputRange)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
                   )}
+                  {isSubscale && output === 'custom' && (
+                    <span className="text-xs text-secondary-500">Suggest unavailable: custom scores have no known range.</span>
+                  )}
                   <button onClick={() => onAddBand(sub.name, output)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
                 </div>
               </div>
