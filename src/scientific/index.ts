@@ -12,3 +12,4 @@ export * from './analysis';
 export * from './formula';
 export * from './bandValidation';
 export * from './dataQuality';
+export * from './responseScales';
