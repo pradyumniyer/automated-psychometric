@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessRangeOutliers,
+  detectConventionalRange,
+  detectMixedRanges,
   resolveResponse,
   type ResponseScaleV2,
 } from "../src/scientific/responseScales";
@@ -25,6 +28,7 @@ describe("resolveResponse", () => {
       kind: "valid",
       value: 4,
     });
+
     expect(resolveResponse(" N/A ", fixtureScale)).toEqual({
       kind: "special_missing",
       value: null,
@@ -32,6 +36,45 @@ describe("resolveResponse", () => {
     expect(resolveResponse("prefer NOT to say", fixtureScale)).toEqual({
       kind: "special_missing",
       value: null,
+    });
+  });
+
+  describe("conventional response-scale range detection", () => {
+    it("detects 1-4 when nobody chose 5 and leaves the suggestion unconfirmed", () => {
+      const result = detectConventionalRange([1, 2, 3, 4, 1, 2, 3, 4]);
+      expect(result.range).toEqual({ min: 1, max: 4 });
+      expect(result.confirmed).toBe(false);
+    });
+
+    it("suggests widening for three values one step beyond 1-4 in 300 responses", () => {
+      const values = Array.from({ length: 297 }, (_, index) => (index % 4) + 1);
+      values.push(5, 5, 5);
+      const result = detectConventionalRange(values);
+      expect(result.range).toEqual({ min: 1, max: 4 });
+      expect(result.outOfRange).toMatchObject({
+        count: 3,
+        suggestedAction: "widen",
+      });
+    });
+
+    it("defaults farther values such as P26's 7 to treating them as missing", () => {
+      expect(assessRangeOutliers([7], { min: 1, max: 5 })).toEqual({
+        count: 1,
+        values: [7],
+        suggestedAction: "missing",
+      });
+    });
+
+    it("reports differing observed ranges for items instead of silently combining them", () => {
+      const result = detectMixedRanges({
+        Q3: [1, 2, 3, 4, 5],
+        Q4: [1, 2, 3, 4],
+      });
+      expect(result.mixed).toBe(true);
+      expect(result.items).toEqual([
+        { item: "Q3", range: { min: 1, max: 5 } },
+        { item: "Q4", range: { min: 1, max: 4 } },
+      ]);
     });
   });
 
