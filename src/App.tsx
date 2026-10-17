@@ -7,7 +7,6 @@ import { ReportScreen } from '@/components/ReportScreen';
 import type { Project } from '@/types/domain';
 import { datasetRepository, exclusionRepository, settingsRepository } from '@/storage/repositories';
 import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
-import type { ScoreColumnSettings } from '@/lib/scoredColumns';
 import {
   buildProjectHash,
   parseProjectHash,
@@ -27,11 +26,6 @@ export default function App() {
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSummarySum, setShowSummarySum] = useState(false);
   const [showSummaryMean, setShowSummaryMean] = useState(false);
-  const [scoreColumnSettings, setScoreColumnSettings] = useState<ScoreColumnSettings>({
-    sum: false,
-    mean: false,
-    overall: true,
-  });
   const [routeReady, setRouteReady] = useState(false);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
 
@@ -50,7 +44,6 @@ export default function App() {
     setActiveDatasetId(restored.datasetId);
     setShowSummarySum(restored.settings.showSummarySum);
     setShowSummaryMean(restored.settings.showSummaryMean);
-    setScoreColumnSettings(restored.settings.scoreColumnSettings);
     setLoadedProjectId(projectId);
   }, []);
 
@@ -86,7 +79,6 @@ export default function App() {
       tab: view === 'list' ? 'config' : view,
       showSummarySum,
       showSummaryMean,
-      scoreColumnSettings,
     };
     settingsRepository.set(`project-view:${project.id}`, saved)
       .catch((error: unknown) => {
@@ -97,7 +89,6 @@ export default function App() {
     loadedProjectId,
     project,
     routeReady,
-    scoreColumnSettings,
     showSummaryMean,
     showSummarySum,
     view,
@@ -229,10 +220,6 @@ export default function App() {
   const setExcludedRowsDirect = useCallback((rows: Set<number>) => (
     persistExcludedRows(rows)
   ), [persistExcludedRows]);
-  const toggleScoreColumn = useCallback((key: keyof ScoreColumnSettings) => {
-    setScoreColumnSettings((current) => ({ ...current, [key]: !current[key] }));
-  }, []);
-
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
   }
@@ -309,8 +296,6 @@ export default function App() {
             showSummaryMean={showSummaryMean}
             onToggleSummarySum={() => setShowSummarySum((v) => !v)}
             onToggleSummaryMean={() => setShowSummaryMean((v) => !v)}
-            scoreColumnSettings={scoreColumnSettings}
-            onToggleScoreColumn={toggleScoreColumn}
           />
         )}
         {view === 'quality' && (
@@ -332,7 +317,6 @@ export default function App() {
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={changeActiveDataset}
-            scoreColumnSettings={scoreColumnSettings}
           />
         )}
         {view === 'report' && (

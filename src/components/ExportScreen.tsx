@@ -10,7 +10,7 @@ import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/st
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
-import { buildScoredColumnData, type ScoreColumnSettings } from '@/lib/scoredColumns';
+import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -18,12 +18,11 @@ interface Props {
   excludedRows: Set<number>;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
-  scoreColumnSettings: ScoreColumnSettings;
 }
 
 type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo' | 'scores_only';
 
-export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange, scoreColumnSettings }: Props) {
+export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
@@ -180,9 +179,8 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       demographicColumns: demoCols.map((column) => column.column_name),
       idColumns,
       subscales: subConfigs,
-      settings: scoreColumnSettings,
     });
-  }, [dataset, scoredResult, demoCols, idColumns, subConfigs, scoreColumnSettings]);
+  }, [dataset, scoredResult, demoCols, idColumns, subConfigs]);
 
   // ── Filename helper ──
   const fileName = (type: ExportType, ext: 'csv' | 'xlsx'): string => {

@@ -36,7 +36,7 @@ import { validateBands, suggestBands } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { buildScoredColumnData, type ScoreColumnSettings } from '@/lib/scoredColumns';
+import { buildScoredColumnData } from '@/lib/scoredColumns';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -57,7 +57,6 @@ export function ConfigScreen({
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
   showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
-  scoreColumnSettings, onToggleScoreColumn,
 }: {
   project: Project;
   highlightRowIndex: number | null;
@@ -72,8 +71,6 @@ export function ConfigScreen({
   showSummaryMean: boolean;
   onToggleSummarySum: () => void;
   onToggleSummaryMean: () => void;
-  scoreColumnSettings: ScoreColumnSettings;
-  onToggleScoreColumn: (key: keyof ScoreColumnSettings) => void;
 }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
@@ -854,8 +851,7 @@ export function ConfigScreen({
       .filter((column) => /\bID\b/i.test(column.detected_by))
       .map((column) => column.column_name),
     subscales: subscaleStates,
-    settings: scoreColumnSettings,
-  }), [dataset, scoringResult, demoCols, subscaleStates, scoreColumnSettings]);
+  }), [dataset, scoringResult, demoCols, subscaleStates]);
   const groups: GridGroup[] = scoredColumnData.groups;
   const summary = useMemo(() => {
     const sums: Record<string, number | null> = {};
@@ -950,32 +946,6 @@ export function ConfigScreen({
               </button>
             ))}
           </div>
-          <div className="w-px h-6 bg-secondary-200" />
-          <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5" aria-label="Score columns">
-            <span className="px-2 text-xs font-medium text-secondary-500 whitespace-nowrap">Score columns</span>
-            {([
-              { key: 'sum' as const, label: 'Sum' },
-              { key: 'mean' as const, label: 'Mean' },
-              { key: 'overall' as const, label: 'Overall' },
-            ]).map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={scoreColumnSettings[key]}
-                onClick={() => onToggleScoreColumn(key)}
-                className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${scoreColumnSettings[key] ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="w-px h-6 bg-secondary-200" />
-          {scoringResult && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => handleExport('csv')}><FileDown className="w-3.5 h-3.5" /> CSV</Button>
-              <Button variant="outline" size="sm" onClick={() => handleExport('xlsx')}><FileDown className="w-3.5 h-3.5" /> XLSX</Button>
-            </>
-          )}
         </div>
       </div>
 

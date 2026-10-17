@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildProjectHash, parseProjectHash } from '../src/lib/appRoute';
+import { buildProjectHash, parseProjectHash, parseProjectViewSettings } from '../src/lib/appRoute';
 import { saveDataQualityThresholds } from '../src/lib/dataQualitySettings';
 import { restoreProjectView } from '../src/lib/projectRestoration';
 import { buildSubscaleConfigs, createScoreHashes } from '../src/storage/scoreHashes';
@@ -30,6 +30,17 @@ describe('project view and saved display state', () => {
     });
     expect(parseProjectHash('#/project/study/configure')).toBeNull();
     expect(parseProjectHash('#/project/study/not-a-tab')).toBeNull();
+  });
+
+  it('ignores legacy score-column display settings', () => {
+    expect(parseProjectViewSettings({
+      scoreColumnSettings: { sum: true, mean: true, overall: false },
+    })).toEqual({
+      activeDatasetId: null,
+      tab: 'config',
+      showSummarySum: false,
+      showSummaryMean: false,
+    });
   });
 
   it('restores the active dataset and display settings from IndexedDB', async () => {
@@ -62,7 +73,11 @@ describe('project view and saved display state', () => {
       project: { id: project.id },
       datasetId: dataset.id,
       tab: 'export',
-      settings: saved,
+      settings: {
+        activeDatasetId: dataset.id,
+        showSummarySum: true,
+        showSummaryMean: false,
+      },
     });
   });
 

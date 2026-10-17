@@ -1,11 +1,5 @@
 import type { ScoringResult, SubscaleConfig } from '@/scientific/scoring';
 
-export interface ScoreColumnSettings {
-  sum: boolean;
-  mean: boolean;
-  overall: boolean;
-}
-
 export interface ScoredColumn {
   key: string;
   label: string;
@@ -32,17 +26,9 @@ interface BuildScoredColumnDataOptions {
   demographicColumns: string[];
   idColumns: string[];
   subscales: Pick<SubscaleConfig, 'id' | 'name' | 'items' | 'scoringMethod'>[];
-  settings: ScoreColumnSettings;
 }
 
-interface ScoreSource {
-  subscaleId: string;
-  metric: 'sum' | 'mean' | 'score';
-}
-
-interface BuiltColumn extends ScoredColumn {
-  scoreSource?: ScoreSource;
-}
+type BuiltColumn = ScoredColumn;
 
 export function buildScoredColumnData({
   result,
@@ -51,7 +37,6 @@ export function buildScoredColumnData({
   demographicColumns,
   idColumns,
   subscales,
-  settings,
 }: BuildScoredColumnDataOptions): ScoredColumnData {
   const groups: { name: string; columns: BuiltColumn[] }[] = [];
   const demoSet = new Set(demographicColumns);
@@ -72,44 +57,15 @@ export function buildScoredColumnData({
 
   const addScoreColumns = (
     target: BuiltColumn[],
-    subscale: Pick<SubscaleConfig, 'id' | 'name' | 'scoringMethod'>,
+    subscale: Pick<SubscaleConfig, 'name'>,
   ) => {
     const scoreHeader = `${subscale.name} Score`;
-    if (settings.sum || settings.mean) {
-      if (settings.sum && subscale.scoringMethod !== 'custom') {
-        target.push({
-          key: `${subscale.name} Sum`,
-          label: 'Sum',
-          group: subscale.name,
-          type: 'score',
-          scoreSource: { subscaleId: subscale.id, metric: 'sum' },
-        });
-      }
-      if (settings.mean && subscale.scoringMethod !== 'custom') {
-        target.push({
-          key: `${subscale.name} Mean`,
-          label: 'Mean',
-          group: subscale.name,
-          type: 'score',
-          scoreSource: { subscaleId: subscale.id, metric: 'mean' },
-        });
-      }
-      if (subscale.scoringMethod === 'custom' && result?.headers.includes(scoreHeader)) {
-        target.push({
-          key: scoreHeader,
-          label: 'Score',
-          group: subscale.name,
-          type: 'score',
-          scoreSource: { subscaleId: subscale.id, metric: 'score' },
-        });
-      }
-    } else if (result?.headers.includes(scoreHeader)) {
+    if (result?.headers.includes(scoreHeader)) {
       target.push({
         key: scoreHeader,
         label: 'Score',
         group: subscale.name,
         type: 'score',
-        scoreSource: { subscaleId: subscale.id, metric: 'score' },
       });
     }
     const interpretationHeader = `${subscale.name} Interpretation`;
@@ -147,7 +103,7 @@ export function buildScoredColumnData({
     }));
   if (unassigned.length > 0) groups.push({ name: 'Unassigned', columns: unassigned });
 
-  if (result && settings.overall) {
+  if (result) {
     const overall = groups.find((group) => group.name === 'Overall Scale');
     const overallColumns = overall?.columns ?? [];
     const overallScoreHeader = 'Overall Scale Score';
@@ -182,19 +138,7 @@ export function buildScoredColumnData({
     const projected: Record<string, unknown> = {};
     for (const group of groups) {
       for (const column of group.columns) {
-        if (column.scoreSource) {
-          const rowId = result?.rowIds[index];
-          const detail = rowId
-            ? result?.scaleScores[column.scoreSource.subscaleId]?.[rowId]
-            : undefined;
-          projected[column.key] = column.scoreSource.metric === 'score'
-            ? sourceRow[column.key] ?? detail?.score ?? null
-            : detail?.[column.scoreSource.metric] ?? null;
-        } else if (column.key === 'Overall Scale Score' && result?.overallScaleScore) {
-          projected[column.key] = result.overallScaleScore[index];
-        } else {
-          projected[column.key] = sourceRow[column.key] ?? null;
-        }
+        projected[column.key] = sourceRow[column.key] ?? null;
       }
     }
     return projected;
