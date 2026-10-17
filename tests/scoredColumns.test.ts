@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import { createCsvContent, createXlsxSheetData } from '../src/lib/fileParser';
-import { buildScoredColumnData } from '../src/lib/scoredColumns';
+import { buildScoredColumnData, scoreOnlyColumnKeys } from '../src/lib/scoredColumns';
 import { buildSummaryExportContent } from '../src/lib/summaryStatistics';
 import { scoreDataset } from '../src/scientific/scoring';
 
@@ -60,6 +60,7 @@ describe('shared scored columns', () => {
       idColumns: ['Participant'],
       subscales,
     });
+
     const gridHeaders = data.groups.flatMap((group) => group.columns.map((column) => column.key));
     expect(gridHeaders).toEqual(data.headers);
 
@@ -75,6 +76,36 @@ describe('shared scored columns', () => {
     expect(sheet[1][0]).toMatchObject({ value: 'P1', type: String });
     expect(sheet[1][1]).toMatchObject({ value: 34, type: Number });
     expect(sheet[1][2]).toMatchObject({ value: 4, type: Number });
+  });
+
+  it('selects only score columns for scores-only exports across output-specific interpretation names', () => {
+    const multiOutputSubscale = {
+      ...subscales[0],
+      showOutputs: ['sum', 'mean'] as const,
+    };
+    const multiOutputResult = scoreDataset(rows, rawHeaders, [multiOutputSubscale], {
+      stress: [{ name: 'High', minScore: 5, maxScore: 10 }],
+    }, [], {
+      bandsByOutput: {
+        stress: {
+          sum: [{ name: 'High', minScore: 5, maxScore: 10 }],
+          mean: [{ name: 'Low', minScore: 1, maxScore: 3 }],
+        },
+      },
+    });
+    const data = buildScoredColumnData({
+      result: multiOutputResult,
+      rawHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant'],
+      idColumns: ['Participant'],
+      subscales: [multiOutputSubscale],
+    });
+
+    expect(scoreOnlyColumnKeys(data.groups.flatMap((group) => group.columns))).toEqual([
+      'Stress Sum',
+      'Stress Mean',
+    ]);
   });
 
   it('preserves Fixture A scores and orders Sum, Mean and Custom outputs in the grid and export', () => {

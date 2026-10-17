@@ -12,6 +12,12 @@ import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { mean, sd } from '@/scientific/descriptives';
 import { Button, Card } from './ui';
+import {
+  primaryScoreColumnKeys,
+  scoreOutputLabel,
+  shownScoreOutputs,
+  uniqueSubscaleNames,
+} from '@/lib/scoreOutputs';
 
 interface Props {
   project: Project;
@@ -80,8 +86,12 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
         setResponseScales(config.subscales.flatMap((subscale) => subscale.response_scale ? [subscale.response_scale] : []));
         const bands: Record<string, BandConfig[]> = {};
         for (const subscale of config.subscales) {
-          if (subscale.bands?.length) {
-            bands[subscale.name] = subscale.bands.map((band) => ({
+          const firstOutput = shownScoreOutputs(subscale.score_outputs, subscale.scoring_method)[0];
+          const firstOutputBands = subscale.bands?.filter((band) =>
+            (band.score_output ?? firstOutput) === firstOutput,
+          ) ?? [];
+          if (firstOutputBands.length) {
+            bands[subscale.id] = firstOutputBands.map((band) => ({
               name: band.name,
               minScore: band.min_score,
               maxScore: band.max_score,
@@ -114,7 +124,8 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
         id: sub.id,
         name: sub.name,
         items: (sub.items || []).map((item: SubscaleItem) => ({ column: item.column, order: item.order, reverse: item.reverse })),
-        scoringMethod: sub.scoring_method,
+        scoringMethod: shownScoreOutputs(sub.score_outputs, sub.scoring_method)[0],
+        showOutputs: shownScoreOutputs(sub.score_outputs, sub.scoring_method),
         customFormula: sub.custom_formula,
         responseScale: {
           scaleType: scale?.scale_type || 'numeric',
@@ -338,21 +349,28 @@ function IndividualReport({ dataset, scoredResult, subscaleGroups, bandConfigs, 
     const row = scoredResult.rows[currentParticipant.index];
     if (!row) return [];
 
-    return subscaleGroups.map((sub) => {
-      const scoreKey = `${sub.name} Score`;
-      const labelKey = `${sub.name} Interpretation`;
+    const groupNames = uniqueSubscaleNames(
+      subscaleGroups.map((subscale) => subscale.name),
+      dataset.headers,
+    );
+    return subscaleGroups.map((sub, index) => {
+      const { output, scoreKey, interpretationKey } = primaryScoreColumnKeys(
+        groupNames[index],
+        sub.score_outputs,
+        sub.scoring_method,
+      );
       const score = row[scoreKey];
-      const bandLabel = row[labelKey];
-      const bands = bandConfigs[sub.name];
+      const bandLabel = row[interpretationKey];
+      const bands = bandConfigs[sub.id];
       return {
         scaleName: sub.name,
         score: typeof score === 'number' ? score : null,
         band: typeof bandLabel === 'string' && bandLabel !== 'Excluded' ? bandLabel : null,
         bands: bands || [],
-        scoringMethod: sub.scoring_method,
+        scoringMethod: scoreOutputLabel(output),
       };
     });
-  }, [scoredResult, currentParticipant, subscaleGroups, bandConfigs]);
+  }, [scoredResult, currentParticipant, subscaleGroups, bandConfigs, dataset]);
 
   // Generate draft text
   const generateDraft = useCallback(() => {
@@ -616,9 +634,16 @@ function GroupReport({ project, dataset, scoredResult, subscaleGroups, bandConfi
   // Compute per-scale group statistics
   const scaleStats = useMemo(() => {
     if (!scoredResult || !hasSubscaleConfig) return [];
-    return subscaleGroups.map((sub) => {
-      const scoreKey = `${sub.name} Score`;
-      const labelKey = `${sub.name} Interpretation`;
+    const groupNames = uniqueSubscaleNames(
+      subscaleGroups.map((scale) => scale.name),
+      dataset.headers,
+    );
+    return subscaleGroups.map((sub, index) => {
+      const { output, scoreKey, interpretationKey } = primaryScoreColumnKeys(
+        groupNames[index],
+        sub.score_outputs,
+        sub.scoring_method,
+      );
       const scores: number[] = [];
       const bandCounts: Record<string, number> = {};
       let missingCount = 0;
@@ -626,7 +651,7 @@ function GroupReport({ project, dataset, scoredResult, subscaleGroups, bandConfi
       scoredResult.rows.forEach((row, i) => {
         if (excludedRows.has(i)) return;
         const score = row[scoreKey];
-        const bandLabel = row[labelKey];
+        const bandLabel = row[interpretationKey];
         if (typeof score === 'number' && !isNaN(score)) {
           scores.push(score);
           if (typeof bandLabel === 'string' && bandLabel !== 'Excluded') {
@@ -647,15 +672,15 @@ function GroupReport({ project, dataset, scoredResult, subscaleGroups, bandConfi
 
       return {
         scaleName: sub.name,
-        scoringMethod: sub.scoring_method,
+        scoringMethod: scoreOutputLabel(output),
         n,
         missing: missingCount,
         stats,
         bandCounts,
-        bands: bandConfigs[sub.name] || [],
+        bands: bandConfigs[sub.id] || [],
       };
     });
-  }, [scoredResult, hasSubscaleConfig, subscaleGroups, bandConfigs, excludedRows]);
+  }, [scoredResult, hasSubscaleConfig, subscaleGroups, bandConfigs, excludedRows, dataset]);
 
   // Generate draft text
   const generateDraft = useCallback(() => {

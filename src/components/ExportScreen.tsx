@@ -10,8 +10,9 @@ import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/st
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
-import { buildScoredColumnData, type ScoredColumn } from '@/lib/scoredColumns';
+import { buildScoredColumnData, scoreOnlyColumnKeys, type ScoredColumn } from '@/lib/scoredColumns';
 import { buildSummaryExportContent } from '@/lib/summaryStatistics';
+import { shownScoreOutputs } from '@/lib/scoreOutputs';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -99,7 +100,7 @@ export function ExportScreen({
         const bands: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>> = {};
         for (const subscale of config.subscales) {
           if (subscale.bands?.length) {
-            const firstOutput = subscale.score_outputs?.[0] ?? subscale.scoring_method;
+            const firstOutput = shownScoreOutputs(subscale.score_outputs, subscale.scoring_method)[0];
             for (const band of subscale.bands) {
               const output = band.score_output ?? firstOutput;
               bands[subscale.id] ??= {};
@@ -245,11 +246,11 @@ export function ExportScreen({
           return out;
         });
       } else if (type === 'scores_only') {
-        if (!scoredResult) throw new Error('Scoring not available');
+        if (!scoredResult || !scoredColumnData) throw new Error('Scoring not available');
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
-        const scoreCols = scoredResult.headers
-          .filter((h) => !dataset.headers.includes(h))
-          .filter((h) => !h.endsWith(' Interpretation'));
+        const scoreCols = scoreOnlyColumnKeys(
+          scoredColumnData.groups.flatMap((group) => group.columns),
+        );
         headers = [...demoList, ...scoreCols];
         numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
         rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {

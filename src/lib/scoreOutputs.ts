@@ -29,6 +29,20 @@ export function interpretationColumnKey(
     : `${subscaleName} ${scoreOutputLabel(output)} interpretation`;
 }
 
+export function primaryScoreColumnKeys(
+  subscaleName: string,
+  outputs: readonly ScoreOutput[] | null | undefined,
+  legacyMethod: ScoreOutput,
+): { output: ScoreOutput; scoreKey: string; interpretationKey: string } {
+  const shown = shownScoreOutputs(outputs, legacyMethod);
+  const output = shown[0];
+  return {
+    output,
+    scoreKey: scoreColumnKey(subscaleName, output),
+    interpretationKey: interpretationColumnKey(subscaleName, output, shown.length),
+  };
+}
+
 export function uniqueSubscaleNames(
   names: readonly string[],
   reservedHeaders: readonly string[] = [],

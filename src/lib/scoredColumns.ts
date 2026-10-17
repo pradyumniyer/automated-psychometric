@@ -14,6 +14,10 @@ export interface ScoredColumn {
   type: 'data' | 'score' | 'interpretation' | 'demo';
 }
 
+export function scoreOnlyColumnKeys(columns: readonly ScoredColumn[]): string[] {
+  return columns.filter((column) => column.type === 'score').map((column) => column.key);
+}
+
 export interface ScoredColumnGroup {
   name: string;
   columns: ScoredColumn[];
