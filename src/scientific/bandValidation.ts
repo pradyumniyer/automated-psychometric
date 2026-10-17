@@ -8,7 +8,7 @@ export interface BandValidationWarning {
 
 export function validateBands(
   bands: { name: string; minScore: number; maxScore: number }[],
-  maxPossibleScore: number,
+  maxPossibleScore: number | null,
 ): BandValidationWarning[] {
   const warnings: BandValidationWarning[] = [];
   if (bands.length === 0) return warnings;
@@ -41,7 +41,7 @@ export function validateBands(
 
   // Check for out-of-range bands
   for (const band of sorted) {
-    if (band.maxScore > maxPossibleScore) {
+    if (maxPossibleScore !== null && band.maxScore > maxPossibleScore) {
       warnings.push({
         type: 'out_of_range',
         message: `"${band.name}" max (${band.maxScore}) exceeds the maximum possible score (${maxPossibleScore})`,

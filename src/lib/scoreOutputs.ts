@@ -29,16 +29,26 @@ export function interpretationColumnKey(
     : `${subscaleName} ${scoreOutputLabel(output)} interpretation`;
 }
 
-export function uniqueSubscaleNames(names: readonly string[]): string[] {
-  const used = new Set<string>();
+export function uniqueSubscaleNames(
+  names: readonly string[],
+  reservedHeaders: readonly string[] = [],
+): string[] {
+  const used = new Set(reservedHeaders);
   return names.map((name) => {
     let unique = name;
     let suffix = 2;
-    while (used.has(unique)) {
+    const generatedHeaders = (candidate: string) => [
+      `${candidate} Score`,
+      `${candidate} Interpretation`,
+      ...SCORE_OUTPUT_ORDER.map((output) => scoreColumnKey(candidate, output)),
+      ...SCORE_OUTPUT_ORDER.map((output) => interpretationColumnKey(candidate, output, 1)),
+      ...SCORE_OUTPUT_ORDER.map((output) => interpretationColumnKey(candidate, output, 2)),
+    ];
+    while (used.has(unique) || generatedHeaders(unique).some((header) => used.has(header))) {
       unique = `${name} (${suffix})`;
       suffix += 1;
     }
-    used.add(unique);
+    generatedHeaders(unique).forEach((header) => used.add(header));
     return unique;
   });
 }

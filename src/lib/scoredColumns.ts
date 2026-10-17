@@ -62,7 +62,7 @@ export function buildScoredColumnData({
     }));
   if (demographics.length > 0) groups.push({ name: 'ID', columns: demographics });
 
-  const subscaleNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name));
+  const subscaleNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name), rawHeaders);
   const addScoreColumns = (
     target: BuiltColumn[],
     subscale: Pick<SubscaleConfig, 'name' | 'scoringMethod' | 'showOutputs'>,
@@ -121,16 +121,25 @@ export function buildScoredColumnData({
     const overallColumns = overall?.columns ?? [];
     const overallScoreHeader = 'Overall Scale Score';
     if (subscales.length === 0) {
-      const autoScale = result.configSnapshot.subscales[0];
-      if (autoScale) {
-        addScoreColumns(overallColumns, autoScale);
-      } else if (result.headers.includes(overallScoreHeader)) {
+      if (result.headers.includes(overallScoreHeader)) {
         overallColumns.push({
           key: overallScoreHeader,
           label: 'Overall Score',
           group: 'Overall Scale',
           type: 'score',
         });
+        const interpretationHeader = 'Overall Scale Interpretation';
+        if (result.headers.includes(interpretationHeader)) {
+          overallColumns.push({
+            key: interpretationHeader,
+            label: 'Interpretation',
+            group: 'Overall Scale',
+            type: 'interpretation',
+          });
+        }
+      } else {
+        const autoScale = result.configSnapshot.subscales[0];
+        if (autoScale) addScoreColumns(overallColumns, autoScale);
       }
     } else if (result.headers.includes(overallScoreHeader)) {
       overallColumns.push({

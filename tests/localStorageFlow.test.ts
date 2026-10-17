@@ -64,6 +64,11 @@ describe('local storage scoring flow', () => {
       demographicColumns: [],
       subscales: screenSubscales,
       bands: {},
+      bandsByOutput: {
+        'Stress': {
+          mean: [{ name: 'High', minScore: 4, maxScore: 5, color: '#ff0000' }],
+        },
+      },
       overallScale: null,
     });
     const config = await surveyConfigRepository.save(dataset.id, configInput);
@@ -91,6 +96,11 @@ describe('local storage scoring flow', () => {
     const reloadedConfig = await surveyConfigRepository.get(dataset.id);
     expect(reloadedDataset?.row_ids).toEqual(dataset.row_ids);
     expect(reloadedConfig?.subscales[0].score_outputs).toEqual(['mean']);
+    expect(reloadedConfig?.subscales[0].bands?.[0]).toMatchObject({
+      score_output: 'mean',
+      min_score: 4,
+      max_score: 5,
+    });
     expect(await exclusionRepository.get(dataset.id)).toEqual({
       dataset_id: dataset.id,
       excluded_row_ids: excludedRowIds,

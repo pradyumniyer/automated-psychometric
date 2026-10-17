@@ -29,7 +29,7 @@ import { fromSurveyConfigRecord, toSurveyConfigRecord } from '@/storage/viewAdap
 import { logAction, fetchHistory, deleteAction } from '@/lib/history';
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
-import { buildTemplateDefinition, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
+import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
@@ -39,7 +39,7 @@ import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
-import { SCORE_OUTPUT_ORDER, shownScoreOutputs } from '@/lib/scoreOutputs';
+import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -92,6 +92,7 @@ export function ConfigScreen({
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [bandStates, setBandStates] = useState<Record<string, BandState[]>>({});
   const [bandStatesByOutput, setBandStatesByOutput] = useState<Record<string, Partial<Record<ScoreOutput, BandState[]>>>>({});
+  const [selectedBandOutputs, setSelectedBandOutputs] = useState<Record<string, ScoreOutput>>({});
   const [scoringResult, setScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
   const [overallScale, setOverallScale] = useState<SubscaleState>({
     id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
@@ -460,11 +461,14 @@ export function ConfigScreen({
     const sub = subscaleStates.find((s) => s.id === id);
     const updated = subscaleStates.filter((s) => s.id !== id).map((s, i) => ({ ...s, displayOrder: i }));
     const nextBands = { ...bandStates };
+    const nextBandsByOutput = { ...bandStatesByOutput };
     if (sub) delete nextBands[sub.name];
+    if (sub) delete nextBandsByOutput[sub.name];
     try {
-      await persistSurveyConfig({ subscales: updated, bands: nextBands });
+      await persistSurveyConfig({ subscales: updated, bands: nextBands, bandsByOutput: nextBandsByOutput });
       setSubscaleStates(updated);
       setBandStates(nextBands);
+      setBandStatesByOutput(nextBandsByOutput);
       await logAction(project.id, 'subscale_delete', `Deleted subscale: ${sub?.name || id}`, {}, null, dataset.id);
       const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (error) {
@@ -479,6 +483,11 @@ export function ConfigScreen({
       const nb = { ...bandStates };
       nb[name] = nb[oldName]; delete nb[oldName];
       setBandStates(nb);
+    }
+    if (oldName && bandStatesByOutput[oldName]) {
+      const next = { ...bandStatesByOutput };
+      next[name] = next[oldName]; delete next[oldName];
+      setBandStatesByOutput(next);
     }
     markDirty();
   };
@@ -567,14 +576,35 @@ export function ConfigScreen({
   };
 
   // ── Bands ──
-  const addBand = (sn: string) => { setBandStates({ ...bandStates, [sn]: [...(bandStates[sn] || []), { name: 'New Band', minScore: 0, maxScore: 0, color: '#14b8a6' }] }); markDirty(); };
-  const updateBand = (sn: string, i: number, f: keyof BandState, v: string | number) => { setBandStates({ ...bandStates, [sn]: (bandStates[sn] || []).map((b, j) => j === i ? { ...b, [f]: v } : b) }); markDirty(); };
-  const removeBand = (sn: string, i: number) => { setBandStates({ ...bandStates, [sn]: (bandStates[sn] || []).filter((_, j) => j !== i) }); markDirty(); };
-
-  const autoSuggestBands = (sn: string, maxScore: number) => {
-    const suggested = suggestBands(maxScore, 3);
-    setBandStates({ ...bandStates, [sn]: suggested });
+  const changeBands = (
+    name: string,
+    output: ScoreOutput | undefined,
+    update: (current: BandState[]) => BandState[],
+  ) => {
+    if (output) {
+      setBandStatesByOutput((current) => ({
+        ...current,
+        [name]: { ...current[name], [output]: update(current[name]?.[output] ?? []) },
+      }));
+    } else {
+      setBandStates((current) => ({ ...current, [name]: update(current[name] ?? []) }));
+    }
     markDirty();
+  };
+  const addBand = (name: string, output?: ScoreOutput) => changeBands(name, output, (current) => [
+    ...current,
+    { name: 'New Band', minScore: 0, maxScore: 0, color: '#14b8a6' },
+  ]);
+  const updateBand = (name: string, output: ScoreOutput | undefined, index: number, field: keyof BandState, value: string | number) =>
+    changeBands(name, output, (current) => current.map((band, currentIndex) =>
+      currentIndex === index ? { ...band, [field]: value } : band,
+    ));
+  const removeBand = (name: string, output: ScoreOutput | undefined, index: number) =>
+    changeBands(name, output, (current) => current.filter((_, currentIndex) => currentIndex !== index));
+
+  const autoSuggestBands = (name: string, output: ScoreOutput | undefined, maxScore: number) => {
+    const suggested = suggestBands(maxScore, 3);
+    changeBands(name, output, () => suggested);
   };
 
   // ── Row exclusion (delegates to shared state in App) ──
@@ -612,6 +642,7 @@ export function ConfigScreen({
         responseScale: { scaleType: s.scaleType, minValue: s.minValue ?? undefined, maxValue: s.maxValue ?? undefined, labelMap: s.labelMap },
       }));
       const bandConfigs: Record<string, BandConfig[]> = {};
+      const bandConfigsByOutput: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>> = {};
       if (subConfigs.length === 0) {
         subConfigs = [{
           id: overallScale.id, name: overallScale.name,
@@ -622,7 +653,21 @@ export function ConfigScreen({
         }];
         bandConfigs[overallScale.name] = (bandStates[overallScale.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
       } else {
-        for (const sub of subscaleStates) bandConfigs[sub.name] = (bandStates[sub.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
+        for (const sub of subscaleStates) {
+          const outputBands: Partial<Record<ScoreOutput, BandConfig[]>> = {};
+          for (const output of SCORE_OUTPUT_ORDER) {
+            const bands = bandStatesByOutput[sub.name]?.[output];
+            if (bands) {
+              outputBands[output] = bands.map((band) => ({
+                name: band.name,
+                minScore: band.minScore,
+                maxScore: band.maxScore,
+                color: band.color,
+              }));
+            }
+          }
+          bandConfigsByOutput[sub.id] = outputBands;
+        }
       }
       const config = await persistSurveyConfig();
       const excludedRowIds = [...sharedExcludedRows].map((index) => dataset.row_ids[index]).filter((id): id is string => !!id);
@@ -632,7 +677,11 @@ export function ConfigScreen({
         subConfigs,
         bandConfigs,
         Array.from(sharedExcludedRows),
-        { rowIds: dataset.row_ids },
+        {
+          rowIds: dataset.row_ids,
+          bandsByOutput: bandConfigsByOutput,
+          legacyScoreColumnIds: subscaleStates.length === 0 ? [overallScale.id] : [],
+        },
       );
       const hashes = await createScoreHashes(dataset, config, subConfigs, excludedRowIds);
       const saved = await scoreRepository.save(dataset.id, {
@@ -664,7 +713,7 @@ export function ConfigScreen({
   const saveAsTemplate = async (name: string, description: string, instrument: string): Promise<string | null> => {
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) return validation.error;
-    const def = buildTemplateDefinition(subscaleStates, bandStates);
+    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput);
     try {
       await templateRepository.save({ name, description, instrument, definition: def, version: 1 });
       await logAction(project.id, 'template_save', `Saved template: ${name}`);
@@ -705,17 +754,19 @@ export function ConfigScreen({
 
     const def = template.definition as TemplateDefinition;
     const nextBands: Record<string, BandState[]> = {};
+    const nextBandsByOutput: Record<string, Partial<Record<ScoreOutput, BandState[]>>> = {};
     const nextSubscales: SubscaleState[] = [];
     for (const definition of def.subscales) {
       const matched = report.matchedBySubscale[definition.name] || [];
       if (matched.length === 0) continue;
       const scale = def.responseScales.find((item) => item.subscaleName === definition.name);
-      const band = def.interpretationBands.find((item) => item.subscaleName === definition.name);
+      const scoreSettings = templateSubscaleScoreSettings(def, definition.name);
       nextSubscales.push({
         id: crypto.randomUUID(),
         name: definition.name,
         items: matched,
-        scoringMethod: definition.scoringMethod,
+        scoringMethod: scoreSettings.showOutputs[0],
+        showOutputs: scoreSettings.showOutputs,
         customFormula: definition.customFormula || '',
         scaleType: scale?.scaleType || 'numeric',
         minValue: scale?.minValue ?? null,
@@ -723,14 +774,9 @@ export function ConfigScreen({
         labelMap: scale?.labelMap || [],
         displayOrder: nextSubscales.length,
       });
-      if (band) {
-        nextBands[definition.name] = band.bands.map((item) => ({
-          name: item.name,
-          minScore: item.minScore,
-          maxScore: item.maxScore,
-          color: item.color,
-        }));
-      }
+      nextBandsByOutput[definition.name] = scoreSettings.bandsByOutput;
+      const firstBands = scoreSettings.bandsByOutput[scoreSettings.showOutputs[0]] ?? [];
+      if (firstBands.length) nextBands[definition.name] = firstBands;
     }
     const nextDemographics = detectDemographics(dataset.headers, dataset.rows).map((suggestion) => ({
       id: crypto.randomUUID(),
@@ -751,6 +797,7 @@ export function ConfigScreen({
         demographicColumns: nextDemographics,
         subscales: nextSubscales,
         bands: nextBands,
+        bandsByOutput: nextBandsByOutput,
         overallScale: null,
         linkedTemplateId: template.id,
       }, existing);
@@ -758,6 +805,7 @@ export function ConfigScreen({
       setDemoCols(nextDemographics);
       setSubscaleStates(nextSubscales);
       setBandStates(nextBands);
+      setBandStatesByOutput(nextBandsByOutput);
       setLinkedTemplate(template);
       setStatusMsg({ type: 'success', text: formatMatchSummary(report) });
       setPendingApplyTemplate(null);
@@ -778,7 +826,7 @@ export function ConfigScreen({
     if (!dataset || !linkedTemplate) return;
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) { setStatusMsg({ type: 'error', text: validation.error! }); return; }
-    const def = buildTemplateDefinition(subscaleStates, bandStates);
+    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput);
     try {
       await templateRepository.update(linkedTemplate.id, { definition: def, version: linkedTemplate.version + 1 });
       await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
@@ -1057,7 +1105,10 @@ export function ConfigScreen({
               demographics: demoCols.length > 0 ? 'done' : 'pending',
               subscales: subscaleStates.length > 0 ? (subscaleStates.every((s) => s.items.length > 0) ? 'done' : 'active') : 'pending',
               scales: subscaleStates.length > 0 ? (subscaleStates.some((s) => s.scaleType === 'categorical' && s.labelMap.length > 0) ? 'done' : 'active') : (overallScale.scaleType === 'categorical' && overallScale.labelMap.length > 0 ? 'done' : 'active'),
-              bands: Object.values(bandStates).some((bs) => bs.length > 0) ? 'done' : 'pending',
+              bands: Object.values(bandStates).some((bs) => bs.length > 0)
+                || Object.values(bandStatesByOutput).some((outputs) =>
+                  Object.values(outputs).some((bs) => (bs?.length ?? 0) > 0))
+                ? 'done' : 'pending',
               scoring: scoringResult ? 'done' : 'pending',
             }} />
 
@@ -1108,6 +1159,9 @@ export function ConfigScreen({
                 {activeStep === 'bands' && (
                   <BandsPanel
                     subscales={subscaleStates} bandStates={bandStates}
+                    bandStatesByOutput={bandStatesByOutput}
+                    selectedBandOutputs={selectedBandOutputs}
+                    onSelectBandOutput={(id, output) => setSelectedBandOutputs((current) => ({ ...current, [id]: output }))}
                     onAddBand={addBand} onUpdateBand={updateBand} onRemoveBand={removeBand}
                     onAutoSuggest={autoSuggestBands}
                     overallScale={overallScale}
@@ -1645,30 +1699,68 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
 }
 
 // ── Bands Panel — with validation warnings ──
-function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBand, onAutoSuggest, overallScale }: {
-  subscales: SubscaleState[]; bandStates: Record<string, BandState[]>;
-  onAddBand: (n: string) => void; onUpdateBand: (n: string, i: number, f: keyof BandState, v: string | number) => void; onRemoveBand: (n: string, i: number) => void;
-  onAutoSuggest: (n: string, maxScore: number) => void; overallScale: SubscaleState;
+function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOutputs, onSelectBandOutput, onAddBand, onUpdateBand, onRemoveBand, onAutoSuggest, overallScale }: {
+  subscales: SubscaleState[];
+  bandStates: Record<string, BandState[]>;
+  bandStatesByOutput: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
+  selectedBandOutputs: Record<string, ScoreOutput>;
+  onSelectBandOutput: (id: string, output: ScoreOutput) => void;
+  onAddBand: (name: string, output?: ScoreOutput) => void;
+  onUpdateBand: (name: string, output: ScoreOutput | undefined, index: number, field: keyof BandState, value: string | number) => void;
+  onRemoveBand: (name: string, output: ScoreOutput | undefined, index: number) => void;
+  onAutoSuggest: (name: string, output: ScoreOutput | undefined, maxScore: number) => void;
+  overallScale: SubscaleState;
 }) {
-  const names = subscales.length > 0 ? subscales.map((s) => s.name) : [overallScale.name];
+  const scales = subscales.length > 0 ? subscales : [overallScale];
   return (
     <div className="p-3">
       <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-2 block">Interpretation Bands</span>
       <div className="space-y-3">
-        {names.map((name) => {
-          const sub = subscales.find((s) => s.name === name) || overallScale;
-          const bands = bandStates[name] || [];
-          const maxPossible = sub.items.length > 0 && sub.maxValue ? sub.items.length * sub.maxValue : 100;
+        {scales.map((sub) => {
+          const isSubscale = subscales.length > 0;
+          const outputs = isSubscale ? shownScoreOutputs(sub.showOutputs, sub.scoringMethod) : [];
+          const chosenOutput = selectedBandOutputs[sub.id];
+          const output = isSubscale
+            ? (chosenOutput && outputs.includes(chosenOutput) ? chosenOutput : outputs[0])
+            : undefined;
+          const rangeMax = sub.maxValue
+            ?? (sub.labelMap.length ? Math.max(...sub.labelMap.map((entry) => entry.value)) : null);
+          const maxPossible = isSubscale
+            ? output === 'sum' && rangeMax !== null
+              ? sub.items.length * rangeMax
+              : output === 'mean'
+                ? rangeMax
+                : null
+            : sub.items.length > 0 && rangeMax !== null ? sub.items.length * rangeMax : 100;
+          const bands = isSubscale
+            ? (output ? bandStatesByOutput[sub.name]?.[output] ?? [] : [])
+            : bandStates[sub.name] || [];
           const warnings = validateBands(bands, maxPossible);
           return (
-            <Card key={name} className="p-3">
+            <Card key={sub.id} className="p-3">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
+                <h4 className="font-semibold text-sm text-secondary-900 truncate">{sub.name}</h4>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => onAutoSuggest(name, maxPossible)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
-                  <button onClick={() => onAddBand(name)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
+                  {maxPossible !== null && (
+                    <button onClick={() => onAutoSuggest(sub.name, output, maxPossible)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
+                  )}
+                  <button onClick={() => onAddBand(sub.name, output)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
                 </div>
               </div>
+              {isSubscale && output && (
+                <label className="flex items-center gap-2 mb-2 text-xs text-secondary-600">
+                  <span>Cut-offs for</span>
+                  <select
+                    value={output}
+                    onChange={(event) => onSelectBandOutput(sub.id, event.target.value as ScoreOutput)}
+                    className="px-2 py-1 border border-secondary-200 rounded bg-white"
+                  >
+                    {outputs.map((candidate) => (
+                      <option key={candidate} value={candidate}>{scoreOutputLabel(candidate)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {/* Validation warnings */}
               {warnings.length > 0 && (
                 <div className="mb-2 space-y-1">
@@ -1681,16 +1773,18 @@ function BandsPanel({ subscales, bandStates, onAddBand, onUpdateBand, onRemoveBa
                 </div>
               )}
               {bands.length === 0 ? (
-                <p className="text-xs text-secondary-400 py-1">No bands defined.</p>
+                <p className="text-xs text-secondary-400 py-1">
+                  {output ? `No bands set for ${scoreOutputLabel(output)}.` : 'No bands defined.'}
+                </p>
               ) : (
                 <div className="space-y-1">
                   {bands.map((band, i) => (
                     <div key={i} className="flex items-center gap-1 w-full">
-                      <input value={band.name} onChange={(e) => onUpdateBand(name, i, 'name', e.target.value)} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Name" />
-                      <input type="number" value={band.minScore} onChange={(e) => onUpdateBand(name, i, 'minScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+                      <input value={band.name} onChange={(e) => onUpdateBand(sub.name, output, i, 'name', e.target.value)} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Name" />
+                      <input type="number" value={band.minScore} onChange={(e) => onUpdateBand(sub.name, output, i, 'minScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
                       <span className="text-secondary-400 text-xs flex-shrink-0">–</span>
-                      <input type="number" value={band.maxScore} onChange={(e) => onUpdateBand(name, i, 'maxScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-                      <button onClick={() => onRemoveBand(name, i)} className="p-0.5 text-error-400 hover:text-error-600 flex-shrink-0"><X className="w-3 h-3" /></button>
+                      <input type="number" value={band.maxScore} onChange={(e) => onUpdateBand(sub.name, output, i, 'maxScore', Number(e.target.value))} className="w-14 flex-shrink-0 px-1.5 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
+                      <button onClick={() => onRemoveBand(sub.name, output, i)} className="p-0.5 text-error-400 hover:text-error-600 flex-shrink-0"><X className="w-3 h-3" /></button>
                     </div>
                   ))}
                 </div>

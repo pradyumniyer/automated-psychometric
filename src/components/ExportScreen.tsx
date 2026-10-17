@@ -5,7 +5,7 @@ import {
   FileDown, FileSpreadsheet, Table, FileText, BarChart3, Users, Hash,
   Check, AlertCircle, Info, Loader2, Download,
 } from 'lucide-react';
-import type { Project, Dataset, DemographicColumn, SubscaleGroup, ResponseScale, SubscaleItem } from '@/types/domain';
+import type { Project, Dataset, DemographicColumn, ScoreOutput, SubscaleGroup, ResponseScale, SubscaleItem } from '@/types/domain';
 import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/storage/repositories';
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
@@ -96,15 +96,21 @@ export function ExportScreen({
         ])]);
         setSubscaleGroups(config.subscales);
         setResponseScales(config.subscales.flatMap((subscale) => subscale.response_scale ? [subscale.response_scale] : []));
-        const bands: Record<string, BandConfig[]> = {};
+        const bands: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>> = {};
         for (const subscale of config.subscales) {
           if (subscale.bands?.length) {
-            bands[subscale.name] = subscale.bands.map((band) => ({
-              name: band.name,
-              minScore: band.min_score,
-              maxScore: band.max_score,
-              color: band.color,
-            }));
+            const firstOutput = subscale.score_outputs?.[0] ?? subscale.scoring_method;
+            for (const band of subscale.bands) {
+              const output = band.score_output ?? firstOutput;
+              bands[subscale.id] ??= {};
+              bands[subscale.id][output] ??= [];
+              bands[subscale.id][output]!.push({
+                name: band.name,
+                minScore: band.min_score,
+                maxScore: band.max_score,
+                color: band.color,
+              });
+            }
           }
         }
         setBandConfigs(bands);
@@ -158,7 +164,7 @@ export function ExportScreen({
     });
   }, [subscaleGroups, responseScales]);
 
-  const [bandConfigs, setBandConfigs] = useState<Record<string, BandConfig[]>>({});
+  const [bandConfigs, setBandConfigs] = useState<Record<string, Partial<Record<ScoreOutput, BandConfig[]>>>>({});
 
   // ── Compute scored result (use saved or recompute) ──
   const scoringAvailable = !!savedScoringResult || (!scoreCacheStale && hasSubscaleConfig);
@@ -172,8 +178,9 @@ export function ExportScreen({
           dataset.rows as Record<string, unknown>[],
           dataset.headers,
           subConfigs,
-          bandConfigs,
+          {},
           Array.from(excludedRows),
+          { bandsByOutput: bandConfigs },
         );
       } catch {
         return null;

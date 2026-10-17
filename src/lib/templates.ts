@@ -5,8 +5,9 @@
  * Demographics are detected per-dataset and must not be treated as fixed template content.
  */
 
-import type { TemplateDefinition } from '@/types/domain';
-import { recognizeColumns } from '@/scientific/detection';
+import type { ScoreOutput, TemplateDefinition } from '@/types/domain';
+import { recognizeColumns } from '../scientific/detection';
+import { SCORE_OUTPUT_ORDER, shownScoreOutputs } from './scoreOutputs';
 
 export interface TemplateItemRef {
   name: string;
@@ -19,6 +20,7 @@ export interface SubscaleStateLike {
   name: string;
   items: { column: string; order: number; reverse: boolean }[];
   scoringMethod: 'sum' | 'mean' | 'custom';
+  showOutputs?: ScoreOutput[];
   customFormula: string;
   scaleType: 'numeric' | 'categorical';
   minValue: number | null;
@@ -90,12 +92,14 @@ export function buildAliases(columnName: string): string[] {
 export function buildTemplateDefinition(
   subscaleStates: SubscaleStateLike[],
   bandStates: Record<string, BandStateLike[]>,
+  bandsByOutput: Record<string, Partial<Record<ScoreOutput, BandStateLike[]>>> = {},
 ): TemplateDefinition {
   return {
     subscales: subscaleStates.map((s) => ({
       name: s.name,
       description: '',
       scoringMethod: s.scoringMethod,
+      showOutputs: shownScoreOutputs(s.showOutputs, s.scoringMethod),
       customFormula: s.customFormula || null,
       items: s.items.map((i) => ({
         name: i.column,
@@ -111,18 +115,47 @@ export function buildTemplateDefinition(
       maxValue: s.maxValue,
       labelMap: s.labelMap,
     })),
-    interpretationBands: Object.entries(bandStates).map(([n, bs]) => ({
-      subscaleName: n,
-      bands: bs.map((b) => ({
-        name: b.name,
-        minScore: b.minScore,
-        maxScore: b.maxScore,
-        color: b.color,
-      })),
-    })),
+    interpretationBands: subscaleStates.flatMap((subscale) => {
+      const outputs = bandsByOutput[subscale.name];
+      if (outputs && Object.values(outputs).some((bands) => bands?.length)) {
+        return SCORE_OUTPUT_ORDER.flatMap((output) => {
+          const bands = outputs[output];
+          return bands?.length ? [{
+          subscaleName: subscale.name,
+          output,
+          bands: bands.map((band) => ({ ...band })),
+          }] : [];
+        });
+      }
+      const bands = bandStates[subscale.name] ?? [];
+      if (bands.length === 0) return [];
+      const output = shownScoreOutputs(subscale.showOutputs, subscale.scoringMethod)[0];
+      return [{
+        subscaleName: subscale.name,
+        output,
+        bands: bands.map((band) => ({ ...band })),
+      }];
+    }),
     // Kept for schema compatibility only — demographics are always re-detected per dataset
     demographicRules: { patterns: [], contentHeuristics: [] },
   };
+}
+
+export function templateSubscaleScoreSettings(
+  definition: TemplateDefinition,
+  subscaleName: string,
+): {
+  showOutputs: ScoreOutput[];
+  bandsByOutput: Partial<Record<ScoreOutput, BandStateLike[]>>;
+} {
+  const subscale = definition.subscales.find((candidate) => candidate.name === subscaleName);
+  const showOutputs = shownScoreOutputs(subscale?.showOutputs, subscale?.scoringMethod ?? 'sum');
+  const bandsByOutput: Partial<Record<ScoreOutput, BandStateLike[]>> = {};
+  for (const bandSet of definition.interpretationBands.filter((candidate) => candidate.subscaleName === subscaleName)) {
+    const output = bandSet.output ?? showOutputs[0];
+    bandsByOutput[output] = bandSet.bands.map((band) => ({ ...band }));
+  }
+  return { showOutputs, bandsByOutput };
 }
 
 /** Match a template to dataset headers and return a detailed report */

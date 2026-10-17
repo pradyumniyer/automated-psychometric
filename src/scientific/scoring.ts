@@ -45,6 +45,7 @@ export interface ScoringOptions {
   proration?: { enabled?: boolean; maxMissingPercent?: number };
   outputs?: Record<string, { sum?: boolean; mean?: boolean }>;
   bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>>;
+  legacyScoreColumnIds?: string[];
   overall?: {
     enabled?: boolean;
     source?: 'subscales' | 'items';
@@ -260,7 +261,7 @@ export function scoreDataset(
   const ranges = new Map(subscales.map((subscale) => [subscale.id, responseScaleRange(subscale.responseScale)]));
   const excludedSet = new Set(excludedRowIndices);
   const headers = [...rawHeaders];
-  const groupNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name));
+  const groupNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name), rawHeaders);
   const subscaleScores: Record<string, (number | null)[]> = {};
   const scaleScores: Record<string, Record<string, ScaleScoreDetail>> = {};
   const interpretationLabels: Record<string, (string | null)[]> = {};
@@ -288,7 +289,8 @@ export function scoreDataset(
         ?? (output === shownOutputs[0] ? legacyBands : undefined),
     ] as const);
     for (const output of shownOutputs) {
-      headers.push(scoreColumnKey(groupName, output));
+      const isLegacyScore = options.legacyScoreColumnIds?.includes(subscale.id) && shownOutputs.length === 1;
+      headers.push(isLegacyScore ? `${groupName} Score` : scoreColumnKey(groupName, output));
       const outputBandList = outputBands.find(([candidate]) => candidate === output)?.[1];
       if (outputBandList?.length) {
         headers.push(interpretationColumnKey(groupName, output, shownOutputs.length));

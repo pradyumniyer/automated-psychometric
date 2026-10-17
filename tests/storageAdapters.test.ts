@@ -97,4 +97,42 @@ describe('screen and storage config adapters', () => {
       },
     });
   });
+
+  it('round-trips output-specific bands without changing their cut-offs', () => {
+    const input = {
+      datasetId: 'dataset-output-bands',
+      projectId: 'project-1',
+      headers: ['Q1'],
+      demographicColumns: [],
+      subscales: [{
+        id: 'sub-output-bands',
+        name: 'Output scale',
+        items: [{ column: 'Q1', order: 0, reverse: false }],
+        scoringMethod: 'sum' as const,
+        showOutputs: ['sum', 'mean'] as const,
+        customFormula: '',
+        scaleType: 'numeric' as const,
+        minValue: 1,
+        maxValue: 5,
+        labelMap: [],
+        displayOrder: 0,
+      }],
+      bands: {},
+      bandsByOutput: {
+        'Output scale': {
+          sum: [{ name: 'High sum', minScore: 20, maxScore: 25, color: '#ff0000' }],
+          mean: [{ name: 'Low mean', minScore: 1, maxScore: 2, color: '#0000ff' }],
+        },
+      },
+      overallScale: null,
+    };
+    const stored = toSurveyConfigRecord(input);
+    const restored = fromSurveyConfigRecord(stored);
+
+    expect(restored.bandsByOutput).toEqual(input.bandsByOutput);
+    expect(stored.subscales[0].bands?.map((band) => [band.score_output, band.min_score, band.max_score])).toEqual([
+      ['sum', 20, 25],
+      ['mean', 1, 2],
+    ]);
+  });
 });

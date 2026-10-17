@@ -178,4 +178,113 @@ describe('shared scored columns', () => {
       outputs.map((output) => `Fixture ${output === 'sum' ? 'Sum' : output === 'mean' ? 'Mean' : 'Custom'}`),
     );
   });
+
+  it('keeps each shown output interpretation adjacent and applies that output bands only', () => {
+    const fixtureCsv = readFileSync(new URL('../docs/fixtures/fixture_A.csv', import.meta.url), 'utf8');
+    const fixture = Papa.parse<Record<string, string>>(fixtureCsv, { header: true, skipEmptyLines: true });
+    if (fixture.errors.length > 0) throw new Error(fixture.errors[0].message);
+    if (!fixture.meta.fields) throw new Error('Fixture A has no header row.');
+    const subscale = {
+      ...subscales[0],
+      items: ['Q1', 'Q2'].map((column, order) => ({ column, order, reverse: false })),
+      showOutputs: ['sum', 'mean'] as const,
+    };
+    const outputBands = {
+      stress: {
+        sum: [{ name: 'Sum band', minScore: 0, maxScore: 10, color: '#ff0000' }],
+        mean: [{ name: 'Mean band', minScore: 0, maxScore: 5, color: '#0000ff' }],
+      },
+    };
+    const resultWithOutputBands = scoreDataset(fixture.data, fixture.meta.fields, [subscale], {}, [], {
+      bandsByOutput: outputBands,
+    });
+    const data = buildScoredColumnData({
+      result: resultWithOutputBands,
+      rawHeaders: fixture.meta.fields,
+      rawRows: fixture.data,
+      demographicColumns: ['ID', 'Age'],
+      idColumns: ['ID'],
+      subscales: [subscale],
+    });
+
+    expect(data.headers.slice(4, 8)).toEqual([
+      'Stress Sum',
+      'Stress Sum interpretation',
+      'Stress Mean',
+      'Stress Mean interpretation',
+    ]);
+    expect(data.rows[0]['Stress Sum interpretation']).toBe('Sum band');
+    expect(data.rows[0]['Stress Mean interpretation']).toBe('Mean band');
+    expect(data.groups.flatMap((group) => group.columns.map((column) => column.key))).toEqual(data.headers);
+
+    const oneOutput = { ...subscale, showOutputs: ['mean'] as const, scoringMethod: 'mean' as const };
+    const oneOutputResult = scoreDataset(fixture.data, fixture.meta.fields, [oneOutput], {}, [], {
+      bandsByOutput: { stress: { mean: outputBands.stress.mean } },
+    });
+    expect(oneOutputResult.headers.slice(-2)).toEqual(['Stress Mean', 'Stress Interpretation']);
+
+    const withoutBands = scoreDataset(fixture.data, fixture.meta.fields, [oneOutput], {});
+    expect(withoutBands.headers).not.toContain('Stress Interpretation');
+  });
+
+  it('keeps score export headers unique when scale names repeat', () => {
+    const repeated = [
+      { ...subscales[0], name: 'Stress', showOutputs: ['sum'] as const },
+      { ...subscales[1], id: 'coping-copy', name: 'Stress', showOutputs: ['mean'] as const },
+    ];
+    const repeatedResult = scoreDataset(rows, rawHeaders, repeated, {});
+    const data = buildScoredColumnData({
+      result: repeatedResult,
+      rawHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant', 'Age'],
+      idColumns: ['Participant'],
+      subscales: repeated,
+    });
+
+    expect(data.headers).toContain('Stress Sum');
+    expect(data.headers).toContain('Stress (2) Mean');
+    expect(new Set(data.headers).size).toBe(data.headers.length);
+  });
+
+  it('preserves the automatic Overall score column when no subscales are configured', () => {
+    const overall = {
+      ...subscales[0],
+      id: 'overall',
+      name: 'Overall Scale',
+      scoringMethod: 'mean' as const,
+      showOutputs: ['mean'] as const,
+    };
+    const resultWithoutSubscales = scoreDataset(rows, rawHeaders, [overall], {}, [], {
+      legacyScoreColumnIds: ['overall'],
+    });
+    const data = buildScoredColumnData({
+      result: resultWithoutSubscales,
+      rawHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant', 'Age'],
+      idColumns: ['Participant'],
+      subscales: [],
+    });
+
+    expect(data.headers).toContain('Overall Scale Score');
+    expect(data.headers).not.toContain('Overall Scale Mean');
+  });
+
+  it('avoids collisions between generated outputs and existing source headers', () => {
+    const sourceHeaders = [...rawHeaders, 'Stress Sum'];
+    const resultWithCollision = scoreDataset(rows, sourceHeaders, [subscales[0]], {});
+    const data = buildScoredColumnData({
+      result: resultWithCollision,
+      rawHeaders: sourceHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant', 'Age'],
+      idColumns: ['Participant'],
+      subscales: [subscales[0]],
+    });
+
+    expect(data.headers).toContain('Stress Sum');
+    expect(data.headers).toContain('Stress (2) Sum');
+    expect(new Set(data.headers).size).toBe(data.headers.length);
+  });
 });
