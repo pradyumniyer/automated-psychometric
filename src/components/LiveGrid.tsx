@@ -2,6 +2,7 @@
 // score/interpretation columns inline, and optional Sum/Mean summary rows.
 import React from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import { rowNumberBackgroundClass } from '@/lib/liveGridStyles';
 
 export interface GridColumn {
   key: string;
@@ -157,7 +158,7 @@ export function LiveGrid({
               return (
                 <tr key={i} ref={isHighlighted ? highlightRef : undefined}
                   className={isHighlighted ? 'bg-accent-100 ring-2 ring-accent-400' : isExcluded ? 'bg-warning-50' : i % 2 ? 'bg-secondary-50/20' : 'bg-white'}>
-                  <td className="px-2 py-1.5 text-secondary-400 font-mono text-xs sticky left-0 bg-inherit border-r border-secondary-100">{realIdx + 1}</td>
+                  <td className={`px-2 py-1.5 text-secondary-400 font-mono text-xs sticky left-0 border-r border-secondary-100 ${rowNumberBackgroundClass(isHighlighted, isExcluded, i)}`}>{realIdx + 1}</td>
                   <td className="px-2 py-1.5 text-center border-r border-secondary-100">
                     <button onClick={() => onToggleRow(realIdx)}
                       className={`px-1.5 py-0.5 text-xs rounded-full transition-colors ${isExcluded ? 'bg-error-100 text-error-700 hover:bg-error-200' : 'bg-success-100 text-success-700 hover:bg-success-200'}`}>
