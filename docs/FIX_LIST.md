@@ -17,7 +17,7 @@ Order = priority. These are owner-approved changes to the frozen UI (see `UI_FRE
 *(F5 moved up into Batch 1.)*
 
 **Toggles decision (owner, 17 Oct 2026):** the existing footer Sum/Mean toggles stay unchanged; F3/F4 use new separate persisted "Score columns" toggles (Sum, Mean, Overall) whose defaults reproduce today's grid and export.
-**F6. Subscale builder** (item 2). Click **Add subscale** as many times as needed. Click a subscale card → popup with the **unassigned item pool** (search, multi-select, select all/none) → **Add**. A **×** on an item chip in the card removes it back to the pool. Above the cards, an "Unassigned items" strip shows what is left (count + chips). The old "select subscale" box goes away. Reverse toggle and reordering inside a subscale are unchanged.
+**F6. Subscale builder** (item 2). Click **Add subscale** as many times as needed. Click a subscale card → popup with the **unassigned item pool** (search, multi-select, select all/none) → **Add**. A **×** on an item chip in the card removes it back to the pool. Above the cards, an "Unassigned items" strip shows what is left (count + chips). The old "select subscale" box goes away. Reverse toggle and reordering inside a subscale are unchanged. **Owner-found bug (17 Oct 2026):** with two empty subscale cards added first, selecting items and assigning them through the popup to Subscale 1 put them in Subscale 2; after deleting Subscale 2, assigning to Subscale 1 did nothing. Adding one card at a time works. F6 must assign to the card that was clicked (by id, not by position or a shared 'selected' state) and needs a test with 2-3 empty cards, deleting cards, and assigning to each.
 **F7. Data-quality normality panel** (item 7, from the owner's screenshot; numbers verified correct: W 0.9804, p 0.8356, skew −0.2906, kurtosis −0.2038, 1 outlier). Replace "Verdict: Normal" and "Parametric analyses are appropriate" with the neutral wording in spec §2.6; format Q–Q axis labels to 2 decimals and stop them clipping; add the Lilliefors KS line next to Shapiro–Wilk; add the reliability section (approved addition).
 **F8. Proration control** in the Scoring panel (opt-in, default off, 20/25/50%).
 
@@ -41,3 +41,14 @@ Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
 - Sum of means and mean of sums are allowed but unusual; mean of subscale means weights each subscale equally, not each item.
 
 **F11. Report rework (later, not specced).** The Report screen should produce a publication-ready, APA-formatted section (tables for descriptives, reliability, normality; wording; export), not the current format. To be specced after the scoring UI work. P1c only keeps the Report working with the new columns.
+
+## Small fixes backlog (owner, 17 Oct 2026; do in bulk, ideally after P2b because the per-cell reasons come from `resolveResponse`)
+1. UI alert that summary rows and subscale scores omitted missing, out-of-range, N/A or similar cells.
+2. Summary sheet: values must start at cell A1 (no title row) so jamovi can import it; move the notes elsewhere (for example a "Notes" sheet and a `_notes` CSV). Notes must name each excluded cell precisely: Excel address on the data sheet (for example A34), respondent, column, value, reason. In the app, the same message with a link to the cell in the grid.
+3. The Summary rows tooltip becomes a small (i) icon with hover.
+4. Summary rows must cover only item columns, score columns and Overall, not Age or other demographics.
+5. Check after P1c: grid/export headers now say Sum / Mean (not "Score"); confirm this is what the owner wants.
+
+**F12. Bands for decimal scores** (owner finding, 17 Oct 2026; built in P1c2, reused by P1d for Overall).
+- Bug: Suggest produced whole-number Mean bands (0-2, 3-3, 4-5); means such as 3.6 fell in the gaps and showed a blank interpretation with no warning.
+- Rules: integer outputs (Sum of integer items) keep inclusive whole-number ranges; continuous outputs (Mean, Custom, decimals, most Overall) use lower limit included / upper limit not included (last band includes its upper limit), contiguous, decimals allowed, classified on the unrounded score. The Bands step validates gaps, overlaps, inverted bands and range coverage. Suggest builds 3 equal contiguous bands over the output's possible range (Sum 5-11, 12-18, 19-25 for five 1-5 items; Mean 1-2.33, 2.33-3.67, 3.67-5); disabled for Custom. A score outside every band shows "No band" (never blank) and the status line names the affected column and respondents. One shared classification function everywhere (grid, export, Report).
