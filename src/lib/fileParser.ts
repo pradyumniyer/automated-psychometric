@@ -104,10 +104,6 @@ function isRowEmpty(row: unknown[]): boolean {
   return row.every((v) => v == null || String(v).trim() === '');
 }
 
-function rowTextLength(row: unknown[]): number {
-  return row.reduce<number>((sum, v) => sum + (v != null ? String(v).trim().length : 0), 0);
-}
-
 function nonEmptyCellCount(row: unknown[]): number {
   return row.filter((v) => v != null && String(v).trim() !== '').length;
 }
@@ -305,7 +301,7 @@ export function parseSheetConfigurable(
     throw new Error('Data start row must be after the header row.');
   }
 
-  let headers = buildHeaders(rawRows[headerRow]);
+  const headers = buildHeaders(rawRows[headerRow]);
   let colCount = headers.length;
 
   // Build column_meta with labels if a label row was specified
@@ -398,6 +394,7 @@ export async function parseFile(file: File): Promise<ParsedSheet> {
 export interface ExportOptions {
   excludedRows?: ReadonlySet<number>;
   keepExcluded?: boolean;
+  numericColumns?: ReadonlySet<string>;
 }
 
 function sanitizeCsvText(value: string): string {
@@ -407,8 +404,20 @@ function sanitizeCsvText(value: string): string {
   return value;
 }
 
-function csvValue(value: unknown): unknown {
-  return typeof value === 'string' ? sanitizeCsvText(value) : value ?? '';
+function numericValue(value: unknown, header: string, numericColumns?: ReadonlySet<string>): unknown {
+  if (typeof value === 'string' && numericColumns?.has(header)) {
+    const trimmed = value.trim();
+    if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) return numeric;
+    }
+  }
+  return value ?? '';
+}
+
+function csvValue(value: unknown, header: string, numericColumns?: ReadonlySet<string>): unknown {
+  const cellValue = numericValue(value, header, numericColumns);
+  return typeof cellValue === 'string' ? sanitizeCsvText(cellValue) : cellValue;
 }
 
 export function createCsvContent(
@@ -423,7 +432,7 @@ export function createCsvContent(
     .map((row, index) => ({ row, index }))
     .filter(({ index }) => keepExcluded || !excludedRows.has(index))
     .map(({ row, index }) => [
-      ...headers.map((header) => csvValue(row[header])),
+      ...headers.map((header) => csvValue(row[header], header, options.numericColumns)),
       ...(keepExcluded ? [excludedRows.has(index)] : []),
     ]);
   return Papa.unparse([
@@ -449,7 +458,8 @@ export function createXlsxSheetData(
   rows.forEach((row, index) => {
     if (!keepExcluded && excludedRows.has(index)) return;
     sheetData.push(headers.map((header) => {
-      const cell = xlsxCell(row[header]);
+      const value = numericValue(row[header], header, options.numericColumns);
+      const cell = xlsxCell(value);
       return keepExcluded && excludedRows.has(index) && typeof cell === 'object' && cell
         ? { ...cell, backgroundColor: '#FFFF00' }
         : cell;

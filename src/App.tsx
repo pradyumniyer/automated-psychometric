@@ -7,6 +7,7 @@ import { ReportScreen } from '@/components/ReportScreen';
 import type { Project } from '@/types/domain';
 import { datasetRepository, exclusionRepository } from '@/storage/repositories';
 import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
+import type { ScoreColumnSettings } from '@/lib/scoredColumns';
 
 type View = 'list' | 'config' | 'quality' | 'export' | 'report';
 
@@ -19,6 +20,11 @@ export default function App() {
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSummarySum, setShowSummarySum] = useState(false);
   const [showSummaryMean, setShowSummaryMean] = useState(false);
+  const [scoreColumnSettings, setScoreColumnSettings] = useState<ScoreColumnSettings>({
+    sum: false,
+    mean: false,
+    overall: true,
+  });
 
   const changeActiveDataset = useCallback((datasetId: string | null) => {
     setExcludedRows(new Set());
@@ -119,6 +125,9 @@ export default function App() {
   const setExcludedRowsDirect = useCallback((rows: Set<number>) => (
     persistExcludedRows(rows)
   ), [persistExcludedRows]);
+  const toggleScoreColumn = useCallback((key: keyof ScoreColumnSettings) => {
+    setScoreColumnSettings((current) => ({ ...current, [key]: !current[key] }));
+  }, []);
 
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
@@ -196,6 +205,8 @@ export default function App() {
             showSummaryMean={showSummaryMean}
             onToggleSummarySum={() => setShowSummarySum((v) => !v)}
             onToggleSummaryMean={() => setShowSummaryMean((v) => !v)}
+            scoreColumnSettings={scoreColumnSettings}
+            onToggleScoreColumn={toggleScoreColumn}
           />
         )}
         {view === 'quality' && (
@@ -217,6 +228,7 @@ export default function App() {
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={changeActiveDataset}
+            scoreColumnSettings={scoreColumnSettings}
           />
         )}
         {view === 'report' && (

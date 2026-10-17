@@ -10,6 +10,7 @@ import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/st
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
+import { buildScoredColumnData, type ScoreColumnSettings } from '@/lib/scoredColumns';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -17,14 +18,16 @@ interface Props {
   excludedRows: Set<number>;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
+  scoreColumnSettings: ScoreColumnSettings;
 }
 
 type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo' | 'scores_only';
 
-export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange }: Props) {
+export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange, scoreColumnSettings }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
+  const [idColumns, setIdColumns] = useState<string[]>([]);
   const [subscaleGroups, setSubscaleGroups] = useState<SubscaleGroup[]>([]);
   const [responseScales, setResponseScales] = useState<ResponseScale[]>([]);
   const [savedScoringResult, setSavedScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
@@ -76,6 +79,12 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
 
         if (cancelled) return;
         setDemoCols(config.demographic_columns);
+        setIdColumns([...new Set([
+          ...config.id_columns,
+          ...config.demographic_columns
+            .filter((column) => /\bID\b/i.test(column.detected_by))
+            .map((column) => column.column_name),
+        ])]);
         setSubscaleGroups(config.subscales);
         setResponseScales(config.subscales.flatMap((subscale) => subscale.response_scale ? [subscale.response_scale] : []));
         const bands: Record<string, BandConfig[]> = {};
@@ -145,29 +154,35 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
   const scoringAvailable = !!savedScoringResult || (!scoreCacheStale && hasSubscaleConfig);
   const scoredResult = useMemo(() => {
     if (!dataset) return null;
-    if (savedScoringResult) {
-      return {
-        headers: savedScoringResult.headers,
-        rows: savedScoringResult.rows as Record<string, number | string | null>[],
-      };
-    }
+    if (savedScoringResult) return savedScoringResult;
     if (scoreCacheStale) return null;
     if (hasSubscaleConfig && subConfigs.length > 0) {
       try {
-        const result = scoreDataset(
+        return scoreDataset(
           dataset.rows as Record<string, unknown>[],
           dataset.headers,
           subConfigs,
           bandConfigs,
           Array.from(excludedRows),
         );
-        return { headers: result.headers, rows: result.rows };
       } catch {
         return null;
       }
     }
     return null;
   }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  const scoredColumnData = useMemo(() => {
+    if (!dataset || !scoredResult) return null;
+    return buildScoredColumnData({
+      result: scoredResult,
+      rawHeaders: dataset.headers,
+      rawRows: dataset.rows as Record<string, unknown>[],
+      demographicColumns: demoCols.map((column) => column.column_name),
+      idColumns,
+      subscales: subConfigs,
+      settings: scoreColumnSettings,
+    });
+  }, [dataset, scoredResult, demoCols, idColumns, subConfigs, scoreColumnSettings]);
 
   // ── Filename helper ──
   const fileName = (type: ExportType, ext: 'csv' | 'xlsx'): string => {
@@ -183,26 +198,31 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
     try {
       let headers: string[];
       let rows: Record<string, unknown>[];
+      let numericColumns: ReadonlySet<string>;
 
       if (type === 'cleaned_raw') {
         headers = dataset.headers;
         rows = dataset.rows as Record<string, unknown>[];
+        numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
       } else if (type === 'items_only') {
         headers = itemColumns;
+        numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
         rows = (dataset.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of itemColumns) out[col] = row[col];
           return out;
         });
       } else if (type === 'scored') {
-        if (!scoredResult) throw new Error('Scoring not available');
-        headers = scoredResult.headers;
-        rows = scoredResult.rows as Record<string, unknown>[];
+        if (!scoredColumnData) throw new Error('Scoring not available');
+        headers = scoredColumnData.headers;
+        rows = scoredColumnData.rows;
+        numericColumns = scoredColumnData.numericColumns;
       } else if (type === 'scores_demo') {
         if (!scoredResult) throw new Error('Scoring not available');
         const demoList = dataset.headers.filter((h) => demoColumnNames.has(h));
         const scoreCols = scoredResult.headers.filter((h) => !dataset.headers.includes(h));
         headers = [...demoList, ...scoreCols];
+        numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
         rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
@@ -215,6 +235,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
           .filter((h) => !dataset.headers.includes(h))
           .filter((h) => !h.endsWith(' Interpretation'));
         headers = [...demoList, ...scoreCols];
+        numericColumns = new Set(headers.filter((header) => !idColumns.includes(header)));
         rows = (scoredResult.rows as Record<string, unknown>[]).map((row) => {
           const out: Record<string, unknown> = {};
           for (const col of headers) out[col] = row[col];
@@ -225,7 +246,7 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
 
       const fn = fileName(type, fmt);
-      const exportOptions = { excludedRows, keepExcluded };
+      const exportOptions = { excludedRows, keepExcluded, numericColumns };
       if (fmt === 'csv') exportToCSV(headers, rows, fn, exportOptions);
       else await exportToXLSX(headers, rows, fn, exportOptions);
     } catch (error) {

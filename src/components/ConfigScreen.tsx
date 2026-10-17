@@ -34,8 +34,9 @@ import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory }
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { validateBands, suggestBands } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
-import { LiveGrid, GridColumn, GridGroup } from './LiveGrid';
+import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
+import { buildScoredColumnData, type ScoreColumnSettings } from '@/lib/scoredColumns';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -56,6 +57,7 @@ export function ConfigScreen({
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
   showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
+  scoreColumnSettings, onToggleScoreColumn,
 }: {
   project: Project;
   highlightRowIndex: number | null;
@@ -70,6 +72,8 @@ export function ConfigScreen({
   showSummaryMean: boolean;
   onToggleSummarySum: () => void;
   onToggleSummaryMean: () => void;
+  scoreColumnSettings: ScoreColumnSettings;
+  onToggleScoreColumn: (key: keyof ScoreColumnSettings) => void;
 }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
@@ -834,105 +838,40 @@ export function ConfigScreen({
     }
   };
 
-  // ── Grid construction: regrouped columns with merged headers ──
-  const { groups, summary } = useMemo(() => {
-    const grps: GridGroup[] = [];
+  const scoredColumnData = useMemo(() => buildScoredColumnData({
+    result: scoringResult,
+    rawHeaders: dataset?.headers ?? [],
+    rawRows: dataset?.rows as Record<string, unknown>[] ?? [],
+    demographicColumns: demoCols.map((column) => column.column_name),
+    idColumns: demoCols
+      .filter((column) => /\bID\b/i.test(column.detected_by))
+      .map((column) => column.column_name),
+    subscales: subscaleStates,
+    settings: scoreColumnSettings,
+  }), [dataset, scoringResult, demoCols, subscaleStates, scoreColumnSettings]);
+  const groups: GridGroup[] = scoredColumnData.groups;
+  const summary = useMemo(() => {
     const sums: Record<string, number | null> = {};
     const means: Record<string, number | null> = {};
-
-    if (!dataset) return { groups: grps, summary: { sums, means } };
-
-    // Use scoring result rows if available, else raw rows
-    const gridRows = scoringResult
-      ? scoringResult.rows as Record<string, unknown>[]
-      : dataset.rows as Record<string, unknown>[];
-
-    // Filter out excluded rows for summary calculations
-    const includedRows = gridRows.filter((_, i) => !sharedExcludedRows.has(i));
-
-    // Demographics group
-    const demoColsList = demoCols.map((d) => d.column_name).filter((c) => dataset.headers.includes(c));
-    if (demoColsList.length > 0) {
-      const cols: GridColumn[] = demoColsList.map((c) => ({ key: c, label: c, group: 'ID', type: 'demo' as const }));
-      grps.push({ name: 'ID', columns: cols });
-      for (const c of demoColsList) {
-        const vals = includedRows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
-        sums[c] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
-        means[c] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    const includedRows = scoredColumnData.rows.filter((_, index) => !sharedExcludedRows.has(index));
+    for (const group of groups) {
+      for (const column of group.columns) {
+        if (column.type === 'interpretation') continue;
+        const values = includedRows
+          .map((row) => Number(row[column.key]))
+          .filter((value) => !Number.isNaN(value));
+        sums[column.key] = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null;
+        means[column.key] = values.length > 0
+          ? values.reduce((sum, value) => sum + value, 0) / values.length
+          : null;
       }
     }
+    return { sums, means };
+  }, [scoredColumnData, sharedExcludedRows, groups]);
 
-    // Subscale groups (in display order)
-    for (const sub of subscaleStates) {
-      const cols: GridColumn[] = sub.items.map((item) => ({ key: item.column, label: item.column, group: sub.name, type: 'data' as const }));
-      // Add score column inline
-      const scoreKey = `${sub.name} Score`;
-      cols.push({ key: scoreKey, label: 'Score', group: sub.name, type: 'score' as const });
-      // Add interpretation column inline
-      const interpKey = `${sub.name} Interpretation`;
-      cols.push({ key: interpKey, label: 'Interpretation', group: sub.name, type: 'interpretation' as const });
-      grps.push({ name: sub.name, columns: cols });
-      // Summaries for item columns
-      for (const item of sub.items) {
-        const vals = includedRows.map((r) => Number(r[item.column])).filter((v) => !isNaN(v));
-        sums[item.column] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
-        means[item.column] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
-      }
-      // Summary for score column
-      const scoreVals = includedRows.map((r) => Number(r[scoreKey])).filter((v) => !isNaN(v));
-      sums[scoreKey] = scoreVals.length > 0 ? scoreVals.reduce((s, v) => s + v, 0) : null;
-      means[scoreKey] = scoreVals.length > 0 ? scoreVals.reduce((s, v) => s + v, 0) / scoreVals.length : null;
-    }
-
-    // Unassigned items group
-    if (unassignedItems.length > 0) {
-      const cols: GridColumn[] = unassignedItems.map((c) => ({ key: c, label: c, group: 'Unassigned', type: 'data' as const }));
-      grps.push({ name: 'Unassigned', columns: cols });
-      for (const c of unassignedItems) {
-        const vals = includedRows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
-        sums[c] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
-        means[c] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
-      }
-    }
-
-    // Overall Scale score at the far right (if scoring has been run with no subscales)
-    if (scoringResult && subscaleStates.length === 0) {
-      const overallScoreKey = 'Overall Scale Score';
-      const overallInterpKey = 'Overall Scale Interpretation';
-      if (scoringResult.headers.includes(overallScoreKey)) {
-        grps.push({
-          name: 'Overall Scale',
-          columns: [
-            { key: overallScoreKey, label: 'Overall Score', group: 'Overall Scale', type: 'score' as const },
-            ...(scoringResult.headers.includes(overallInterpKey)
-              ? [{ key: overallInterpKey, label: 'Interpretation', group: 'Overall Scale', type: 'interpretation' as const }]
-              : []),
-          ],
-        });
-        const vals = includedRows.map((r) => Number(r[overallScoreKey])).filter((v) => !isNaN(v));
-        sums[overallScoreKey] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
-        means[overallScoreKey] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
-      }
-    }
-    // Overall Scale score when subscales exist (combined overall score)
-    if (scoringResult && subscaleStates.length > 0) {
-      const overallKey = 'Overall Scale Score';
-      if (scoringResult.headers.includes(overallKey)) {
-        grps.push({ name: 'Overall Scale', columns: [{ key: overallKey, label: 'Overall Score', group: 'Overall Scale', type: 'score' as const }] });
-        const vals = includedRows.map((r) => Number(r[overallKey])).filter((v) => !isNaN(v));
-        sums[overallKey] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) : null;
-        means[overallKey] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
-      }
-    }
-
-    return { groups: grps, summary: { sums, means } };
-  }, [dataset, scoringResult, demoCols, subscaleStates, unassignedItems, sharedExcludedRows]);
-
-  const displayRows = dataset ? (
-    scoringResult
-      ? (showExcludedOnly ? (scoringResult.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : scoringResult.rows as Record<string, unknown>[])
-      : (showExcludedOnly ? (dataset.rows as Record<string, unknown>[]).filter((_, i) => sharedExcludedRows.has(i)) : dataset.rows as Record<string, unknown>[])
-  ) : [];
+  const displayRows = showExcludedOnly
+    ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))
+    : scoredColumnData.rows;
   const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom')) && itemColumns.length > 0;
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
@@ -1001,6 +940,25 @@ export function ConfigScreen({
                 title={`Show ${label} row${!scoringResult ? ' (available after scoring)' : ''}`}
               >
                 <Icon className="w-3.5 h-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-6 bg-secondary-200" />
+          <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5" aria-label="Score columns">
+            <span className="px-2 text-xs font-medium text-secondary-500 whitespace-nowrap">Score columns</span>
+            {([
+              { key: 'sum' as const, label: 'Sum' },
+              { key: 'mean' as const, label: 'Mean' },
+              { key: 'overall' as const, label: 'Overall' },
+            ]).map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={scoreColumnSettings[key]}
+                onClick={() => onToggleScoreColumn(key)}
+                className={`px-2 py-1 text-xs font-medium rounded-md transition-all ${scoreColumnSettings[key] ? 'bg-white text-primary-700 shadow-sm' : 'text-secondary-500 hover:text-secondary-700'}`}
+              >
+                {label}
               </button>
             ))}
           </div>
