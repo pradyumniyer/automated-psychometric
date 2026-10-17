@@ -65,6 +65,7 @@ export interface ResponseScale {
   min_value: number | null;
   max_value: number | null;
   label_map: { label: string; value: number }[];
+  confirmed?: boolean;
   created_at: string;
 }
 

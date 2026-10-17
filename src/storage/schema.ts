@@ -42,6 +42,7 @@ export interface SurveyConfigRecord {
     min?: number;
     max?: number;
     label_map?: { label: string; value: number }[];
+    confirmed?: boolean;
   };
   subscales: (SubscaleGroup & {
     response_scale?: ResponseScale;

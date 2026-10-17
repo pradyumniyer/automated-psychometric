@@ -10,6 +10,7 @@ import type {
   TemplateRecord,
 } from './schema';
 import type { Dataset, Project, Template } from '@/types/domain';
+import { migrateSurveyConfigRecord } from './viewAdapters';
 
 export interface DatasetImportInput {
   projectId: string;
@@ -311,16 +312,20 @@ export const datasetRepository: DatasetRepository = {
 
 export const surveyConfigRepository: SurveyConfigRepository = {
   async get(datasetId) {
-    return (await db.survey_configs.get(datasetId)) ?? null;
+    const record = await db.survey_configs.get(datasetId);
+    if (!record) return null;
+    const migrated = migrateSurveyConfigRecord(record);
+    if (JSON.stringify(record) !== JSON.stringify(migrated)) await db.survey_configs.put(migrated);
+    return migrated;
   },
 
   async save(datasetId, config) {
     return db.transaction('rw', db.survey_configs, async () => {
-      const saved = {
+      const saved = migrateSurveyConfigRecord({
         ...config,
         dataset_id: datasetId,
         updated_at: Date.now(),
-      };
+      });
       await db.survey_configs.put(saved);
       return saved;
     });

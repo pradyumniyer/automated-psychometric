@@ -20,6 +20,7 @@ export interface ScreenSubscaleState {
   minValue: number | null;
   maxValue: number | null;
   labelMap: { label: string; value: number }[];
+  confirmed?: boolean;
   displayOrder: number;
 }
 
@@ -79,6 +80,7 @@ function toStoredSubscale(
     min_value: state.minValue,
     max_value: state.maxValue,
     label_map: state.labelMap,
+    confirmed: true,
     created_at: existing?.response_scale?.created_at ?? now,
   };
   const outputs = shownScoreOutputs(state.showOutputs, state.scoringMethod);
@@ -173,6 +175,22 @@ export function toSurveyConfigRecord(
       ? existing?.linked_template_id ?? null
       : input.linkedTemplateId,
     updated_at: Date.now(),
+  };
+}
+
+export function migrateSurveyConfigRecord(config: SurveyConfigRecord): SurveyConfigRecord {
+  const migrateScale = (scale: ResponseScale | undefined): ResponseScale | undefined =>
+    scale ? { ...scale, confirmed: scale.confirmed ?? true } : undefined;
+  return {
+    ...config,
+    response_scale: { ...config.response_scale, confirmed: config.response_scale.confirmed ?? true },
+    subscales: config.subscales.map((subscale) => ({
+      ...subscale,
+      response_scale: migrateScale(subscale.response_scale),
+    })),
+    overall_scale: config.overall_scale
+      ? { ...config.overall_scale, response_scale: migrateScale(config.overall_scale.response_scale) }
+      : undefined,
   };
 }
 

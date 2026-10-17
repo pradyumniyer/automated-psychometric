@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromSurveyConfigRecord, toSurveyConfigRecord } from '../src/storage/viewAdapters';
+import { fromSurveyConfigRecord, migrateSurveyConfigRecord, toSurveyConfigRecord } from '../src/storage/viewAdapters';
 
 describe('screen and storage config adapters', () => {
   it('round-trips all UI-editable survey configuration', () => {
@@ -46,12 +46,14 @@ describe('screen and storage config adapters', () => {
       display_order: 2,
       response_scale: {
         scale_type: 'categorical',
+        confirmed: true,
         min_value: 1,
         max_value: 5,
         label_map: [{ label: 'Often', value: 4 }],
       },
       bands: [{ name: 'High', min_score: 4, max_score: 5, color: '#ff0000' }],
     });
+
     expect(fromSurveyConfigRecord(stored).subscales[0]).toMatchObject({
       id: 'sub-1',
       scoringMethod: 'mean',
@@ -60,7 +62,43 @@ describe('screen and storage config adapters', () => {
       maxValue: 5,
       labelMap: [{ label: 'Often', value: 4 }],
     });
+
     expect(fromSurveyConfigRecord(stored).bands).toEqual(screenConfig.bands);
+  });
+
+  it('migrates old numeric and categorical response scales as confirmed', () => {
+    const migrated = migrateSurveyConfigRecord({
+      dataset_id: 'legacy', id_columns: [], demographic_columns: [], item_columns: ['Q1'],
+      response_scale: { type: 'numeric', min: 1, max: 5 },
+      subscales: [
+        {
+          id: 'numeric', project_id: 'p', dataset_id: 'legacy', name: 'Numeric', description: '',
+          items: [{ column: 'Q1', order: 0, reverse: false }], scoring_method: 'sum',
+          custom_formula: null, display_order: 0, created_at: new Date().toISOString(),
+          response_scale: {
+            id: 'numeric-scale', project_id: 'p', dataset_id: 'legacy', subscale_id: 'numeric',
+            scale_type: 'numeric', min_value: 1, max_value: 5, label_map: [],
+            created_at: new Date().toISOString(),
+          },
+        },
+        {
+          id: 'categorical', project_id: 'p', dataset_id: 'legacy', name: 'Categorical', description: '',
+          items: [{ column: 'Q1', order: 0, reverse: false }], scoring_method: 'sum',
+          custom_formula: null, display_order: 1, created_at: new Date().toISOString(),
+          response_scale: {
+            id: 'categorical-scale', project_id: 'p', dataset_id: 'legacy', subscale_id: 'categorical',
+            scale_type: 'categorical', min_value: null, max_value: null,
+            label_map: [{ label: 'No', value: 0 }, { label: 'Yes', value: 1 }],
+            created_at: new Date().toISOString(),
+          },
+        },
+      ],
+      bands: [], allowed_nonresponse: [], proration_enabled: false,
+      proration_max_missing_pct: 20, dq_thresholds: {}, linked_template_id: null, updated_at: 0,
+    });
+
+    expect(migrated.response_scale.confirmed).toBe(true);
+    expect(migrated.subscales.map((subscale) => subscale.response_scale?.confirmed)).toEqual([true, true]);
   });
 
   it('migrates a legacy method and its bands to the matching shown output', () => {

@@ -9,8 +9,9 @@ import type {
   SurveyConfigRecord,
   TemplateRecord,
 } from './schema';
+import { migrateSurveyConfigRecord } from './viewAdapters';
 
-export const STORAGE_SCHEMA_VERSION = 1;
+export const STORAGE_SCHEMA_VERSION = 2;
 export const DATABASE_NAME = 'psychometric_prep';
 
 export class PsychometricDatabase extends Dexie {
@@ -34,6 +35,11 @@ export class PsychometricDatabase extends Dexie {
       templates: '&id, name, kind',
       history: '&id, project_id, dataset_id, ts, [dataset_id+ts]',
       settings: '&key',
+    });
+    this.version(2).stores({}).upgrade(async (tx) => {
+      await tx.table('survey_configs').toCollection().modify((record: SurveyConfigRecord) => {
+        Object.assign(record, migrateSurveyConfigRecord(record));
+      });
     });
   }
 }
