@@ -332,7 +332,7 @@ export function scoreDataset(
   const overallBands = options.bandsByOutput?.overall?.[combineBy === 'custom' ? 'custom' : combineBy]
     ?? bands['Overall Scale']
     ?? bands['overall'];
-  const overallRange = basedOn === 'custom'
+  const overallRange = basedOn === 'custom' || combineBy === 'custom'
     ? null
     : (() => {
         const rangesForOutput = selectedSubscales.map((subscale) => {

@@ -1821,7 +1821,7 @@ function getOverallOutputRange(
   subscales: SubscaleState[],
   settings: OverallSettings,
 ): OutputRange | null {
-  if (settings.basedOn === 'custom' || subscales.length < 2) return null;
+  if (settings.basedOn === 'custom' || settings.combineBy === 'custom' || subscales.length < 2) return null;
   const ranges = subscales.map((subscale) => {
     if (subscale.minValue === null || subscale.maxValue === null) return null;
     return settings.basedOn === 'sums'

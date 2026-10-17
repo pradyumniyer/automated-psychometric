@@ -398,4 +398,18 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
     });
     expect(custom.overallScaleScore).toEqual([18]);
   });
+
+  it('classifies decimal Overall means with Overall bands', () => {
+    const first = makeSubscale('First', ['F1', 'F2']);
+    const second = makeSubscale('Second', ['S1', 'S2']);
+    const row = { F1: '4', F2: '2', S1: '5', S2: '1' };
+    const result = scoreDataset([row], Object.keys(row), [first, second], {
+      'Overall Scale': [{ name: 'Moderate', minScore: 2.5, maxScore: 3.5 }],
+    }, [], {
+      overall: { enabled: true, basedOn: 'means', combineBy: 'mean' },
+    });
+
+    expect(result.rows[0]['Overall Scale Score']).toBe(3);
+    expect(result.rows[0]['Overall Scale Interpretation']).toBe('Moderate');
+  });
 });

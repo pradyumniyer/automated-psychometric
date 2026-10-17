@@ -13,6 +13,7 @@ import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { buildScoredColumnData, scoreOnlyColumnKeys, type ScoredColumn } from '@/lib/scoredColumns';
 import { buildSummaryExportContent } from '@/lib/summaryStatistics';
 import { shownScoreOutputs } from '@/lib/scoreOutputs';
+import type { SurveyConfigRecord } from '@/storage/schema';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -40,6 +41,7 @@ export function ExportScreen({
   const [idColumns, setIdColumns] = useState<string[]>([]);
   const [subscaleGroups, setSubscaleGroups] = useState<SubscaleGroup[]>([]);
   const [responseScales, setResponseScales] = useState<ResponseScale[]>([]);
+  const [overallSettings, setOverallSettings] = useState<NonNullable<SurveyConfigRecord['overall_settings']> | null>(null);
   const [savedScoringResult, setSavedScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
   const [scoreCacheStale, setScoreCacheStale] = useState(false);
   const [keepExcluded, setKeepExcluded] = useState(false);
@@ -114,6 +116,19 @@ export function ExportScreen({
             }
           }
         }
+        if (config.overall_scale?.bands?.length) {
+          const output = config.overall_settings?.combine_by === 'custom'
+            ? 'custom'
+            : config.overall_settings?.combine_by ?? 'sum';
+          bands.overall ??= {};
+          bands.overall[output] = config.overall_scale.bands.map((band) => ({
+            name: band.name,
+            minScore: band.min_score,
+            maxScore: band.max_score,
+            color: band.color,
+          }));
+        }
+        setOverallSettings(config.overall_settings ?? null);
         setBandConfigs(bands);
         setSavedScoringResult(resultIsValid ? result : null);
         setScoreCacheStale(!!latest && (!current || !resultIsValid));
@@ -181,14 +196,24 @@ export function ExportScreen({
           subConfigs,
           {},
           Array.from(excludedRows),
-          { bandsByOutput: bandConfigs },
+          {
+            bandsByOutput: bandConfigs,
+            overall: overallSettings
+              ? {
+                  enabled: overallSettings.enabled,
+                  basedOn: overallSettings.based_on,
+                  combineBy: overallSettings.combine_by,
+                  customFormula: overallSettings.custom_formula,
+                }
+              : undefined,
+          },
         );
       } catch {
         return null;
       }
     }
     return null;
-  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, overallSettings, excludedRows]);
   const scoredColumnData = useMemo(() => {
     if (!dataset || !scoredResult) return null;
     return buildScoredColumnData({
