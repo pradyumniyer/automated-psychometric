@@ -4,6 +4,7 @@ import {
   applyOutOfRangeAction,
   buildPresetLabels,
   canReverseScore,
+  createOutOfRangeHistoryEntry,
   detectConventionalRange,
   detectMixedRanges,
   matchResponsePreset,
@@ -192,6 +193,16 @@ describe("resolveResponse", () => {
       raw: 7,
       suggestedAction: "missing",
     });
+  });
+
+  it("creates a cleaning-log entry without changing the original cells", () => {
+    const result = applyOutOfRangeAction({ ...fixtureScale }, [7, 7], "missing");
+    expect(createOutOfRangeHistoryEntry(result.log)).toEqual({
+      action_type: "response_scale_out_of_range",
+      description: "Treat as missing for 2 out-of-range responses",
+      payload: { action: "missing", count: 2, values: [7, 7] },
+    });
+    expect(result.log.values).toEqual([7, 7]);
   });
 
   it("recognizes numeric missing codes and blank or unmapped text", () => {

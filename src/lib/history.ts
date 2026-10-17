@@ -1,5 +1,6 @@
 import { historyRepository } from '@/storage/repositories';
 import type { ActionHistory } from '@/types/domain';
+import type { OutOfRangeActionLog } from '@/scientific/responseScales';
 
 export async function logAction(
   projectId: string,
@@ -17,6 +18,21 @@ export async function logAction(
     payload,
     undo_data: undoData,
   });
+}
+
+export async function logOutOfRangeAction(
+  projectId: string,
+  datasetId: string,
+  log: OutOfRangeActionLog,
+): Promise<void> {
+  await logAction(
+    projectId,
+    'response_scale_out_of_range',
+    `${log.action === 'widen' ? 'Widen range' : 'Treat as missing'} for ${log.count} out-of-range response${log.count === 1 ? '' : 's'}`,
+    { action: log.action, count: log.count, values: [...log.values] },
+    null,
+    datasetId,
+  );
 }
 
 export async function fetchHistory(datasetId: string): Promise<ActionHistory[]> {

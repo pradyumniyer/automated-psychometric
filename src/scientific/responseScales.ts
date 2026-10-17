@@ -78,6 +78,21 @@ export interface OutOfRangeActionLog {
   values: number[];
 }
 
+export interface OutOfRangeHistoryEntry {
+  action_type: "response_scale_out_of_range";
+  description: string;
+  payload: { action: OutOfRangeAction; count: number; values: number[] };
+}
+
+export function createOutOfRangeHistoryEntry(log: OutOfRangeActionLog): OutOfRangeHistoryEntry {
+  const actionLabel = log.action === "widen" ? "Widen range" : "Treat as missing";
+  return {
+    action_type: "response_scale_out_of_range",
+    description: `${actionLabel} for ${log.count} out-of-range response${log.count === 1 ? "" : "s"}`,
+    payload: { action: log.action, count: log.count, values: [...log.values] },
+  };
+}
+
 export interface OutOfRangeActionResult {
   scale: ResponseScaleV2;
   log: OutOfRangeActionLog;
