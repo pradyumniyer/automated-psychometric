@@ -118,6 +118,13 @@ export interface TemplateDefinition {
     output?: ScoreOutput;
     bands: { name: string; minScore: number; maxScore: number; color: string }[];
   }[];
+  overall?: {
+    enabled: boolean;
+    basedOn: 'sums' | 'means' | 'custom';
+    combineBy: 'sum' | 'mean' | 'custom';
+    customFormula: string;
+    bands: { name: string; minScore: number; maxScore: number; color: string }[];
+  };
   demographicRules: { patterns: string[]; contentHeuristics: string[] };
 }
 

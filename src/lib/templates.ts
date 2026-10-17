@@ -93,6 +93,7 @@ export function buildTemplateDefinition(
   subscaleStates: SubscaleStateLike[],
   bandStates: Record<string, BandStateLike[]>,
   bandsByOutput: Record<string, Partial<Record<ScoreOutput, BandStateLike[]>>> = {},
+  overall?: TemplateDefinition['overall'],
 ): TemplateDefinition {
   return {
     subscales: subscaleStates.map((s) => ({
@@ -136,6 +137,7 @@ export function buildTemplateDefinition(
         bands: bands.map((band) => ({ ...band })),
       }];
     }),
+    ...(overall ? { overall } : {}),
     // Kept for schema compatibility only — demographics are always re-detected per dataset
     demographicRules: { patterns: [], contentHeuristics: [] },
   };

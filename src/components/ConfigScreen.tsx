@@ -52,6 +52,12 @@ interface SubscaleState {
   displayOrder: number;
 }
 interface BandState { name: string; minScore: number; maxScore: number; color: string; }
+interface OverallSettings {
+  enabled: boolean;
+  basedOn: 'sums' | 'means' | 'custom';
+  combineBy: 'sum' | 'mean' | 'custom';
+  customFormula: string;
+}
 interface SheetInfo { name: string; rows: number; cols: number; }
 
 type SaveState = 'idle' | 'saving' | 'saved';
@@ -98,6 +104,9 @@ export function ConfigScreen({
     id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
     scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
   });
+  const [overallSettings, setOverallSettings] = useState<OverallSettings>({
+    enabled: true, basedOn: 'sums', combineBy: 'sum', customFormula: '',
+  });
   const [history, setHistory] = useState<ActionHistory[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [linkedTemplate, setLinkedTemplate] = useState<Template | null>(null);
@@ -131,6 +140,7 @@ export function ConfigScreen({
     bands?: Record<string, BandState[]>;
     bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
     overallScale?: SubscaleState | null;
+    overallSettings?: OverallSettings;
     linkedTemplateId?: string | null;
   } = {}) => {
     if (!dataset) throw new Error('No active dataset to save.');
@@ -144,8 +154,9 @@ export function ConfigScreen({
       bands: overrides.bands ?? bandStates,
       bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
       overallScale: overrides.overallScale === undefined
-        ? (subscaleStates.length === 0 ? overallScale : null)
+        ? overallScale
         : overrides.overallScale,
+      overallSettings: overrides.overallSettings ?? overallSettings,
       linkedTemplateId: overrides.linkedTemplateId,
     }, existing);
     return surveyConfigRepository.save(dataset.id, config);
@@ -202,6 +213,7 @@ export function ConfigScreen({
         id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
         scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
       });
+      setOverallSettings(adapted.overallSettings);
       const linked = config.linked_template_id
         ? await templateRepository.get(config.linked_template_id)
         : null;
@@ -276,7 +288,7 @@ export function ConfigScreen({
       setSaveState('idle');
       setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
     }
-  }, [dataset, configDirty, subscaleStates, bandStates, bandStatesByOutput, project.id, linkedTemplate, demoCols, overallScale]);
+  }, [dataset, configDirty, subscaleStates, bandStates, bandStatesByOutput, project.id, linkedTemplate, demoCols, overallScale, overallSettings]);
   performAutoSaveRef.current = performAutoSave;
 
   // Debounce auto-save: trigger 1s after configDirty becomes true
@@ -668,6 +680,17 @@ export function ConfigScreen({
           }
           bandConfigsByOutput[sub.id] = outputBands;
         }
+        const overallBands = bandStates[overallScale.name] ?? [];
+        if (overallBands.length > 0) {
+          bandConfigsByOutput.overall = {
+            [overallSettings.combineBy === 'custom' ? 'custom' : overallSettings.combineBy]: overallBands.map((band) => ({
+              name: band.name,
+              minScore: band.minScore,
+              maxScore: band.maxScore,
+              color: band.color,
+            })),
+          };
+        }
       }
       const config = await persistSurveyConfig();
       const excludedRowIds = [...sharedExcludedRows].map((index) => dataset.row_ids[index]).filter((id): id is string => !!id);
@@ -681,6 +704,12 @@ export function ConfigScreen({
           rowIds: dataset.row_ids,
           bandsByOutput: bandConfigsByOutput,
           legacyScoreColumnIds: subscaleStates.length === 0 ? [overallScale.id] : [],
+          overall: subscaleStates.length > 0 ? {
+            enabled: overallSettings.enabled,
+            basedOn: overallSettings.basedOn,
+            combineBy: overallSettings.combineBy,
+            customFormula: overallSettings.customFormula || null,
+          } : undefined,
         },
       );
       const hashes = await createScoreHashes(dataset, config, subConfigs, excludedRowIds);
@@ -714,7 +743,10 @@ export function ConfigScreen({
   const saveAsTemplate = async (name: string, description: string, instrument: string): Promise<string | null> => {
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) return validation.error;
-    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput);
+    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput, {
+      ...overallSettings,
+      bands: bandStates[overallScale.name] ?? [],
+    });
     try {
       await templateRepository.save({ name, description, instrument, definition: def, version: 1 });
       await logAction(project.id, 'template_save', `Saved template: ${name}`);
@@ -789,6 +821,17 @@ export function ConfigScreen({
       confirmed: suggestion.confidence >= 0.5,
       created_at: new Date().toISOString(),
     }));
+    const nextOverallSettings = def.overall
+      ? {
+          enabled: def.overall.enabled,
+          basedOn: def.overall.basedOn,
+          combineBy: def.overall.combineBy,
+          customFormula: def.overall.customFormula,
+        }
+      : overallSettings;
+    const nextBandsWithOverall = def.overall?.bands.length
+      ? { ...nextBands, [overallScale.name]: def.overall.bands }
+      : nextBands;
     try {
       const existing = await surveyConfigRepository.get(dataset.id);
       const config = toSurveyConfigRecord({
@@ -797,16 +840,18 @@ export function ConfigScreen({
         headers: dataset.headers,
         demographicColumns: nextDemographics,
         subscales: nextSubscales,
-        bands: nextBands,
+        bands: nextBandsWithOverall,
         bandsByOutput: nextBandsByOutput,
-        overallScale: null,
+        overallScale,
+        overallSettings: nextOverallSettings,
         linkedTemplateId: template.id,
       }, existing);
       await templateRepository.applyToDataset(template.id, dataset.id, config);
       setDemoCols(nextDemographics);
       setSubscaleStates(nextSubscales);
-      setBandStates(nextBands);
+      setBandStates(nextBandsWithOverall);
       setBandStatesByOutput(nextBandsByOutput);
+      setOverallSettings(nextOverallSettings);
       setLinkedTemplate(template);
       setStatusMsg({ type: 'success', text: formatMatchSummary(report) });
       setPendingApplyTemplate(null);
@@ -827,7 +872,10 @@ export function ConfigScreen({
     if (!dataset || !linkedTemplate) return;
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) { setStatusMsg({ type: 'error', text: validation.error! }); return; }
-    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput);
+    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput, {
+      ...overallSettings,
+      bands: bandStates[overallScale.name] ?? [],
+    });
     try {
       await templateRepository.update(linkedTemplate.id, { definition: def, version: linkedTemplate.version + 1 });
       await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
@@ -1146,6 +1194,8 @@ export function ConfigScreen({
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
                     overallScale={overallScale} onSetOverallScale={(patch) => { setOverallScale((prev) => ({ ...prev, ...patch })); markDirty(); }}
+                    overallSettings={overallSettings}
+                    onSetOverallSettings={(patch) => { setOverallSettings((prev) => ({ ...prev, ...patch })); markDirty(); }}
                     onAutoDetectOverall={() => {
                       if (!dataset) return;
                       const itemCols = allColumns.filter((c) => !demoColumnNames.has(c));
@@ -1166,6 +1216,7 @@ export function ConfigScreen({
                     onAddBand={addBand} onUpdateBand={updateBand} onRemoveBand={removeBand}
                     onAutoSuggest={autoSuggestBands}
                     overallScale={overallScale}
+                    overallSettings={overallSettings}
                   />
                 )}
                 {activeStep === 'scoring' && (
@@ -1536,7 +1587,7 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
@@ -1546,6 +1597,8 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
   onAutoDetect: (id: string) => void;
   onApplyToAll: () => void;
   overallScale: SubscaleState;
+  overallSettings: OverallSettings;
+  onSetOverallSettings: (patch: Partial<OverallSettings>) => void;
   onSetOverallScale: (patch: Partial<SubscaleState>) => void;
   onAutoDetectOverall: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
@@ -1554,9 +1607,74 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Response Scales</span>
-        {subscales.length >= 2 && <button onClick={onApplyToAll} className="text-xs text-primary-600 hover:underline">Apply first to all</button>}
+        <div className="flex items-center gap-3">
+          {subscales.length >= 2 && <button onClick={onApplyToAll} className="text-xs text-primary-600 hover:underline">Apply first to all</button>}
+          {subscales.length >= 2 && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={overallSettings.enabled}
+              onClick={() => onSetOverallSettings({ enabled: !overallSettings.enabled })}
+              className={`text-xs px-2 py-1 rounded-md ${overallSettings.enabled ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}
+            >
+              Overall scale
+            </button>
+          )}
+        </div>
       </div>
       <div className="space-y-3">
+        {subscales.length >= 2 && overallSettings.enabled && (
+          <Card className="p-3">
+            <h4 className="font-semibold text-sm text-secondary-900 mb-2">Overall Scale</h4>
+            <div className="text-xs text-secondary-500 mb-1">Based on</div>
+            <div className="flex items-center gap-1 mb-2">
+              {([
+                ['sums', 'Subscale Sums'],
+                ['means', 'Means'],
+                ['custom', 'Custom scores'],
+              ] as const).map(([value, label]) => {
+                const customDisabled = value === 'custom' && !subscales.every((subscale) => !!subscale.customFormula.trim());
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={customDisabled}
+                    title={customDisabled ? 'Every subscale needs a custom formula.' : undefined}
+                    onClick={() => onSetOverallSettings({ basedOn: value })}
+                    className={`px-2 py-0.5 text-xs rounded-md ${overallSettings.basedOn === value ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'} disabled:opacity-50`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-xs text-secondary-500 mb-1">Combine by</div>
+            <div className="flex items-center gap-1">
+              {([
+                ['sum', 'Sum'],
+                ['mean', 'Mean'],
+                ['custom', 'Custom formula'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onSetOverallSettings({ combineBy: value })}
+                  className={`px-2 py-0.5 text-xs rounded-md ${overallSettings.combineBy === value ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {overallSettings.combineBy === 'custom' && (
+              <input
+                value={overallSettings.customFormula}
+                onChange={(event) => onSetOverallSettings({ customFormula: event.target.value })}
+                placeholder="e.g. Stress + Coping"
+                className="w-full mt-2 px-2 py-1 text-xs border border-secondary-200 rounded font-mono"
+              />
+            )}
+          </Card>
+        )}
         {subscales.length === 0 && (
           <ScaleCardCompact name={overallScale.name} scaleType={overallScale.scaleType} scoringMethod={overallScale.scoringMethod} customFormula={overallScale.customFormula}
             showOutputs={shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod)}
@@ -1699,8 +1817,32 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   );
 }
 
+function getOverallOutputRange(
+  subscales: SubscaleState[],
+  settings: OverallSettings,
+): OutputRange | null {
+  if (settings.basedOn === 'custom' || subscales.length < 2) return null;
+  const ranges = subscales.map((subscale) => {
+    if (subscale.minValue === null || subscale.maxValue === null) return null;
+    return settings.basedOn === 'sums'
+      ? { min: subscale.items.length * subscale.minValue, max: subscale.items.length * subscale.maxValue }
+      : { min: subscale.minValue, max: subscale.maxValue };
+  });
+  if (ranges.some((range) => range === null)) return null;
+  const min = ranges.reduce((total, range) => total + range!.min, 0);
+  const max = ranges.reduce((total, range) => total + range!.max, 0);
+  return {
+    min: settings.combineBy === 'mean' ? min / ranges.length : min,
+    max: settings.combineBy === 'mean' ? max / ranges.length : max,
+    kind: settings.basedOn === 'sums' && settings.combineBy === 'sum'
+      && subscales.every((subscale) => Number.isInteger(subscale.minValue) && Number.isInteger(subscale.maxValue))
+      ? 'integer'
+      : 'continuous',
+  };
+}
+
 // ── Bands Panel — with validation warnings ──
-function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOutputs, onSelectBandOutput, onAddBand, onUpdateBand, onRemoveBand, onAutoSuggest, overallScale }: {
+function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOutputs, onSelectBandOutput, onAddBand, onUpdateBand, onRemoveBand, onAutoSuggest, overallScale, overallSettings }: {
   subscales: SubscaleState[];
   bandStates: Record<string, BandState[]>;
   bandStatesByOutput: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
@@ -1711,14 +1853,18 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
   onRemoveBand: (name: string, output: ScoreOutput | undefined, index: number) => void;
   onAutoSuggest: (name: string, output: ScoreOutput | undefined, range: OutputRange) => void;
   overallScale: SubscaleState;
+  overallSettings: OverallSettings;
 }) {
-  const scales = subscales.length > 0 ? subscales : [overallScale];
+  const scales = subscales.length > 0
+    ? (overallSettings.enabled ? [...subscales, overallScale] : subscales)
+    : [overallScale];
   return (
     <div className="p-3">
       <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-2 block">Interpretation Bands</span>
       <div className="space-y-3">
         {scales.map((sub) => {
-          const isSubscale = subscales.length > 0;
+          const isOverall = sub.id === overallScale.id && subscales.length > 0;
+          const isSubscale = subscales.length > 0 && !isOverall;
           const outputs = isSubscale ? shownScoreOutputs(sub.showOutputs, sub.scoringMethod) : [];
           const chosenOutput = selectedBandOutputs[sub.id];
           const output = isSubscale
@@ -1734,7 +1880,9 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
               : null;
           const outputRange = isSubscale && output
             ? getOutputRange(output, sub.items.length, scaleRange)
-            : null;
+            : isOverall
+              ? getOverallOutputRange(subscales, overallSettings)
+              : null;
           const bands = isSubscale
             ? (output ? bandStatesByOutput[sub.name]?.[output] ?? [] : [])
             : bandStates[sub.name] || [];
@@ -1749,7 +1897,8 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
                   {outputRange !== null && (
                     <button onClick={() => onAutoSuggest(sub.name, output, outputRange)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
                   )}
-                  {isSubscale && output === 'custom' && (
+                  {((isSubscale && output === 'custom')
+                    || (isOverall && (overallSettings.basedOn === 'custom' || overallSettings.combineBy === 'custom'))) && (
                     <span className="text-xs text-secondary-500">Suggest unavailable: custom scores have no known range.</span>
                   )}
                   <button onClick={() => onAddBand(sub.name, output)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>

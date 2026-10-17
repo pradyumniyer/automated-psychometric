@@ -51,6 +51,9 @@ export interface ScoringOptions {
     enabled?: boolean;
     source?: 'subscales' | 'items';
     method?: 'sum' | 'mean';
+    basedOn?: 'sums' | 'means' | 'custom';
+    combineBy?: 'sum' | 'mean' | 'custom';
+    customFormula?: string | null;
     flippedSubscaleIds?: string[];
     includedSubscaleIds?: string[];
   };
@@ -308,6 +311,12 @@ export function scoreDataset(
     source: 'subscales',
     method: defaultOverallMethod,
   };
+  const basedOn = overall.basedOn
+    ?? (overall.source === 'items' ? 'sums' : overall.method === 'mean' ? 'means' : 'sums');
+  const combineBy = overall.combineBy ?? overall.method ?? (defaultOverallMethod as 'sum' | 'mean');
+  const useConfiguredPrimaryOutput = overall.basedOn === undefined
+    && overall.combineBy === undefined
+    && overall.source === 'subscales';
   const selectedSubscales = subscales.filter((subscale) =>
     !overall.includedSubscaleIds || overall.includedSubscaleIds.includes(subscale.id),
   );
@@ -319,11 +328,44 @@ export function scoreDataset(
   ) {
     throw new Error('Custom subscales cannot be flipped in Overall.');
   }
-  if (overall.enabled && selectedSubscales.length >= 2) headers.push('Overall Scale Score');
+  const overallOutput: ScoreOutput = basedOn === 'means' ? 'mean' : basedOn === 'custom' ? 'custom' : 'sum';
+  const overallBands = options.bandsByOutput?.overall?.[combineBy === 'custom' ? 'custom' : combineBy]
+    ?? bands['Overall Scale']
+    ?? bands['overall'];
+  const overallRange = basedOn === 'custom'
+    ? null
+    : (() => {
+        const rangesForOutput = selectedSubscales.map((subscale) => {
+          const range = ranges.get(subscale.id)!;
+          return overallOutput === 'sum'
+            ? { min: subscale.items.length * range.min, max: subscale.items.length * range.max }
+            : { min: range.min, max: range.max };
+        });
+        if (rangesForOutput.length === 0) return null;
+        const min = rangesForOutput.reduce((total, range) => total + range.min, 0);
+        const max = rangesForOutput.reduce((total, range) => total + range.max, 0);
+        return {
+          min: combineBy === 'mean' ? min / rangesForOutput.length : min,
+          max: combineBy === 'mean' ? max / rangesForOutput.length : max,
+          kind: overallOutput === 'sum' && combineBy === 'sum'
+            && selectedSubscales.every((subscale) => {
+              const range = ranges.get(subscale.id)!;
+              return Number.isInteger(range.min) && Number.isInteger(range.max);
+            }) ? 'integer' as const : 'continuous' as const,
+        };
+      })();
+  if (overall.enabled && selectedSubscales.length >= 2) {
+    headers.push('Overall Scale Score');
+    if (overallBands?.length) headers.push('Overall Scale Interpretation');
+  }
 
   const overallScores: (number | null)[] = [];
   const normalizedSubscaleValues: Record<string, (number | null)[]> = {};
+  const normalizedSubscaleOutputValues: Record<string, Record<ScoreOutput, (number | null)[]>> = {};
   for (const subscale of subscales) normalizedSubscaleValues[subscale.id] = [];
+  for (const subscale of subscales) {
+    normalizedSubscaleOutputValues[subscale.id] = { sum: [], mean: [], custom: [] };
+  }
 
   for (let rowIndex = 0; rowIndex < rawRows.length; rowIndex++) {
     const outRow: Record<string, number | string | null> = {};
@@ -351,7 +393,7 @@ export function scoreDataset(
         ? { sum: null, mean: null, score: null, missingItems: values.filter((value) => value === null).length, observedItems: 0, prorated: false }
         : scoreValues(values, subscale.scoringMethod, options);
       let customScore: number | null = null;
-      if (!excluded && shownOutputs.includes('custom') && subscale.customFormula && detail.missingItems === 0) {
+      if (!excluded && subscale.customFormula && detail.missingItems === 0) {
         const formulaValues: Record<string, number | null> = {};
         subscale.items.forEach((item, itemIndex) => { formulaValues[item.column] = values[itemIndex]; });
         customScore = evaluateFormula(subscale.customFormula, formulaValues).value;
@@ -366,6 +408,9 @@ export function scoreDataset(
       scaleScores[subscale.id][rowIds[rowIndex]] = detail;
       subscaleScores[subscale.name].push(excluded ? null : selectedScore);
       normalizedSubscaleValues[subscale.id].push(excluded ? null : selectedScore);
+      for (const output of ['sum', 'mean', 'custom'] as const) {
+        normalizedSubscaleOutputValues[subscale.id][output].push(excluded ? null : outputValues[output]);
+      }
       outputScores(outRow, subscale, groupName, shownOutputs, outputValues);
 
       let firstInterpretation: string | null = null;
@@ -412,24 +457,44 @@ export function scoreDataset(
           });
           score = scoreValues(values, overall.method || 'sum', options).score;
         } else {
+          const selectedOutput: ScoreOutput = basedOn === 'means' ? 'mean' : basedOn === 'custom' ? 'custom' : 'sum';
           const values = selectedSubscales.map((subscale) => {
-            const value = normalizedSubscaleValues[subscale.id][rowIndex];
+            const value = useConfiguredPrimaryOutput
+              ? normalizedSubscaleValues[subscale.id][rowIndex]
+              : normalizedSubscaleOutputValues[subscale.id][selectedOutput][rowIndex];
             if (value === null) return null;
             if (!flippedIds.has(subscale.id)) return value;
             const range = ranges.get(subscale.id)!;
             const itemCount = subscale.items.length;
-            const min = subscale.scoringMethod === 'sum' ? itemCount * range.min : range.min;
-            const max = subscale.scoringMethod === 'sum' ? itemCount * range.max : range.max;
+            const rangeOutput = useConfiguredPrimaryOutput ? subscale.scoringMethod : selectedOutput;
+            const min = rangeOutput === 'sum' ? itemCount * range.min : range.min;
+            const max = rangeOutput === 'sum' ? itemCount * range.max : range.max;
             return min + max - value;
           });
           if (values.every((value): value is number => value !== null)) {
-            const total = values.reduce((sum, value) => sum + value, 0);
-            score = overall.method === 'mean' ? total / values.length : total;
+            const formulaValues: Record<string, number | null> = {};
+            selectedSubscales.forEach((subscale, index) => {
+              formulaValues[subscale.name] = values[index];
+              formulaValues[subscale.id] = values[index];
+            });
+            if (combineBy === 'custom') {
+              score = evaluateFormula(overall.customFormula ?? '', formulaValues).value;
+            } else {
+              const total = values.reduce((sum, value) => sum + value, 0);
+              score = combineBy === 'mean' ? total / values.length : total;
+            }
           }
         }
       }
       overallScores.push(score);
       outputRows[rowIndex]['Overall Scale Score'] = score;
+      if (overallBands?.length) {
+        outputRows[rowIndex]['Overall Scale Interpretation'] = excludedSet.has(rowIndex)
+          ? 'Excluded'
+          : score === null
+            ? null
+            : classifyScore(score, overallBands, overallRange?.kind ?? 'continuous') ?? 'No band';
+      }
     }
   }
 

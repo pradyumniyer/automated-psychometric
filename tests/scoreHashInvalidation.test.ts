@@ -71,6 +71,12 @@ const mutations: { name: string; mutate: ConfigMutation }[] = [
     name: 'an interpretation band changes',
     mutate: (current) => [...current],
   },
+  {
+    name: 'a subscale Show toggle changes',
+    mutate: (current) => current.map((scale) => scale.id === 'stress'
+      ? { ...scale, showOutputs: ['mean'] as const }
+      : scale),
+  },
 ];
 
 describe('score-cache invalidation for scoring configuration changes', () => {
@@ -126,6 +132,46 @@ describe('score-cache invalidation for scoring configuration changes', () => {
       [],
     );
 
+    await expect(scoreRepository.getCurrent(dataset.id, changedHashes)).resolves.toBeNull();
+  });
+
+  it('invalidates the cached score when a per-output band cut-off changes', async () => {
+    const project = await projectRepository.create({ name: 'Band hash study', description: '' });
+    const dataset = await datasetRepository.import({
+      projectId: project.id,
+      fileName: 'bands.csv',
+      sheetName: 'Responses',
+      headers: ['Q1'],
+      rows: [{ Q1: 1 }],
+      columnMeta: {},
+    });
+    const makeConfig = (maxScore: number) => toSurveyConfigRecord({
+      datasetId: dataset.id,
+      projectId: project.id,
+      headers: dataset.headers,
+      demographicColumns: [],
+      subscales: [{
+        ...subscales[0],
+        items: [{ column: 'Q1', order: 0, reverse: false }],
+        showOutputs: ['sum', 'mean'],
+      }],
+      bands: {},
+      bandsByOutput: {
+        Stress: {
+          sum: [{ name: 'Low', minScore: 1, maxScore, color: '#000000' }],
+        },
+      },
+      overallScale: null,
+    });
+    const initialConfig = makeConfig(2);
+    const initialHashes = await createScoreHashes(dataset, initialConfig, buildSubscaleConfigs(initialConfig), []);
+    await scoreRepository.save(dataset.id, {
+      ...initialHashes,
+      computed_at: Date.now(),
+      payload: {},
+    });
+    const changedConfig = makeConfig(3);
+    const changedHashes = await createScoreHashes(dataset, changedConfig, buildSubscaleConfigs(changedConfig), []);
     await expect(scoreRepository.getCurrent(dataset.id, changedHashes)).resolves.toBeNull();
   });
 });

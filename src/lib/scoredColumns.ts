@@ -152,6 +152,14 @@ export function buildScoredColumnData({
         group: 'Overall Scale',
         type: 'score',
       });
+      if (result.headers.includes('Overall Scale Interpretation')) {
+        overallColumns.push({
+          key: 'Overall Scale Interpretation',
+          label: 'Overall interpretation',
+          group: 'Overall Scale',
+          type: 'interpretation',
+        });
+      }
     }
     if (overallColumns.length > 0 && !overall) {
       groups.push({ name: 'Overall Scale', columns: overallColumns });

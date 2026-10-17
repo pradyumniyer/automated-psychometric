@@ -135,4 +135,64 @@ describe('screen and storage config adapters', () => {
       ['mean', 1, 2],
     ]);
   });
+
+  it('round-trips explicit Overall settings and Overall bands', () => {
+    const stored = toSurveyConfigRecord({
+      datasetId: 'dataset-overall',
+      projectId: 'project-1',
+      headers: ['Q1'],
+      demographicColumns: [],
+      subscales: [{
+        id: 'sub-overall',
+        name: 'Scale',
+        items: [{ column: 'Q1', order: 0, reverse: false }],
+        scoringMethod: 'sum' as const,
+        customFormula: '',
+        scaleType: 'numeric' as const,
+        minValue: 1,
+        maxValue: 5,
+        labelMap: [],
+        displayOrder: 0,
+      }],
+      bands: {
+        'Overall Scale': [{ name: 'High', minScore: 5, maxScore: 10, color: '#ff0000' }],
+      },
+      overallScale: {
+        id: 'overall',
+        name: 'Overall Scale',
+        items: [],
+        scoringMethod: 'sum',
+        customFormula: '',
+        scaleType: 'numeric',
+        minValue: 1,
+        maxValue: 5,
+        labelMap: [],
+        displayOrder: 0,
+      },
+      overallSettings: {
+        enabled: true,
+        basedOn: 'means',
+        combineBy: 'mean',
+        customFormula: '',
+      },
+    });
+
+    expect(stored.overall_settings).toEqual({
+      enabled: true,
+      based_on: 'means',
+      combine_by: 'mean',
+      custom_formula: null,
+    });
+    expect(stored.overall_scale?.bands?.[0]).toMatchObject({
+      name: 'High',
+      min_score: 5,
+      max_score: 10,
+    });
+    expect(fromSurveyConfigRecord(stored).overallSettings).toEqual({
+      enabled: true,
+      basedOn: 'means',
+      combineBy: 'mean',
+      customFormula: '',
+    });
+  });
 });

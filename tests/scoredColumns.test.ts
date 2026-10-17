@@ -185,6 +185,7 @@ describe('shared scored columns', () => {
       rowIds: rows.map((row) => row.ID),
       overall: { enabled: true, source: 'subscales', method: 'sum' },
     });
+
     const data = buildScoredColumnData({
       result: fixtureResult,
       rawHeaders: headers,
@@ -195,6 +196,27 @@ describe('shared scored columns', () => {
     });
 
     expect(data.rows[0]['Overall Scale Score']).toBe(37);
+    const sumsMean = scoreDataset(rows.slice(0, 1), headers, fixtureSubscales, {}, [], {
+      overall: { enabled: true, basedOn: 'sums', combineBy: 'mean' },
+    });
+    expect(sumsMean.overallScaleScore).toEqual([18.5]);
+    const meansSum = scoreDataset(rows.slice(0, 1), headers, fixtureSubscales, {}, [], {
+      overall: { enabled: true, basedOn: 'means', combineBy: 'sum' },
+    });
+    expect(meansSum.overallScaleScore).toEqual([7.4]);
+    const meansMean = scoreDataset(rows.slice(0, 1), headers, fixtureSubscales, {}, [], {
+      overall: { enabled: true, basedOn: 'means', combineBy: 'mean' },
+    });
+    expect(meansMean.overallScaleScore).toEqual([3.7]);
+    const custom = scoreDataset(rows.slice(0, 1), headers, fixtureSubscales, {}, [], {
+      overall: {
+        enabled: true,
+        basedOn: 'sums',
+        combineBy: 'custom',
+        customFormula: 'Sub1 + Sub2',
+      },
+    });
+    expect(custom.overallScaleScore).toEqual([37]);
     expect(data.headers).toEqual([
       'ID', 'Age', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Sub1 Sum', 'Sub1 Mean',
       'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Sub2 Sum', 'Overall Scale Score',
@@ -214,6 +236,28 @@ describe('shared scored columns', () => {
     );
     expect(summary?.rows[2]).toEqual(data.headers);
     expect(summary?.rows[3]).toHaveLength(data.headers.length);
+  });
+
+  it('adds Overall interpretation immediately after Overall when Overall bands exist', () => {
+    const overallResult = scoreDataset(rows, rawHeaders, subscales, {
+      'Overall Scale': [{ name: 'High', minScore: 0, maxScore: 20 }],
+    }, [], {
+      overall: { enabled: true, basedOn: 'sums', combineBy: 'sum' },
+    });
+    const data = buildScoredColumnData({
+      result: overallResult,
+      rawHeaders,
+      rawRows: rows,
+      demographicColumns: ['Participant', 'Age'],
+      idColumns: ['Participant'],
+      subscales,
+    });
+
+    expect(data.headers.slice(-2)).toEqual([
+      'Overall Scale Score',
+      'Overall Scale Interpretation',
+    ]);
+    expect(data.rows[0]['Overall Scale Interpretation']).toBe('High');
   });
 
   it.each([

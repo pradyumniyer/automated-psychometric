@@ -366,4 +366,36 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
 
     expect(result.overallScaleScore).toEqual([16]);
   });
+
+  it('supports explicit Overall based-on and combine-by settings', () => {
+    const first = makeSubscale('First', ['F1', 'F2']);
+    const second = makeSubscale('Second', ['S1', 'S2']);
+    const row = { F1: '4', F2: '2', S1: '5', S2: '1' };
+    const headers = Object.keys(row);
+
+    const sumsMean = scoreDataset([row], headers, [first, second], {}, [], {
+      overall: { enabled: true, basedOn: 'sums', combineBy: 'mean' },
+    });
+    expect(sumsMean.overallScaleScore).toEqual([6]);
+
+    const meansSum = scoreDataset([row], headers, [first, second], {}, [], {
+      overall: { enabled: true, basedOn: 'means', combineBy: 'sum' },
+    });
+    expect(meansSum.overallScaleScore).toEqual([6]);
+
+    const meansMean = scoreDataset([row], headers, [first, second], {}, [], {
+      overall: { enabled: true, basedOn: 'means', combineBy: 'mean' },
+    });
+    expect(meansMean.overallScaleScore).toEqual([3]);
+
+    const custom = scoreDataset([row], headers, [first, second], {}, [], {
+      overall: {
+        enabled: true,
+        basedOn: 'sums',
+        combineBy: 'custom',
+        customFormula: 'First + Second * 2',
+      },
+    });
+    expect(custom.overallScaleScore).toEqual([18]);
+  });
 });

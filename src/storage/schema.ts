@@ -51,6 +51,12 @@ export interface SurveyConfigRecord {
     response_scale?: ResponseScale;
     bands?: InterpretationBand[];
   };
+  overall_settings?: {
+    enabled: boolean;
+    based_on: 'sums' | 'means' | 'custom';
+    combine_by: 'sum' | 'mean' | 'custom';
+    custom_formula: string | null;
+  };
   bands: InterpretationBand[];
   allowed_nonresponse: string[];
   proration_enabled: boolean;

@@ -32,6 +32,12 @@ export interface ScreenSurveyConfig {
   bands: Record<string, { name: string; minScore: number; maxScore: number; color: string }[]>;
   bandsByOutput?: Record<string, Partial<Record<ScoreOutput, { name: string; minScore: number; maxScore: number; color: string }[]>>>;
   overallScale: ScreenSubscaleState | null;
+  overallSettings?: {
+    enabled: boolean;
+    basedOn: 'sums' | 'means' | 'custom';
+    combineBy: 'sum' | 'mean' | 'custom';
+    customFormula: string;
+  };
   linkedTemplateId?: string | null;
 }
 
@@ -145,6 +151,19 @@ export function toSurveyConfigRecord(
       : previous ?? { type: 'numeric' },
     subscales,
     overall_scale: overallScale,
+    overall_settings: input.overallSettings
+      ? {
+          enabled: input.overallSettings.enabled,
+          based_on: input.overallSettings.basedOn,
+          combine_by: input.overallSettings.combineBy,
+          custom_formula: input.overallSettings.customFormula || null,
+        }
+      : existing?.overall_settings ?? {
+          enabled: input.subscales.length >= 2,
+          based_on: input.subscales.length > 0 && input.subscales.every((subscale) => subscale.scoringMethod === 'mean') ? 'means' : 'sums',
+          combine_by: input.subscales.length > 0 && input.subscales.every((subscale) => subscale.scoringMethod === 'mean') ? 'mean' : 'sum',
+          custom_formula: null,
+        },
     bands,
     allowed_nonresponse: existing?.allowed_nonresponse ?? [],
     proration_enabled: existing?.proration_enabled ?? false,
@@ -163,6 +182,7 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
   bands: ScreenSurveyConfig['bands'];
   bandsByOutput: NonNullable<ScreenSurveyConfig['bandsByOutput']>;
   overallScale: ScreenSubscaleState | null;
+  overallSettings: NonNullable<ScreenSurveyConfig['overallSettings']>;
   responseScales: ResponseScale[];
 } {
   const toState = (subscale: NonNullable<SurveyConfigRecord['overall_scale']>): ScreenSubscaleState => ({
@@ -214,6 +234,14 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
     bands,
     bandsByOutput,
     overallScale: config.overall_scale ? toState(config.overall_scale) : null,
+    overallSettings: {
+      enabled: config.overall_settings?.enabled ?? config.subscales.length >= 2,
+      basedOn: config.overall_settings?.based_on
+        ?? (config.subscales.length > 0 && config.subscales.every((subscale) => subscale.scoring_method === 'mean') ? 'means' : 'sums'),
+      combineBy: config.overall_settings?.combine_by
+        ?? (config.subscales.length > 0 && config.subscales.every((subscale) => subscale.scoring_method === 'mean') ? 'mean' : 'sum'),
+      customFormula: config.overall_settings?.custom_formula ?? '',
+    },
     responseScales: config.subscales.flatMap((subscale) =>
       subscale.response_scale ? [subscale.response_scale] : [],
     ),
