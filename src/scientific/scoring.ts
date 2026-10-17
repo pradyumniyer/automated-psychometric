@@ -21,6 +21,7 @@ import {
   shownScoreOutputs,
   uniqueSubscaleNames,
 } from '../lib/scoreOutputs';
+import { classifyScore, getOutputRange } from './bandValidation';
 import type { ScoreOutput } from '@/types/domain';
 
 export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'out_of_range';
@@ -378,8 +379,8 @@ export function scoreDataset(
         let label: string | null = null;
         const value = outputValues[output];
         if (!excluded && value !== null) {
-          const band = outputBandList.find((candidate) => value >= candidate.minScore && value <= candidate.maxScore);
-          if (band) label = band.name;
+          const outputRange = getOutputRange(output, subscale.items.length, ranges.get(subscale.id) ?? null);
+          label = classifyScore(value, outputBandList, outputRange?.kind ?? 'continuous');
         }
         const interpretationKey = interpretationColumnKey(groupName, output, shownOutputs.length);
         outRow[interpretationKey] = excluded ? 'Excluded' : label;

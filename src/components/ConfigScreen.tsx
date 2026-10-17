@@ -33,7 +33,7 @@ import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplat
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
-import { validateBands, suggestBands } from '@/scientific/bandValidation';
+import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
@@ -602,8 +602,8 @@ export function ConfigScreen({
   const removeBand = (name: string, output: ScoreOutput | undefined, index: number) =>
     changeBands(name, output, (current) => current.filter((_, currentIndex) => currentIndex !== index));
 
-  const autoSuggestBands = (name: string, output: ScoreOutput | undefined, maxScore: number) => {
-    const suggested = suggestBands(maxScore, 3);
+  const autoSuggestBands = (name: string, output: ScoreOutput | undefined, range: OutputRange) => {
+    const suggested = suggestBands(range, 3);
     changeBands(name, output, () => suggested);
   };
 
@@ -1708,7 +1708,7 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
   onAddBand: (name: string, output?: ScoreOutput) => void;
   onUpdateBand: (name: string, output: ScoreOutput | undefined, index: number, field: keyof BandState, value: string | number) => void;
   onRemoveBand: (name: string, output: ScoreOutput | undefined, index: number) => void;
-  onAutoSuggest: (name: string, output: ScoreOutput | undefined, maxScore: number) => void;
+  onAutoSuggest: (name: string, output: ScoreOutput | undefined, range: OutputRange) => void;
   overallScale: SubscaleState;
 }) {
   const scales = subscales.length > 0 ? subscales : [overallScale];
@@ -1723,26 +1723,30 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
           const output = isSubscale
             ? (chosenOutput && outputs.includes(chosenOutput) ? chosenOutput : outputs[0])
             : undefined;
-          const rangeMax = sub.maxValue
-            ?? (sub.labelMap.length ? Math.max(...sub.labelMap.map((entry) => entry.value)) : null);
-          const maxPossible = isSubscale
-            ? output === 'sum' && rangeMax !== null
-              ? sub.items.length * rangeMax
-              : output === 'mean'
-                ? rangeMax
-                : null
-            : sub.items.length > 0 && rangeMax !== null ? sub.items.length * rangeMax : 100;
+          const scaleRange = sub.minValue !== null && sub.maxValue !== null
+            ? { min: sub.minValue, max: sub.maxValue }
+            : sub.labelMap.length
+              ? {
+                  min: Math.min(...sub.labelMap.map((entry) => entry.value)),
+                  max: Math.max(...sub.labelMap.map((entry) => entry.value)),
+                }
+              : null;
+          const outputRange = isSubscale && output
+            ? getOutputRange(output, sub.items.length, scaleRange)
+            : null;
           const bands = isSubscale
             ? (output ? bandStatesByOutput[sub.name]?.[output] ?? [] : [])
             : bandStates[sub.name] || [];
-          const warnings = validateBands(bands, maxPossible);
+          const warnings = validateBands(bands, outputRange
+            ? { outputKind: outputRange.kind, possibleRange: outputRange }
+            : null);
           return (
             <Card key={sub.id} className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="font-semibold text-sm text-secondary-900 truncate">{sub.name}</h4>
                 <div className="flex items-center gap-1">
-                  {maxPossible !== null && (
-                    <button onClick={() => onAutoSuggest(sub.name, output, maxPossible)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
+                  {outputRange !== null && (
+                    <button onClick={() => onAutoSuggest(sub.name, output, outputRange)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Suggest</button>
                   )}
                   <button onClick={() => onAddBand(sub.name, output)} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
                 </div>
@@ -1760,6 +1764,11 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
                     ))}
                   </select>
                 </label>
+              )}
+              {outputRange?.kind === 'continuous' && (
+                <p className="text-xs text-secondary-500 mb-2">
+                  Lower limit included, upper limit not included (the last band includes its upper limit).
+                </p>
               )}
               {/* Validation warnings */}
               {warnings.length > 0 && (
