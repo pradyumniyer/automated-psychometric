@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assessRangeOutliers,
+  applyOutOfRangeAction,
   buildPresetLabels,
   canReverseScore,
   detectConventionalRange,
@@ -47,6 +48,55 @@ describe("resolveResponse", () => {
       const result = detectConventionalRange([1, 2, 3, 4, 1, 2, 3, 4]);
       expect(result.range).toEqual({ min: 1, max: 4 });
       expect(result.confirmed).toBe(false);
+    });
+
+    describe("out-of-range actions", () => {
+      it("widens a detected 1-4 range to 1-5 and logs the affected values", () => {
+        const result = applyOutOfRangeAction(
+          { ...fixtureScale, min: 1, max: 4, confirmed: false },
+          [5, 5, 5],
+          "widen",
+        );
+        expect(result.scale).toMatchObject({
+          min: 1,
+          max: 5,
+          rangeSource: "manual",
+          confirmed: true,
+        });
+        expect(result.log).toEqual({
+          action: "widen",
+          count: 3,
+          values: [5, 5, 5],
+        });
+      });
+
+      it("widens a detected 1-5 range to 1-7 and then resolves 7 as valid", () => {
+        const result = applyOutOfRangeAction(
+          { ...fixtureScale, confirmed: false },
+          [7],
+          "widen",
+        );
+        expect(result.scale).toMatchObject({ min: 1, max: 7, confirmed: true });
+        expect(resolveResponse(7, result.scale)).toEqual({ kind: "valid", value: 7 });
+      });
+
+      it("keeps the range and confirmation unchanged when treating values as missing", () => {
+        const result = applyOutOfRangeAction(
+          { ...fixtureScale, confirmed: false },
+          [7, 7],
+          "missing",
+        );
+        expect(result.scale).toEqual(fixtureScale);
+        expect(result.log).toEqual({
+          action: "missing",
+          count: 2,
+          values: [7, 7],
+        });
+        expect(resolveResponse(7, result.scale)).toMatchObject({
+          kind: "out_of_range",
+          suggestedAction: "missing",
+        });
+      });
     });
 
     it("detects Fixture A's 1-5 response range and only permits reverse scoring after confirmation", () => {

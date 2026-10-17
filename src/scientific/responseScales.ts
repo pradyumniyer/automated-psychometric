@@ -72,6 +72,17 @@ export interface RangeOutlierAssessment {
   suggestedAction: OutOfRangeAction;
 }
 
+export interface OutOfRangeActionLog {
+  action: OutOfRangeAction;
+  count: number;
+  values: number[];
+}
+
+export interface OutOfRangeActionResult {
+  scale: ResponseScaleV2;
+  log: OutOfRangeActionLog;
+}
+
 export interface ConventionalRangeDetection {
   range: NumericRange;
   confirmed: false;
@@ -82,6 +93,25 @@ export interface ConventionalRangeDetection {
 
 export function canReverseScore(scale: Pick<ResponseScaleV2, "confirmed">): boolean {
   return scale.confirmed;
+}
+
+export function applyOutOfRangeAction(
+  scale: ResponseScaleV2,
+  values: number[],
+  action: OutOfRangeAction,
+): OutOfRangeActionResult {
+  const log = { action, count: values.length, values: [...values] };
+  if (action === "missing") return { scale: { ...scale }, log };
+  return {
+    scale: {
+      ...scale,
+      min: Math.min(scale.min, ...values),
+      max: Math.max(scale.max, ...values),
+      rangeSource: "manual",
+      confirmed: true,
+    },
+    log,
+  };
 }
 
 function numericValues(values: unknown[]): number[] {
