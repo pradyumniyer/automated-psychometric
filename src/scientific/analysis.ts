@@ -62,7 +62,10 @@ export function runFullAnalysis(
 
   const allItemColumns = effectiveSubscales.flatMap((s) => s.items.map((item) => item.column));
   const uniqueItemColumns = Array.from(new Set(allItemColumns));
-  const mvData = includedIndices.map((rowIdx) => uniqueItemColumns.map((col) => { const v = Number(rawRows[rowIdx][col]); return isNaN(v) ? NaN : v; }));
+  const mvData = includedIndices.map((rowIdx) => uniqueItemColumns.map((col) => {
+    const value = scoring.normalizedMatrix.values[rowIdx]?.[col];
+    return value == null ? NaN : value;
+  }));
   const mvOutliers = mahalanobisDistance(mvData, uniqueItemColumns);
 
   const analysis: FullAnalysis = { subscales: subscaleAnalyses, multivariateOutliers: mvOutliers, overallN: rawRows.length, excludedN: excludedRowIndices.length, includedN: includedIndices.length, usedAutoScale };
