@@ -75,6 +75,9 @@ export function computeDataQuality(
       } else if (state === 'out_of_range') {
         outOfRange++;
         itemMissingnessMap[col].outOfRange++;
+      } else if (state === 'unmapped') {
+        blank++;
+        itemMissingnessMap[col].unexpected++;
       } else {
         itemMissingnessMap[col].valid++;
         if (value === null || !Number.isFinite(value)) {

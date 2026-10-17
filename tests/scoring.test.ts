@@ -120,6 +120,76 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
     expect(result.rows[0]["Categorical Score"]).toBe(2);
   });
 
+  it("uses the shared resolver for special, unmapped, and out-of-range cells", () => {
+    const result = scoreDataset(
+      [{ Q1: "N/A" }, { Q1: "unknown" }, { Q1: 7 }],
+      ["Q1"],
+      [{
+        id: "resolved",
+        name: "Resolved",
+        items: [{ column: "Q1", order: 0, reverse: false }],
+        scoringMethod: "sum",
+        responseScale: {
+          scaleType: "numeric",
+          minValue: 1,
+          maxValue: 5,
+          allowedNonresponse: ["N/A"],
+        },
+      }],
+      {},
+      [],
+    );
+
+    expect(result.normalizedMatrix.states).toEqual([
+      { Q1: "allowed" },
+      { Q1: "unmapped" },
+      { Q1: "out_of_range" },
+    ]);
+  });
+
+  it("blocks reverse scoring for an unconfirmed detected range", () => {
+    expect(() => scoreDataset(
+      [{ Q1: 2 }],
+      ["Q1"],
+      [{
+        id: "detected",
+        name: "Stress",
+        items: [{ column: "Q1", order: 0, reverse: true }],
+        scoringMethod: "sum",
+        responseScale: {
+          scaleType: "numeric",
+          minValue: 1,
+          maxValue: 4,
+          confirmed: false,
+        },
+      }],
+      {},
+      [],
+    )).toThrow("Confirm the range for Stress (it has reverse items)");
+  });
+
+  it("classifies a Sum as continuous when resolved item values include decimals", () => {
+    const result = scoreDataset(
+      [{ Q1: 1.5, Q2: 2 }],
+      ["Q1", "Q2"],
+      [{
+        id: "slider",
+        name: "Slider",
+        items: [
+          { column: "Q1", order: 0, reverse: false },
+          { column: "Q2", order: 1, reverse: false },
+        ],
+        scoringMethod: "sum",
+        responseScale: { scaleType: "numeric", minValue: 0, maxValue: 5 },
+      }],
+      {},
+      [],
+    );
+
+    expect(result.configSnapshot).toBeDefined();
+    expect(result.rows[0]["Slider Sum"]).toBe(3.5);
+  });
+
   it("blocks reverse scoring when the scale range is not configured", () => {
     expect(() =>
       scoreDataset(
@@ -248,8 +318,8 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
     });
     expect(result.normalizedMatrix.states[0]).toEqual({
       Q1: "valid",
-      Q2: "blank",
-      Q3: "blank",
+      Q2: "unmapped",
+      Q3: "unmapped",
       Q4: "allowed",
       Q5: "out_of_range",
       Q6: "blank",

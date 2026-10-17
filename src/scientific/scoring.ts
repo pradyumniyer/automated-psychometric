@@ -6,6 +6,7 @@ export interface ResponseScaleConfig {
   minValue?: number; maxValue?: number;
   labelMap?: { label: string; value: number }[];
   allowedNonresponse?: string[];
+  confirmed?: boolean;
 }
 export interface SubscaleConfig {
   id: string; name: string; items: SubscaleItemConfig[];
@@ -23,8 +24,13 @@ import {
 } from '../lib/scoreOutputs';
 import { classifyScore, getOutputRange } from './bandValidation';
 import type { ScoreOutput } from '@/types/domain';
+import {
+  normalizeResponseText,
+  resolveResponse,
+  type ResponseScaleV2,
+} from './responseScales';
 
-export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'out_of_range';
+export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'special_scored' | 'unmapped' | 'out_of_range';
 
 export interface NormalizedMatrix {
   values: Record<string, number | null>[];
@@ -99,44 +105,46 @@ function scaleSignature(scale: ResponseScaleConfig): string {
   });
 }
 
-function parseNumericString(value: string): number | null {
-  const trimmed = value.trim();
-  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function mapValue(
-  raw: unknown,
+function toResolverScale(
   scale: ResponseScaleConfig,
   range: ScaleRange,
   allowedNonresponse: Set<string>,
+): ResponseScaleV2 {
+  const labels = [
+    ...(scale.labelMap ?? []).map((entry) => ({ text: entry.label, value: entry.value, kind: 'scale' as const })),
+    ...[...allowedNonresponse].map((text) => ({ text, value: null, kind: 'special' as const })),
+  ];
+  return {
+    min: range.min,
+    max: range.max,
+    rangeSource: 'manual',
+    confirmed: scale.confirmed !== false,
+    flipped: false,
+    startsAtZero: false,
+    labels,
+    outOfRange: 'missing',
+  };
+}
+
+function mapResolvedValue(
+  raw: unknown,
+  scale: ResponseScaleV2,
 ): { value: number | null; state: ItemValueState } {
-  if (raw == null || (typeof raw === 'string' && raw.trim() === '')) {
-    return { value: null, state: 'blank' };
+  const resolved = resolveResponse(raw, scale);
+  switch (resolved.kind) {
+    case 'valid':
+      return { value: resolved.value, state: 'valid' };
+    case 'special_scored':
+      return { value: resolved.value, state: 'special_scored' };
+    case 'special_missing':
+      return { value: null, state: 'allowed' };
+    case 'out_of_range':
+      return { value: null, state: 'out_of_range' };
+    case 'unmapped':
+      return { value: null, state: 'unmapped' };
+    default:
+      return { value: null, state: 'blank' };
   }
-  if (typeof raw !== 'string' && typeof raw !== 'number') {
-    return { value: null, state: 'blank' };
-  }
-
-  const text = String(raw).trim();
-  if (allowedNonresponse.has(text.toLowerCase())) return { value: null, state: 'allowed' };
-
-  let value: number | null = null;
-  if (scale.scaleType === 'categorical' && scale.labelMap) {
-    const entry = scale.labelMap.find((candidate) => candidate.label.trim().toLowerCase() === text.toLowerCase());
-    if (entry) value = entry.value;
-  }
-  if (value === null) {
-    value = typeof raw === 'number' && Number.isFinite(raw)
-      ? raw
-      : typeof raw === 'string'
-        ? parseNumericString(raw)
-        : null;
-  }
-  if (value === null) return { value: null, state: 'blank' };
-  if (value < range.min || value > range.max) return { value: null, state: 'out_of_range' };
-  return { value, state: 'valid' };
 }
 
 export function normalizeResponseMatrix(
@@ -157,13 +165,14 @@ export function normalizeResponseMatrix(
   }
 
   const ranges = new Map<string, ScaleRange>();
-  const allowedByColumn = new Map<string, Set<string>>();
-  for (const [column, scale] of columnScales) {
+  const resolverScales = new Map<string, ResponseScaleV2>();
+  for (const column of columnScales.keys()) {
     ranges.set(column, responseScaleRange(scale));
-    allowedByColumn.set(
-      column,
-      new Set([...allowedNonresponse, ...(scale.allowedNonresponse || [])].map((value) => value.trim().toLowerCase())),
-    );
+    const resolverScale = toResolverScale(scale, ranges.get(column)!, new Set([
+      ...allowedNonresponse.map(normalizeResponseText),
+      ...(scale.allowedNonresponse ?? []).map(normalizeResponseText),
+    ]));
+    resolverScales.set(column, resolverScale);
   }
 
   const values: Record<string, number | null>[] = [];
@@ -172,7 +181,7 @@ export function normalizeResponseMatrix(
     const valueRow: Record<string, number | null> = {};
     const stateRow: Record<string, ItemValueState> = {};
     for (const [column, scale] of columnScales) {
-      const mapped = mapValue(row[column], scale, ranges.get(column)!, allowedByColumn.get(column)!);
+      const mapped = mapResolvedValue(row[column], resolverScales.get(column)!);
       valueRow[column] = mapped.value;
       stateRow[column] = mapped.state;
     }
@@ -263,6 +272,11 @@ export function scoreDataset(
   const normalizedMatrix = normalizeResponseMatrix(rawRows, subscales, options.allowedNonresponse);
   const rowIds = deriveRowIds(rawRows, options.rowIds);
   const ranges = new Map(subscales.map((subscale) => [subscale.id, responseScaleRange(subscale.responseScale)]));
+  for (const subscale of subscales) {
+    if (subscale.items.some((item) => item.reverse) && subscale.responseScale.confirmed === false) {
+      throw new Error(`Confirm the range for ${subscale.name} (it has reverse items)`);
+    }
+  }
   const excludedSet = new Set(excludedRowIndices);
   const headers = [...rawHeaders];
   const groupNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name), rawHeaders);
@@ -350,7 +364,12 @@ export function scoreDataset(
           kind: overallOutput === 'sum' && combineBy === 'sum'
             && selectedSubscales.every((subscale) => {
               const range = ranges.get(subscale.id)!;
-              return Number.isInteger(range.min) && Number.isInteger(range.max);
+              return Number.isInteger(range.min)
+                && Number.isInteger(range.max)
+                && subscale.items.every((item) => normalizedMatrix.values.every((row) => {
+                  const value = row[item.column];
+                  return value === null || Number.isInteger(value);
+                }));
             }) ? 'integer' as const : 'continuous' as const,
         };
       })();
@@ -387,7 +406,10 @@ export function scoreDataset(
       const excluded = excludedSet.has(rowIndex);
       const values = subscale.items.map((item) => {
         const mapped = normalizedMatrix.values[rowIndex][item.column];
-        return mapped !== null && item.reverse ? reverseValue(mapped, ranges.get(subscale.id)!) : mapped;
+        const state = normalizedMatrix.states[rowIndex][item.column];
+        return mapped !== null && item.reverse && state === 'valid'
+          ? reverseValue(mapped, ranges.get(subscale.id)!)
+          : mapped;
       });
       let detail = excluded
         ? { sum: null, mean: null, score: null, missingItems: values.filter((value) => value === null).length, observedItems: 0, prorated: false }
@@ -452,7 +474,8 @@ export function scoreDataset(
           const values = itemColumns.map(({ item, flipped, range }) => {
             const rawValue = normalizedMatrix.values[rowIndex][item.column];
             if (rawValue === null) return null;
-            const reverse = item.reverse !== flipped;
+            const state = normalizedMatrix.states[rowIndex][item.column];
+            const reverse = state === 'valid' && item.reverse !== flipped;
             return reverse ? reverseValue(rawValue, range) : rawValue;
           });
           score = scoreValues(values, overall.method || 'sum', options).score;

@@ -1,26 +1,7 @@
 import type { AllowedNonResponse } from './dataQualityTypes';
 import type { ItemValueState, NormalizedMatrix } from './scoring';
 import type { Severity } from './dataQualityTypes';
-
-function isBlank(val: unknown): boolean {
-  return val == null || val === '' || (typeof val === 'string' && val.trim() === '');
-}
-
-function isAllowedNonResponse(val: unknown, allowed: AllowedNonResponse): boolean {
-  if (val == null) return false;
-  const str = String(val).trim();
-  if (allowed.textValues.some((t) => t.toLowerCase() === str.toLowerCase())) return true;
-  const num = Number(val);
-  if (!isNaN(num) && isFinite(num) && allowed.numericSentinels.includes(num)) return true;
-  return false;
-}
-
-function toNumeric(val: unknown): number | null {
-  if (val == null || val === '') return null;
-  const num = Number(val);
-  if (!isNaN(num) && isFinite(num)) return num;
-  return null;
-}
+import { resolveResponse, type ResponseScaleV2 } from './responseScales';
 
 export function severityRank(s: Severity): number {
   return s === 'severe' ? 3 : s === 'moderate' ? 2 : 1;
@@ -58,25 +39,24 @@ export function createLegacyNormalizedMatrix(
     const rowStates: Record<string, ItemValueState> = {};
     for (const column of itemColumns) {
       const raw = row[column];
-      if (isBlank(raw)) {
-        rowValues[column] = null;
-        rowStates[column] = 'blank';
-      } else if (isAllowedNonResponse(raw, allowed)) {
-        rowValues[column] = null;
-        rowStates[column] = 'allowed';
-      } else {
-        const value = toNumeric(raw);
-        if (value === null) {
-          rowValues[column] = null;
-          rowStates[column] = 'blank';
-        } else if ((min !== null && value < min) || (max !== null && value > max)) {
-          rowValues[column] = null;
-          rowStates[column] = 'out_of_range';
-        } else {
-          rowValues[column] = value;
-          rowStates[column] = 'valid';
-        }
-      }
+      const scale: ResponseScaleV2 = {
+        min: min ?? Number.NEGATIVE_INFINITY,
+        max: max ?? Number.POSITIVE_INFINITY,
+        rangeSource: 'manual',
+        confirmed: true,
+        flipped: false,
+        startsAtZero: false,
+        labels: allowed.textValues.map((text) => ({ text, value: null, kind: 'special' as const }))
+          .concat(allowed.numericSentinels.map((value) => ({ text: String(value), value: null, kind: 'special' as const }))),
+        outOfRange: 'missing',
+      };
+      const resolved = resolveResponse(raw, scale);
+      rowValues[column] = 'value' in resolved && typeof resolved.value === 'number' ? resolved.value : null;
+      rowStates[column] = resolved.kind === 'special_missing'
+        ? 'allowed'
+        : resolved.kind === 'special_scored'
+          ? 'special_scored'
+          : resolved.kind;
     }
     values.push(rowValues);
     states.push(rowStates);
