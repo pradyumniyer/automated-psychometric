@@ -1,20 +1,30 @@
 import type { ScoringResult } from '@/scientific/scoring';
 
-export function getUnscoredRowSummary(result: ScoringResult, displayIds?: string[]): string | null {
+export function getUnscoredRowSummary(
+  result: ScoringResult,
+  displayIds?: (string | undefined)[],
+): string | null {
   const excluded = new Set(result.excludedRowIndices);
-  const unscoredIds = result.rowIds.flatMap((rowId, index) => {
-    const hasScore = Object.values(result.subscaleScores).some((scores) =>
-      typeof scores[index] === 'number' && Number.isFinite(scores[index]),
+  const scoreColumns = [
+    ...Object.values(result.subscaleScores),
+    ...(result.overallScaleScore ? [result.overallScaleScore] : []),
+  ];
+  if (scoreColumns.length === 0) return null;
+
+  const unscoredIds = result.rowIds.flatMap((_, index) => {
+    const hasMissingScore = scoreColumns.some((scores) =>
+      typeof scores[index] !== 'number' || !Number.isFinite(scores[index]),
     );
-    if (excluded.has(index) || hasScore) return [];
+    if (excluded.has(index) || !hasMissingScore) return [];
     const displayId = displayIds?.[index]?.trim();
-    return [displayId || rowId];
+    return [displayId || `row ${index + 1}`];
   });
   if (unscoredIds.length === 0) return null;
 
   const preview = unscoredIds.slice(0, 5).join(', ');
   const remainder = unscoredIds.length > 5 ? ` and ${unscoredIds.length - 5} more` : '';
-  return `${unscoredIds.length} rows have no score because an item is missing, N/A or outside the scale: ${preview}${remainder}`;
+  const noun = unscoredIds.length === 1 ? 'row has' : 'rows have';
+  return `${unscoredIds.length} ${noun} at least one score missing because an item is missing, N/A or outside the scale: ${preview}${remainder}`;
 }
 
 export function getUnassignedItemCount(
