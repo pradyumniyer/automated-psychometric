@@ -10,7 +10,8 @@ import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/st
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
-import { buildScoredColumnData } from '@/lib/scoredColumns';
+import { buildScoredColumnData, type ScoredColumn } from '@/lib/scoredColumns';
+import { buildSummaryExportContent } from '@/lib/summaryStatistics';
 import { Button, Card } from './ui';
 
 interface Props {
@@ -18,11 +19,20 @@ interface Props {
   excludedRows: Set<number>;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
+  showSummarySum: boolean;
+  showSummaryMean: boolean;
 }
 
 type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo' | 'scores_only';
 
-export function ExportScreen({ project, excludedRows, sharedDatasetId, onDatasetChange }: Props) {
+export function ExportScreen({
+  project,
+  excludedRows,
+  sharedDatasetId,
+  onDatasetChange,
+  showSummarySum,
+  showSummaryMean,
+}: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
@@ -244,7 +254,36 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
 
       const fn = fileName(type, fmt);
-      const exportOptions = { excludedRows, keepExcluded, numericColumns };
+      const summaryHeaders = keepExcluded ? [...headers, 'Excluded'] : headers;
+      const summaryRows = keepExcluded
+        ? rows.map((row, index) => ({ ...row, Excluded: excludedRows.has(index) }))
+        : rows;
+      const knownColumns = new Map(
+        (scoredColumnData?.groups.flatMap((group) => group.columns) ?? [])
+          .map((column) => [column.key, column]),
+      );
+      const summaryColumns: ScoredColumn[] = summaryHeaders.map((header) => {
+        const known = knownColumns.get(header);
+        if (known) return known;
+        const type = header.endsWith(' Interpretation')
+          ? 'interpretation'
+          : header === 'Excluded' || demoColumnNames.has(header)
+            ? 'demo'
+            : dataset.headers.includes(header)
+              ? 'data'
+              : 'score';
+        return { key: header, label: header, group: 'Export', type };
+      });
+      const summary = buildSummaryExportContent(
+        summaryHeaders,
+        summaryColumns,
+        summaryRows,
+        excludedRows,
+        new Set(idColumns),
+        { sum: showSummarySum, mean: showSummaryMean },
+        scoredResult?.normalizedMatrix.states,
+      );
+      const exportOptions = { excludedRows, keepExcluded, numericColumns, summary: summary ?? undefined };
       if (fmt === 'csv') exportToCSV(headers, rows, fn, exportOptions);
       else await exportToXLSX(headers, rows, fn, exportOptions);
     } catch (error) {
@@ -310,6 +349,11 @@ export function ExportScreen({ project, excludedRows, sharedDatasetId, onDataset
             <SummaryStat icon={<Check className="w-4 h-4" />} label="Included" value={includedCount.toString()} accent="success" />
             <SummaryStat icon={<AlertCircle className="w-4 h-4" />} label="Excluded" value={excludedCount.toString()} accent="error" />
           </div>
+          {(showSummarySum || showSummaryMean) && (
+            <p role="status" className="text-xs text-primary-700 mt-3">
+              Summary statistics are included in XLSX exports as a second “Summary” sheet and in CSV downloads as a second “&lt;name&gt;_summary.csv” file.
+            </p>
+          )}
         </div>
 
         <div className="p-6 space-y-6">

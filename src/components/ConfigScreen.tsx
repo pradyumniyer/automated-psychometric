@@ -37,7 +37,7 @@ import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip 
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
-import { buildSummaryStatistics } from '@/lib/summaryStatistics';
+import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -784,10 +784,45 @@ export function ConfigScreen({
   const handleExport = async (fmt: 'csv' | 'xlsx') => {
     if (!scoringResult || !dataset) return;
     const fn = `${project.name}_${dataset.sheet_name || 'data'}_scored.${fmt}`;
-    const exportOptions = { excludedRows: sharedExcludedRows, keepExcluded: true };
     try {
-      if (fmt === 'csv') exportToCSV(scoringResult.headers, scoringResult.rows, fn, exportOptions);
-      else await exportToXLSX(scoringResult.headers, scoringResult.rows, fn, exportOptions);
+      const data = buildScoredColumnData({
+        result: scoringResult,
+        rawHeaders: dataset.headers,
+        rawRows: dataset.rows as Record<string, unknown>[],
+        demographicColumns: demoCols.map((column) => column.column_name),
+        idColumns: demoCols
+          .filter((column) => /\bID\b/i.test(column.detected_by))
+          .map((column) => column.column_name),
+        subscales: subscaleStates,
+      });
+      const headers = [...data.headers, 'Excluded'];
+      const rows = data.rows.map((row, index) => ({
+        ...row,
+        Excluded: sharedExcludedRows.has(index),
+      }));
+      const columns = [
+        ...data.groups.flatMap((group) => group.columns),
+        { key: 'Excluded', label: 'Excluded', group: 'Export', type: 'demo' as const },
+      ];
+      const summary = buildSummaryExportContent(
+        headers,
+        columns,
+        rows,
+        sharedExcludedRows,
+        new Set(demoCols
+          .filter((column) => /\bID\b/i.test(column.detected_by))
+          .map((column) => column.column_name)),
+        { sum: showSummarySum, mean: showSummaryMean },
+        scoringResult.normalizedMatrix.states,
+      );
+      const exportOptions = {
+        excludedRows: sharedExcludedRows,
+        keepExcluded: true,
+        numericColumns: data.numericColumns,
+        summary: summary ?? undefined,
+      };
+      if (fmt === 'csv') exportToCSV(data.headers, data.rows, fn, exportOptions);
+      else await exportToXLSX(data.headers, data.rows, fn, exportOptions);
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Export failed: ${(error as Error).message}` });
     }
@@ -854,6 +889,7 @@ export function ConfigScreen({
     subscales: subscaleStates,
   }), [dataset, scoringResult, demoCols, subscaleStates]);
   const groups: GridGroup[] = scoredColumnData.groups;
+  const summaryItemStates = scoringResult?.normalizedMatrix.states;
   const summary = useMemo(() => {
     const sums: Record<string, number | null> = {};
     const means: Record<string, number | null> = {};
@@ -864,13 +900,14 @@ export function ConfigScreen({
       new Set(demoCols
         .filter((column) => /\bID\b/i.test(column.detected_by))
         .map((column) => column.column_name)),
+      summaryItemStates,
     );
     for (const [key, column] of Object.entries(statistics.columns)) {
       sums[key] = column.sum;
       means[key] = column.mean;
     }
     return { sums, means, numericColumns: statistics.numericColumns };
-  }, [scoredColumnData, sharedExcludedRows, groups, demoCols]);
+  }, [scoredColumnData, sharedExcludedRows, groups, demoCols, summaryItemStates]);
 
   const displayRows = showExcludedOnly
     ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))

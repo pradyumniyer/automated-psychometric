@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import readXlsxFile from 'read-excel-file/browser';
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/browser';
 import { validateImportFile, validateParsedSheets } from './importLimits';
+import type { SummaryExportContent } from './summaryStatistics';
 
 export interface ParsedSheet {
   sheetName: string;
@@ -395,6 +396,7 @@ export interface ExportOptions {
   excludedRows?: ReadonlySet<number>;
   keepExcluded?: boolean;
   numericColumns?: ReadonlySet<string>;
+  summary?: SummaryExportContent;
 }
 
 function sanitizeCsvText(value: string): string {
@@ -441,6 +443,36 @@ export function createCsvContent(
   ]);
 }
 
+export interface CsvExportFile {
+  fileName: string;
+  content: string;
+}
+
+export function createSummaryCsvContent(summary: SummaryExportContent): string {
+  return Papa.unparse(summary.rows.map((row) =>
+    row.map((value) => typeof value === 'string' ? sanitizeCsvText(value) : value),
+  ));
+}
+
+export function createCsvExportFiles(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  fileName: string,
+  options: ExportOptions = {},
+): CsvExportFile[] {
+  const files: CsvExportFile[] = [{
+    fileName,
+    content: createCsvContent(headers, rows, options),
+  }];
+  if (options.summary) {
+    files.push({
+      fileName: `${fileName.replace(/\.csv$/i, '')}_summary.csv`,
+      content: createSummaryCsvContent(options.summary),
+    });
+  }
+  return files;
+}
+
 function xlsxCell(value: unknown): Cell {
   if (typeof value === 'number' && Number.isFinite(value)) return { value, type: Number };
   if (typeof value === 'boolean') return { value, type: Boolean };
@@ -468,6 +500,23 @@ export function createXlsxSheetData(
   return sheetData;
 }
 
+export function createXlsxSummarySheetData(summary: SummaryExportContent): SheetData {
+  return summary.rows.map((row) => row.map(xlsxCell));
+}
+
+export function createXlsxWorkbook(
+  headers: string[],
+  rows: Record<string, unknown>[],
+  options: ExportOptions = {},
+) {
+  const dataSheet = createXlsxSheetData(headers, rows, options);
+  if (!options.summary) return writeXlsxFile(dataSheet, { sheet: 'Scored Data' });
+  return writeXlsxFile([
+    { sheet: 'Scored Data', data: dataSheet },
+    { sheet: 'Summary', data: createXlsxSummarySheetData(options.summary) },
+  ]);
+}
+
 // Export to CSV
 export function exportToCSV(
   headers: string[],
@@ -475,13 +524,15 @@ export function exportToCSV(
   fileName: string,
   options: ExportOptions = {},
 ) {
-  const blob = new Blob([createCsvContent(headers, rows, options)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  for (const file of createCsvExportFiles(headers, rows, fileName, options)) {
+    const blob = new Blob([file.content], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = file.fileName;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }
 
 // Export to XLSX
@@ -491,5 +542,5 @@ export function exportToXLSX(
   fileName: string,
   options: ExportOptions = {},
 ): Promise<void> {
-  return writeXlsxFile(createXlsxSheetData(headers, rows, options), { sheet: 'Scored Data' }).toFile(fileName);
+  return createXlsxWorkbook(headers, rows, options).toFile(fileName);
 }

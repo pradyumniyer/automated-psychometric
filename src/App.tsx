@@ -317,6 +317,8 @@ export default function App() {
             excludedRows={excludedRows}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={changeActiveDataset}
+            showSummarySum={showSummarySum}
+            showSummaryMean={showSummaryMean}
           />
         )}
         {view === 'report' && (
