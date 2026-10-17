@@ -37,6 +37,14 @@ describe('scoring status', () => {
     expect(getUnscoredRowSummary(scoringResult(['P1', 'P2'], { Stress: [1, null] }, [1]))).toBeNull();
   });
 
+  it('uses respondent IDs for the status line instead of storage row IDs', () => {
+    const result = scoringResult(['internal-row-1', 'internal-row-2'], { Stress: [null, 2] });
+
+    expect(getUnscoredRowSummary(result, ['P25', 'P26'])).toBe(
+      '1 rows have no score because an item is missing, N/A or outside the scale: P25',
+    );
+  });
+
   it('counts unassigned item columns without changing subscale definitions', () => {
     expect(getUnassignedItemCount(
       ['Q1', 'Q2', 'Q3', 'Q4'],

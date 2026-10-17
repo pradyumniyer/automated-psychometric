@@ -623,7 +623,12 @@ export function ConfigScreen({
       setScoringResult(result);
       const nv = saved.version;
       await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
-      const unscoredSummary = getUnscoredRowSummary(result);
+      const idColumn = demoCols.find((column) => /\bID\b/i.test(column.detected_by))?.column_name;
+      const displayIds = result.rowIds.map((rowId, index) => {
+        const value = idColumn ? dataset.rows[index][idColumn] : null;
+        return value == null || String(value).trim() === '' ? rowId : String(value);
+      });
+      const unscoredSummary = getUnscoredRowSummary(result, displayIds);
       setStatusMsg({
         type: 'success',
         text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.${unscoredSummary ? ` ${unscoredSummary}` : ''}`,
