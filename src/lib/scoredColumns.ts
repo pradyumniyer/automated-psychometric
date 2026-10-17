@@ -1,4 +1,11 @@
 import type { ScoringResult, SubscaleConfig } from '@/scientific/scoring';
+import {
+  interpretationColumnKey,
+  scoreColumnKey,
+  scoreOutputLabel,
+  shownScoreOutputs,
+  uniqueSubscaleNames,
+} from './scoreOutputs';
 
 export interface ScoredColumn {
   key: string;
@@ -25,7 +32,7 @@ interface BuildScoredColumnDataOptions {
   rawRows: Record<string, unknown>[];
   demographicColumns: string[];
   idColumns: string[];
-  subscales: Pick<SubscaleConfig, 'id' | 'name' | 'items' | 'scoringMethod'>[];
+  subscales: Pick<SubscaleConfig, 'id' | 'name' | 'items' | 'scoringMethod' | 'showOutputs'>[];
 }
 
 type BuiltColumn = ScoredColumn;
@@ -55,42 +62,48 @@ export function buildScoredColumnData({
     }));
   if (demographics.length > 0) groups.push({ name: 'ID', columns: demographics });
 
+  const subscaleNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name));
   const addScoreColumns = (
     target: BuiltColumn[],
-    subscale: Pick<SubscaleConfig, 'name'>,
+    subscale: Pick<SubscaleConfig, 'name' | 'scoringMethod' | 'showOutputs'>,
+    groupName = subscale.name,
   ) => {
-    const scoreHeader = `${subscale.name} Score`;
-    if (result?.headers.includes(scoreHeader)) {
-      target.push({
-        key: scoreHeader,
-        label: 'Score',
-        group: subscale.name,
-        type: 'score',
-      });
-    }
-    const interpretationHeader = `${subscale.name} Interpretation`;
-    if (result?.headers.includes(interpretationHeader)) {
-      target.push({
-        key: interpretationHeader,
-        label: 'Interpretation',
-        group: subscale.name,
-        type: 'interpretation',
-      });
+    const outputs = shownScoreOutputs(subscale.showOutputs, subscale.scoringMethod);
+    for (const output of outputs) {
+      const scoreHeader = scoreColumnKey(groupName, output);
+      if (result?.headers.includes(scoreHeader)) {
+        target.push({
+          key: scoreHeader,
+          label: scoreOutputLabel(output),
+          group: groupName,
+          type: 'score',
+        });
+      }
+      const interpretationHeader = interpretationColumnKey(groupName, output, outputs.length);
+      if (result?.headers.includes(interpretationHeader)) {
+        target.push({
+          key: interpretationHeader,
+          label: outputs.length === 1 ? 'Interpretation' : `${scoreOutputLabel(output)} interpretation`,
+          group: groupName,
+          type: 'interpretation',
+        });
+      }
     }
   };
 
-  for (const subscale of subscales) {
+  for (const [subscaleIndex, subscale] of subscales.entries()) {
+    const groupName = subscaleNames[subscaleIndex];
     const columns: BuiltColumn[] = subscale.items
       .map((item) => item.column)
       .filter((column) => rawHeaders.includes(column))
       .map((column) => ({
         key: column,
         label: column,
-        group: subscale.name,
+        group: groupName,
         type: 'data',
       }));
-    if (result) addScoreColumns(columns, subscale);
-    groups.push({ name: subscale.name, columns });
+    if (result) addScoreColumns(columns, subscale, groupName);
+    groups.push({ name: groupName, columns });
   }
 
   const unassigned = rawHeaders
@@ -143,7 +156,11 @@ export function buildScoredColumnData({
     }
     return projected;
   });
-  const numericColumns = new Set(headers.filter((header) => !idSet.has(header)));
+  const numericColumns = new Set(
+    groups.flatMap((group) => group.columns)
+      .filter((column) => column.type !== 'interpretation' && !idSet.has(column.key))
+      .map((column) => column.key),
+  );
 
   return { groups, headers, rows, numericColumns };
 }

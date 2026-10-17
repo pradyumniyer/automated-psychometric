@@ -10,10 +10,18 @@ export interface ResponseScaleConfig {
 export interface SubscaleConfig {
   id: string; name: string; items: SubscaleItemConfig[];
   scoringMethod: 'sum' | 'mean' | 'custom'; customFormula?: string | null;
+  showOutputs?: ScoreOutput[];
   responseScale: ResponseScaleConfig;
 }
 export interface BandConfig { name: string; minScore: number; maxScore: number; color: string; }
 import { evaluateFormula } from './formula';
+import {
+  interpretationColumnKey,
+  scoreColumnKey,
+  shownScoreOutputs,
+  uniqueSubscaleNames,
+} from '../lib/scoreOutputs';
+import type { ScoreOutput } from '@/types/domain';
 
 export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'out_of_range';
 
@@ -36,6 +44,7 @@ export interface ScoringOptions {
   allowedNonresponse?: string[];
   proration?: { enabled?: boolean; maxMissingPercent?: number };
   outputs?: Record<string, { sum?: boolean; mean?: boolean }>;
+  bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>>;
   overall?: {
     enabled?: boolean;
     source?: 'subscales' | 'items';
@@ -219,20 +228,16 @@ function scoreValues(values: (number | null)[], method: SubscaleConfig['scoringM
   return { sum, mean, score, missingItems, observedItems, prorated };
 }
 
-function outputScore(
+function outputScores(
   row: Record<string, number | string | null>,
   subscale: SubscaleConfig,
-  detail: ScaleScoreDetail,
-  options: ScoringOptions,
+  groupName: string,
+  shownOutputs: ScoreOutput[],
+  scores: Record<ScoreOutput, number | null>,
 ): void {
-  const outputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
-  if (!outputs) {
-    row[`${subscale.name} Score`] = detail.score;
-    return;
+  for (const output of shownOutputs) {
+    row[scoreColumnKey(groupName, output)] = scores[output];
   }
-  if (outputs.sum) row[`${subscale.name} Sum`] = detail.sum;
-  if (outputs.mean) row[`${subscale.name} Mean`] = detail.mean;
-  if (subscale.scoringMethod === 'custom') row[`${subscale.name} Score`] = detail.score;
 }
 
 export function scoreDataset(
@@ -255,24 +260,40 @@ export function scoreDataset(
   const ranges = new Map(subscales.map((subscale) => [subscale.id, responseScaleRange(subscale.responseScale)]));
   const excludedSet = new Set(excludedRowIndices);
   const headers = [...rawHeaders];
+  const groupNames = uniqueSubscaleNames(subscales.map((subscale) => subscale.name));
   const subscaleScores: Record<string, (number | null)[]> = {};
   const scaleScores: Record<string, Record<string, ScaleScoreDetail>> = {};
   const interpretationLabels: Record<string, (string | null)[]> = {};
   const outputRows: Record<string, number | string | null>[] = [];
 
-  for (const subscale of subscales) {
+  for (const [subscaleIndex, subscale] of subscales.entries()) {
+    const groupName = groupNames[subscaleIndex];
     subscaleScores[subscale.name] = [];
     scaleScores[subscale.id] = {};
     interpretationLabels[subscale.name] = [];
-    const outputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
-    if (outputs) {
-      if (outputs.sum) headers.push(`${subscale.name} Sum`);
-      if (outputs.mean) headers.push(`${subscale.name} Mean`);
-      if (subscale.scoringMethod === 'custom') headers.push(`${subscale.name} Score`);
-    } else {
-      headers.push(`${subscale.name} Score`);
+    const legacyOutputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
+    const shownOutputs = legacyOutputs
+      ? shownScoreOutputs([
+          ...(legacyOutputs.sum ? ['sum' as const] : []),
+          ...(legacyOutputs.mean ? ['mean' as const] : []),
+          ...(subscale.scoringMethod === 'custom' ? ['custom' as const] : []),
+        ], subscale.scoringMethod)
+      : shownScoreOutputs(subscale.showOutputs, subscale.scoringMethod);
+    const subscaleBands = options.bandsByOutput?.[subscale.id]
+      ?? options.bandsByOutput?.[subscale.name];
+    const legacyBands = bands[subscale.name] ?? bands[subscale.id];
+    const outputBands = shownOutputs.map((output) => [
+      output,
+      subscaleBands?.[output]
+        ?? (output === shownOutputs[0] ? legacyBands : undefined),
+    ] as const);
+    for (const output of shownOutputs) {
+      headers.push(scoreColumnKey(groupName, output));
+      const outputBandList = outputBands.find(([candidate]) => candidate === output)?.[1];
+      if (outputBandList?.length) {
+        headers.push(interpretationColumnKey(groupName, output, shownOutputs.length));
+      }
     }
-    headers.push(`${subscale.name} Interpretation`);
   }
 
   const defaultOverallMethod = subscales.every((subscale) => subscale.scoringMethod === 'mean')
@@ -308,7 +329,16 @@ export function scoreDataset(
       outRow[header] = raw == null ? null : String(raw);
     }
 
-    for (const subscale of subscales) {
+    for (const [subscaleIndex, subscale] of subscales.entries()) {
+      const groupName = groupNames[subscaleIndex];
+      const legacyOutputs = options.outputs?.[subscale.id] ?? options.outputs?.[subscale.name];
+      const shownOutputs = legacyOutputs
+        ? shownScoreOutputs([
+            ...(legacyOutputs.sum ? ['sum' as const] : []),
+            ...(legacyOutputs.mean ? ['mean' as const] : []),
+            ...(subscale.scoringMethod === 'custom' ? ['custom' as const] : []),
+          ], subscale.scoringMethod)
+        : shownScoreOutputs(subscale.showOutputs, subscale.scoringMethod);
       const excluded = excludedSet.has(rowIndex);
       const values = subscale.items.map((item) => {
         const mapped = normalizedMatrix.values[rowIndex][item.column];
@@ -317,25 +347,45 @@ export function scoreDataset(
       let detail = excluded
         ? { sum: null, mean: null, score: null, missingItems: values.filter((value) => value === null).length, observedItems: 0, prorated: false }
         : scoreValues(values, subscale.scoringMethod, options);
-      if (!excluded && subscale.scoringMethod === 'custom' && subscale.customFormula && detail.missingItems === 0) {
+      let customScore: number | null = null;
+      if (!excluded && shownOutputs.includes('custom') && subscale.customFormula && detail.missingItems === 0) {
         const formulaValues: Record<string, number | null> = {};
         subscale.items.forEach((item, itemIndex) => { formulaValues[item.column] = values[itemIndex]; });
-        const formulaResult = evaluateFormula(subscale.customFormula, formulaValues);
-        detail = { ...detail, score: formulaResult.value };
+        customScore = evaluateFormula(subscale.customFormula, formulaValues).value;
       }
+      const outputValues: Record<ScoreOutput, number | null> = {
+        sum: detail.sum,
+        mean: detail.mean,
+        custom: customScore,
+      };
+      const selectedScore = outputValues[shownOutputs[0]];
+      detail = { ...detail, score: selectedScore };
       scaleScores[subscale.id][rowIds[rowIndex]] = detail;
-      subscaleScores[subscale.name].push(excluded ? null : detail.score);
-      normalizedSubscaleValues[subscale.id].push(excluded ? null : detail.score);
-      outputScore(outRow, subscale, detail, options);
+      subscaleScores[subscale.name].push(excluded ? null : selectedScore);
+      normalizedSubscaleValues[subscale.id].push(excluded ? null : selectedScore);
+      outputScores(outRow, subscale, groupName, shownOutputs, outputValues);
 
-      let label: string | null = null;
-      if (!excluded && detail.score !== null) {
-        const subBands = bands[subscale.name] || bands[subscale.id];
-        const band = subBands?.find((candidate) => detail.score! >= candidate.minScore && detail.score! <= candidate.maxScore);
-        if (band) label = band.name;
+      let firstInterpretation: string | null = null;
+      const subscaleBands = options.bandsByOutput?.[subscale.id]
+        ?? options.bandsByOutput?.[subscale.name];
+      const legacyBands = bands[subscale.name] ?? bands[subscale.id];
+      for (const output of shownOutputs) {
+        const outputBandList = subscaleBands?.[output]
+          ?? (output === shownOutputs[0] ? legacyBands : undefined);
+        if (!outputBandList?.length) continue;
+        let label: string | null = null;
+        const value = outputValues[output];
+        if (!excluded && value !== null) {
+          const band = outputBandList.find((candidate) => value >= candidate.minScore && value <= candidate.maxScore);
+          if (band) label = band.name;
+        }
+        const interpretationKey = interpretationColumnKey(groupName, output, shownOutputs.length);
+        outRow[interpretationKey] = excluded ? 'Excluded' : label;
+        if (output === shownOutputs[0]) firstInterpretation = label;
       }
-      outRow[`${subscale.name} Interpretation`] = excluded ? 'Excluded' : label;
-      interpretationLabels[subscale.name].push(excluded ? null : label);
+      outRow[`${subscale.name} Score`] = excluded ? null : selectedScore;
+      outRow[`${subscale.name} Interpretation`] = excluded ? 'Excluded' : firstInterpretation;
+      interpretationLabels[subscale.name].push(excluded ? null : firstInterpretation);
     }
     outputRows.push(outRow);
   }

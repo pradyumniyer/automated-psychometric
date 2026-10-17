@@ -40,6 +40,8 @@ export interface SubscaleItem {
   reverse: boolean;
 }
 
+export type ScoreOutput = 'sum' | 'mean' | 'custom';
+
 export interface SubscaleGroup {
   id: string;
   project_id: string;
@@ -48,6 +50,7 @@ export interface SubscaleGroup {
   description: string;
   items: SubscaleItem[];
   scoring_method: 'sum' | 'mean' | 'custom';
+  score_outputs?: ScoreOutput[];
   custom_formula: string | null;
   display_order: number;
   created_at: string;
@@ -74,6 +77,7 @@ export interface InterpretationBand {
   min_score: number;
   max_score: number;
   color: string;
+  score_output?: ScoreOutput;
   display_order: number;
   created_at: string;
 }
@@ -98,6 +102,7 @@ export interface TemplateDefinition {
     name: string;
     description: string;
     scoringMethod: 'sum' | 'mean' | 'custom';
+    showOutputs?: ScoreOutput[];
     customFormula?: string | null;
     items: { name: string; aliases: string[]; order: number; reverse: boolean }[];
   }[];
@@ -110,6 +115,7 @@ export interface TemplateDefinition {
   }[];
   interpretationBands: {
     subscaleName: string;
+    output?: ScoreOutput;
     bands: { name: string; minScore: number; maxScore: number; color: string }[];
   }[];
   demographicRules: { patterns: string[]; contentHeuristics: string[] };

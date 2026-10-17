@@ -2,7 +2,7 @@ import { normalizeResponseMatrix, type SubscaleConfig } from '../scientific/scor
 import type { Dataset } from '../types/domain';
 import type { ScoreResultRecord, SurveyConfigRecord } from './schema';
 
-export const SCIENTIFIC_SPEC_VERSION = 'scientific-spec-v2';
+export const SCIENTIFIC_SPEC_VERSION = 'scientific-spec-v3';
 
 export function buildSubscaleConfigs(config: SurveyConfigRecord): SubscaleConfig[] {
   const scales = config.subscales.length > 0
@@ -13,7 +13,8 @@ export function buildSubscaleConfigs(config: SurveyConfigRecord): SubscaleConfig
     name: subscale.name,
     items: subscale.items,
     scoringMethod: subscale.scoring_method,
-    customFormula: subscale.scoring_method === 'custom' ? subscale.custom_formula : null,
+    showOutputs: subscale.score_outputs,
+    customFormula: subscale.custom_formula,
     responseScale: {
       scaleType: subscale.response_scale?.scale_type ?? 'numeric',
       minValue: subscale.response_scale?.min_value ?? undefined,

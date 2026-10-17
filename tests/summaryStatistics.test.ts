@@ -135,8 +135,11 @@ describe('summary statistics', () => {
     const usedRow = summary.rows.find((row) => row[0] === 'N used');
     const notCountedRow = summary.rows.find((row) => row[0] === 'N not counted');
     if (!sumRow || !meanRow || !usedRow || !notCountedRow) throw new Error('Summary statistic rows are missing.');
-    expect(sumRow[data.headers.indexOf('Sub1 Interpretation')]).toBe('');
-    expect(meanRow[data.headers.indexOf('Sub2 Interpretation')]).toBe('');
+    expect(data.headers).not.toContain('Sub1 Interpretation');
+    expect(data.headers).not.toContain('Sub2 Interpretation');
+    expect([...statistics.numericColumns]).toEqual(expect.arrayContaining(['Sub1 Sum', 'Sub2 Sum']));
+    expect(sumRow[data.headers.indexOf('Sub1 Sum')]).not.toBe('');
+    expect(meanRow[data.headers.indexOf('Sub2 Sum')]).not.toBe('');
 
     for (const header of statistics.numericColumns) {
       const values = data.rows

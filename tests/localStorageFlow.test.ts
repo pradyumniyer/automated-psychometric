@@ -49,6 +49,7 @@ describe('local storage scoring flow', () => {
       name: subscale.name,
       items: subscale.items,
       scoringMethod: subscale.scoringMethod,
+      showOutputs: ['mean'],
       customFormula: '',
       scaleType: 'numeric' as const,
       minValue: 1,
@@ -89,6 +90,7 @@ describe('local storage scoring flow', () => {
     const reloadedDataset = await datasetRepository.get(dataset.id);
     const reloadedConfig = await surveyConfigRepository.get(dataset.id);
     expect(reloadedDataset?.row_ids).toEqual(dataset.row_ids);
+    expect(reloadedConfig?.subscales[0].score_outputs).toEqual(['mean']);
     expect(await exclusionRepository.get(dataset.id)).toEqual({
       dataset_id: dataset.id,
       excluded_row_ids: excludedRowIds,

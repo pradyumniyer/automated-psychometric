@@ -146,6 +146,7 @@ export function ExportScreen({
         name: sub.name,
         items: (sub.items || []).map((item: SubscaleItem) => ({ column: item.column, order: item.order, reverse: item.reverse })),
         scoringMethod: sub.scoring_method,
+        showOutputs: sub.score_outputs,
         customFormula: sub.custom_formula,
         responseScale: {
           scaleType: scale?.scale_type || 'numeric',

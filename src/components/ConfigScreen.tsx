@@ -15,6 +15,7 @@ import {
   SubscaleItem,
   Template,
   TemplateDefinition,
+  ScoreOutput,
 } from '@/types/domain';
 import {
   datasetRepository,
@@ -38,10 +39,12 @@ import { LiveGrid, GridGroup } from './LiveGrid';
 import { getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
+import { SCORE_OUTPUT_ORDER, shownScoreOutputs } from '@/lib/scoreOutputs';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
   scoringMethod: 'sum' | 'mean' | 'custom';
+  showOutputs?: ScoreOutput[];
   customFormula: string;
   scaleType: 'numeric' | 'categorical';
   minValue: number | null; maxValue: number | null;
@@ -88,6 +91,7 @@ export function ConfigScreen({
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [bandStates, setBandStates] = useState<Record<string, BandState[]>>({});
+  const [bandStatesByOutput, setBandStatesByOutput] = useState<Record<string, Partial<Record<ScoreOutput, BandState[]>>>>({});
   const [scoringResult, setScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
   const [overallScale, setOverallScale] = useState<SubscaleState>({
     id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
@@ -124,6 +128,7 @@ export function ConfigScreen({
     demographicColumns?: DemographicColumn[];
     subscales?: SubscaleState[];
     bands?: Record<string, BandState[]>;
+    bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
     overallScale?: SubscaleState | null;
     linkedTemplateId?: string | null;
   } = {}) => {
@@ -136,6 +141,7 @@ export function ConfigScreen({
       demographicColumns: overrides.demographicColumns ?? demoCols,
       subscales: overrides.subscales ?? subscaleStates,
       bands: overrides.bands ?? bandStates,
+      bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
       overallScale: overrides.overallScale === undefined
         ? (subscaleStates.length === 0 ? overallScale : null)
         : overrides.overallScale,
@@ -190,6 +196,7 @@ export function ConfigScreen({
       setDemoCols(adapted.demographicColumns);
       setSubscaleStates(adapted.subscales);
       setBandStates(adapted.bands);
+      setBandStatesByOutput(adapted.bandsByOutput);
       setOverallScale(adapted.overallScale ?? {
         id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
         scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
@@ -225,7 +232,7 @@ export function ConfigScreen({
         name: sub.name,
         items: sub.items,
         scoringMethod: sub.scoringMethod,
-        customFormula: sub.scoringMethod === 'custom' ? sub.customFormula : null,
+        customFormula: sub.customFormula || null,
         responseScale: {
           scaleType: sub.scaleType,
           minValue: sub.minValue ?? undefined,
@@ -268,7 +275,7 @@ export function ConfigScreen({
       setSaveState('idle');
       setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
     }
-  }, [dataset, configDirty, subscaleStates, bandStates, project.id, linkedTemplate, demoCols, overallScale]);
+  }, [dataset, configDirty, subscaleStates, bandStates, bandStatesByOutput, project.id, linkedTemplate, demoCols, overallScale]);
   performAutoSaveRef.current = performAutoSave;
 
   // Debounce auto-save: trigger 1s after configDirty becomes true
@@ -431,7 +438,7 @@ export function ConfigScreen({
     if (!dataset) return;
     const name = `Subscale ${subscaleStates.length + 1}`;
     const order = subscaleStates.length;
-    const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, labelMap: [], displayOrder: order };
+    const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, labelMap: [], displayOrder: order };
     try {
       await persistSurveyConfig({ subscales: [...subscaleStates, newSub] });
       setSubscaleStates([...subscaleStates, newSub]);
@@ -517,7 +524,19 @@ export function ConfigScreen({
     markDirty();
   };
 
-  const setScoringMethod = (id: string, m: 'sum' | 'mean' | 'custom') => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, scoringMethod: m } : s)); markDirty(); };
+  const toggleScoreOutput = (id: string, output: ScoreOutput) => {
+    setSubscaleStates((previous) => previous.map((subscale) => {
+      if (subscale.id !== id) return subscale;
+      const current = shownScoreOutputs(subscale.showOutputs, subscale.scoringMethod);
+      if (current.includes(output) && current.length === 1) return subscale;
+      const next = current.includes(output)
+        ? current.filter((candidate) => candidate !== output)
+        : [...current, output];
+      const ordered = SCORE_OUTPUT_ORDER.filter((candidate) => next.includes(candidate));
+      return { ...subscale, showOutputs: ordered, scoringMethod: ordered[0] };
+    }));
+    markDirty();
+  };
   const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
   const setScaleType = (id: string, t: 'numeric' | 'categorical') => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, scaleType: t } : s)); markDirty(); };
   const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max } : s)); markDirty(); };
@@ -541,6 +560,7 @@ export function ConfigScreen({
     setSubscaleStates((prev) => prev.map((s) => ({
       ...s, scaleType: first.scaleType, minValue: first.minValue, maxValue: first.maxValue,
       labelMap: first.labelMap.map((lm) => ({ ...lm })), scoringMethod: first.scoringMethod,
+      showOutputs: shownScoreOutputs(first.showOutputs, first.scoringMethod),
     })));
     setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${subscaleStates.length} subscales.` });
     markDirty();
@@ -587,7 +607,8 @@ export function ConfigScreen({
     try {
       let subConfigs: SubscaleConfig[] = subscaleStates.map((s) => ({
         id: s.id, name: s.name, items: s.items, scoringMethod: s.scoringMethod,
-        customFormula: s.scoringMethod === 'custom' ? s.customFormula : null,
+        showOutputs: shownScoreOutputs(s.showOutputs, s.scoringMethod),
+        customFormula: s.customFormula || null,
         responseScale: { scaleType: s.scaleType, minValue: s.minValue ?? undefined, maxValue: s.maxValue ?? undefined, labelMap: s.labelMap },
       }));
       const bandConfigs: Record<string, BandConfig[]> = {};
@@ -595,7 +616,8 @@ export function ConfigScreen({
         subConfigs = [{
           id: overallScale.id, name: overallScale.name,
           items: overallScale.items, scoringMethod: overallScale.scoringMethod,
-          customFormula: overallScale.scoringMethod === 'custom' ? overallScale.customFormula : null,
+          showOutputs: shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod),
+          customFormula: overallScale.customFormula || null,
           responseScale: { scaleType: overallScale.scaleType, minValue: overallScale.minValue ?? undefined, maxValue: overallScale.maxValue ?? undefined, labelMap: overallScale.labelMap },
         }];
         bandConfigs[overallScale.name] = (bandStates[overallScale.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
@@ -912,7 +934,7 @@ export function ConfigScreen({
   const displayRows = showExcludedOnly
     ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))
     : scoredColumnData.rows;
-  const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || s.scoringMethod === 'custom')) && itemColumns.length > 0;
+  const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || (shownScoreOutputs(s.showOutputs, s.scoringMethod).length === 1 && s.scoringMethod === 'custom'))) && itemColumns.length > 0;
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
 
@@ -1068,7 +1090,7 @@ export function ConfigScreen({
                   <ScalesPanel
                     subscales={subscaleStates}
                     onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
-                    onSetLabelMap={setLabelMap} onSetScoringMethod={setScoringMethod}
+                    onSetLabelMap={setLabelMap} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
                     overallScale={overallScale} onSetOverallScale={(patch) => { setOverallScale((prev) => ({ ...prev, ...patch })); markDirty(); }}
@@ -1459,12 +1481,12 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap, onSetScoringMethod, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
   onSetLabelMap: (id: string, lm: { label: string; value: number }[]) => void;
-  onSetScoringMethod: (id: string, m: 'sum' | 'mean' | 'custom') => void;
+  onToggleOutput: (id: string, output: ScoreOutput) => void;
   onSetCustomFormula: (id: string, f: string) => void;
   onAutoDetect: (id: string) => void;
   onApplyToAll: () => void;
@@ -1482,9 +1504,12 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
       <div className="space-y-3">
         {subscales.length === 0 && (
           <ScaleCardCompact name={overallScale.name} scaleType={overallScale.scaleType} scoringMethod={overallScale.scoringMethod} customFormula={overallScale.customFormula}
+            showOutputs={shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod)}
             minValue={overallScale.minValue} maxValue={overallScale.maxValue} labelMap={overallScale.labelMap}
             itemCols={overallScale.items.map((i) => i.column)}
             onSetScoringMethod={(m) => onSetOverallScale({ scoringMethod: m })}
+            onToggleOutput={() => {}}
+            multipleOutputs={false}
             onSetCustomFormula={(f) => onSetOverallScale({ customFormula: f })}
             onSetScaleType={(t) => onSetOverallScale({ scaleType: t })}
             onSetScaleRange={(min, max) => onSetOverallScale({ minValue: min, maxValue: max })}
@@ -1495,9 +1520,12 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
         )}
         {subscales.map((sub) => (
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
+            showOutputs={shownScoreOutputs(sub.showOutputs, sub.scoringMethod)}
             minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap}
             itemCols={sub.items.map((i) => i.column)}
-            onSetScoringMethod={(m) => onSetScoringMethod(sub.id, m)}
+            onSetScoringMethod={() => {}}
+            onToggleOutput={(output) => onToggleOutput(sub.id, output)}
+            multipleOutputs
             onSetCustomFormula={(f) => onSetCustomFormula(sub.id, f)}
             onSetScaleType={(t) => onSetScaleType(sub.id, t)}
             onSetScaleRange={(min, max) => onSetScaleRange(sub.id, min, max)}
@@ -1511,10 +1539,12 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, customFormula, minValue, maxValue, labelMap, itemCols, onSetScoringMethod, onSetCustomFormula, onSetScaleType, onSetScaleRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
-  name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; customFormula: string;
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, itemCols, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+  name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
+  multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
+  onToggleOutput: (output: ScoreOutput) => void;
   onSetCustomFormula: (f: string) => void;
   onSetScaleType: (t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (min: number | null, max: number | null) => void;
@@ -1522,21 +1552,30 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, customFormula, minVa
   onAutoDetect: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
 }) {
-  const formulaError = scoringMethod === 'custom' && customFormula ? validateFormula(customFormula, itemCols) : null;
-  const preview = scoringMethod === 'custom' && customFormula ? formulaPreviewFn(customFormula, itemCols) : '';
+  const customVisible = multipleOutputs ? showOutputs.includes('custom') : scoringMethod === 'custom';
+  const formulaError = customVisible && customFormula ? validateFormula(customFormula, itemCols) : null;
+  const preview = customVisible && customFormula ? formulaPreviewFn(customFormula, itemCols) : '';
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
         <button onClick={onAutoDetect} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Auto</button>
       </div>
-      {/* Scoring method: sum | mean | custom */}
       <div className="flex items-center gap-1 mb-2">
-        {(['sum', 'mean', 'custom'] as const).map((m) => (
-          <button key={m} onClick={() => onSetScoringMethod(m)} className={`px-2 py-0.5 text-xs rounded-md transition-colors ${scoringMethod === m ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600 hover:bg-secondary-200'}`}>{m === 'sum' ? 'Sum' : m === 'mean' ? 'Mean' : 'Custom'}</button>
+        {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
+        {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
+          <button
+            key={output}
+            onClick={() => multipleOutputs ? onToggleOutput(output) : onSetScoringMethod(output)}
+            disabled={multipleOutputs && showOutputs.length === 1 && showOutputs.includes(output)}
+            aria-pressed={multipleOutputs ? showOutputs.includes(output) : scoringMethod === output}
+            className={`px-2 py-0.5 text-xs rounded-md transition-colors ${(multipleOutputs ? showOutputs.includes(output) : scoringMethod === output) ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600 hover:bg-secondary-200'} disabled:opacity-60`}
+          >
+            {output === 'sum' ? 'Sum' : output === 'mean' ? 'Mean' : multipleOutputs ? 'Custom formula' : 'Custom'}
+          </button>
         ))}
       </div>
-      {scoringMethod === 'custom' && (
+      {customVisible && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 mb-1">
             <input value={customFormula} onChange={(e) => onSetCustomFormula(e.target.value)} placeholder="e.g. (Q1 + Q2) / 2 * Q3" className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400 font-mono" />
