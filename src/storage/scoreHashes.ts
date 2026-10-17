@@ -55,8 +55,9 @@ export async function createScoreHashes(
     headers: dataset.headers,
     normalizedMatrix,
   });
+  // Data Quality thresholds and config timestamps do not change scoring results.
   const configHash = await sha256({
-    config,
+    config: { ...config, dq_thresholds: {}, updated_at: 0 },
     excludedRowIds: [...new Set(excludedRowIds)].sort(),
   });
   return {

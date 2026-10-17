@@ -5,14 +5,21 @@ import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { ExportScreen } from '@/components/ExportScreen';
 import { ReportScreen } from '@/components/ReportScreen';
 import type { Project } from '@/types/domain';
-import { datasetRepository, exclusionRepository } from '@/storage/repositories';
+import { datasetRepository, exclusionRepository, settingsRepository } from '@/storage/repositories';
 import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
 import type { ScoreColumnSettings } from '@/lib/scoredColumns';
+import {
+  buildProjectHash,
+  parseProjectHash,
+  type ProjectTab,
+  type ProjectViewSettings,
+} from '@/lib/appRoute';
+import { restoreProjectView } from '@/lib/projectRestoration';
 
 type View = 'list' | 'config' | 'quality' | 'export' | 'report';
 
 export default function App() {
-  const [view, setView] = useState<View>('list');
+  const [view, setView] = useState<View>(() => parseProjectHash(window.location.hash)?.tab ?? 'list');
   const [project, setProject] = useState<Project | null>(null);
   const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
@@ -25,6 +32,99 @@ export default function App() {
     mean: false,
     overall: true,
   });
+  const [routeReady, setRouteReady] = useState(false);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+
+  const restoreProjectState = useCallback(async (projectId: string, requestedTab?: ProjectTab) => {
+    const restored = await restoreProjectView(projectId, requestedTab);
+    if (!restored.project) {
+      setProject(null);
+      setView('list');
+      setActiveDatasetId(null);
+      setLoadedProjectId(null);
+      return;
+    }
+
+    setProject(restored.project);
+    setView(restored.tab);
+    setActiveDatasetId(restored.datasetId);
+    setShowSummarySum(restored.settings.showSummarySum);
+    setShowSummaryMean(restored.settings.showSummaryMean);
+    setScoreColumnSettings(restored.settings.scoreColumnSettings);
+    setLoadedProjectId(projectId);
+  }, []);
+
+  useEffect(() => {
+    const route = parseProjectHash(window.location.hash);
+    if (!route) {
+      setRouteReady(true);
+      return;
+    }
+    let cancelled = false;
+    restoreProjectState(route.projectId, route.tab)
+      .catch((error: unknown) => {
+        if (!cancelled) setStorageError(`Failed to restore project: ${(error as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setRouteReady(true);
+      });
+    return () => { cancelled = true; };
+  }, [restoreProjectState]);
+
+  useEffect(() => {
+    if (!routeReady) return;
+    const nextHash = project && view !== 'list'
+      ? buildProjectHash(project.id, view)
+      : '#/';
+    if (window.location.hash !== nextHash) window.location.hash = nextHash;
+  }, [project, routeReady, view]);
+
+  useEffect(() => {
+    if (!routeReady || !project || loadedProjectId !== project.id) return;
+    const saved: ProjectViewSettings = {
+      activeDatasetId,
+      tab: view === 'list' ? 'config' : view,
+      showSummarySum,
+      showSummaryMean,
+      scoreColumnSettings,
+    };
+    settingsRepository.set(`project-view:${project.id}`, saved)
+      .catch((error: unknown) => {
+        setStorageError(`Failed to save project view settings: ${(error as Error).message}`);
+      });
+  }, [
+    activeDatasetId,
+    loadedProjectId,
+    project,
+    routeReady,
+    scoreColumnSettings,
+    showSummaryMean,
+    showSummarySum,
+    view,
+  ]);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const route = parseProjectHash(window.location.hash);
+      if (!route) {
+        setProject(null);
+        setView('list');
+        setActiveDatasetId(null);
+        setLoadedProjectId(null);
+        return;
+      }
+      setView(route.tab);
+      if (route.projectId !== project?.id) {
+        setLoadedProjectId(null);
+        restoreProjectState(route.projectId, route.tab)
+          .catch((error: unknown) => {
+            setStorageError(`Failed to restore project: ${(error as Error).message}`);
+          });
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [project?.id, restoreProjectState]);
 
   const changeActiveDataset = useCallback((datasetId: string | null) => {
     setExcludedRows(new Set());
@@ -80,13 +180,17 @@ export default function App() {
   }, [activeDatasetId]);
 
   const openProject = (p: Project) => {
-    setProject(p);
-    setView('config');
+    setLoadedProjectId(null);
+    restoreProjectState(p.id)
+      .catch((error: unknown) => {
+        setStorageError(`Failed to open project: ${(error as Error).message}`);
+      });
   };
 
   const goToList = () => {
     setProject(null);
     setView('list');
+    setLoadedProjectId(null);
     setExcludedRows(new Set());
     setActiveDatasetId(null);
     setStorageError(null);

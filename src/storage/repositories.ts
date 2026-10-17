@@ -530,6 +530,17 @@ export const historyRepository: HistoryRepository = {
   },
 };
 
+export const settingsRepository: SettingsRepository = {
+  async get<T>(key: string) {
+    const record = await db.settings.get(key);
+    return record?.value as T | undefined;
+  },
+
+  async set<T>(key: string, value: T) {
+    await db.settings.put({ key, value });
+  },
+};
+
 export type {
   DatasetRecord,
   ExclusionStateRecord,

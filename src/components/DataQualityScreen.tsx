@@ -1,12 +1,12 @@
 // Data Quality screen — missingness, out-of-range, response bias, outliers, normality.
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ShieldCheck, AlertTriangle, Eye, TrendingDown, BarChart3, Activity,
-  ChevronDown, ChevronRight, Settings2, Trash2, Plus, X,
+  ChevronDown, ChevronRight, Settings2, Plus, X,
   Check, Info, FileDown, AlertCircle, RotateCcw,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Line, ComposedChart, Scatter, ReferenceLine,
 } from 'recharts';
 import type { Dataset, DemographicColumn, Project, SubscaleGroup, ResponseScale } from '@/types/domain';
@@ -15,9 +15,10 @@ import { datasetRepository, surveyConfigRepository } from '@/storage/repositorie
 import {
   computeDataQuality, histogramData, qqPlotData, boxplotData,
   DEFAULT_THRESHOLDS, DEFAULT_ALLOWED_NON_RESPONSE,
-  QualityThresholds, AllowedNonResponse, RowFlag, Severity, FlagCategory,
+  QualityThresholds, AllowedNonResponse, Severity, FlagCategory,
 } from '@/scientific/dataQuality';
 import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
+import { saveDataQualityThresholds } from '@/lib/dataQualitySettings';
 import { Button, Card } from './ui';
 
 interface SubscaleState {
@@ -67,6 +68,7 @@ export function DataQualityScreen({
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [thresholds, setThresholds] = useState<QualityThresholds>(DEFAULT_THRESHOLDS);
+  const thresholdsLoadedForDataset = useRef<string | null>(null);
   const [allowedNonResponse, setAllowedNonResponse] = useState<AllowedNonResponse>(DEFAULT_ALLOWED_NON_RESPONSE);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -83,7 +85,7 @@ export function DataQualityScreen({
     } catch (error) {
       setStorageError(`Failed to load datasets: ${(error as Error).message}`);
     }
-  }, [project.id, activeDatasetId]);
+  }, [project.id, activeDatasetId, setActiveDatasetId]);
 
   // When datasets load and no active dataset is set, pick the first
   useEffect(() => {
@@ -94,6 +96,7 @@ export function DataQualityScreen({
 
   // ── Load config for active dataset ──
   useEffect(() => {
+    thresholdsLoadedForDataset.current = null;
     if (!activeDatasetId) { setDataset(null); return; }
     const ds = datasets.find((d) => d.id === activeDatasetId);
     if (!ds) { setDataset(null); return; }
@@ -106,6 +109,8 @@ export function DataQualityScreen({
         if (!config) throw new Error('Dataset configuration is missing.');
         if (cancelled) return;
         setDemoCols(config.demographic_columns);
+        setThresholds({ ...DEFAULT_THRESHOLDS, ...config.dq_thresholds });
+        thresholdsLoadedForDataset.current = activeDatasetId;
         setSubscaleStates(config.subscales.map((subscale) => ({
           id: subscale.id,
           name: subscale.name,
@@ -123,6 +128,24 @@ export function DataQualityScreen({
     })();
     return () => { cancelled = true; };
   }, [activeDatasetId, datasets]);
+
+  useEffect(() => {
+    if (!activeDatasetId || thresholdsLoadedForDataset.current !== activeDatasetId) return;
+    let cancelled = false;
+    const saveTimer = setTimeout(() => {
+      saveDataQualityThresholds(activeDatasetId, thresholds)
+        .then(() => {
+          if (!cancelled) setStorageError(null);
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) setStorageError(`Failed to save Data Quality thresholds: ${(error as Error).message}`);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(saveTimer);
+    };
+  }, [activeDatasetId, thresholds]);
 
   // ── Derived state ──
   const demoColumnNames = useMemo(() => new Set(demoCols.map((d) => d.column_name)), [demoCols]);
