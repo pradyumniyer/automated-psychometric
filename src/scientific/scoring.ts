@@ -166,7 +166,7 @@ export function normalizeResponseMatrix(
 
   const ranges = new Map<string, ScaleRange>();
   const resolverScales = new Map<string, ResponseScaleV2>();
-  for (const column of columnScales.keys()) {
+  for (const [column, scale] of columnScales) {
     ranges.set(column, responseScaleRange(scale));
     const resolverScale = toResolverScale(scale, ranges.get(column)!, new Set([
       ...allowedNonresponse.map(normalizeResponseText),
@@ -180,7 +180,7 @@ export function normalizeResponseMatrix(
   for (const row of rawRows) {
     const valueRow: Record<string, number | null> = {};
     const stateRow: Record<string, ItemValueState> = {};
-    for (const [column, scale] of columnScales) {
+    for (const column of columnScales.keys()) {
       const mapped = mapResolvedValue(row[column], resolverScales.get(column)!);
       valueRow[column] = mapped.value;
       stateRow[column] = mapped.state;
