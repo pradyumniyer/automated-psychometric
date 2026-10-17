@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   assessRangeOutliers,
+  buildPresetLabels,
+  canReverseScore,
   detectConventionalRange,
   detectMixedRanges,
+  matchResponsePreset,
   resolveResponse,
   type ResponseScaleV2,
 } from "../src/scientific/responseScales";
@@ -44,6 +47,50 @@ describe("resolveResponse", () => {
       const result = detectConventionalRange([1, 2, 3, 4, 1, 2, 3, 4]);
       expect(result.range).toEqual({ min: 1, max: 4 });
       expect(result.confirmed).toBe(false);
+    });
+
+    it("detects Fixture A's 1-5 response range and only permits reverse scoring after confirmation", () => {
+      const result = detectConventionalRange([1, 2, 3, 4, 5, 1, 2, 3, 4, 5]);
+      expect(result.range).toEqual({ min: 1, max: 5 });
+      expect(result.confirmed).toBe(false);
+      expect(canReverseScore({ ...fixtureScale, confirmed: result.confirmed })).toBe(false);
+      expect(canReverseScore({ ...fixtureScale, confirmed: true })).toBe(true);
+    });
+
+    describe("word response-scale presets", () => {
+      it("matches normalized word variants and preserves an extra N/A row", () => {
+        const result = matchResponsePreset([
+          "strongly agree",
+          " Strongly   Agree ",
+          "Agree",
+          "N/A",
+        ]);
+        expect(result.preset?.name).toBe("5-pt Agreement");
+        expect(result.extraResponses).toEqual(["N/A"]);
+        expect(result.labels.find((label) => label.text === "Strongly Agree")?.value).toBe(5);
+      });
+
+      it("leaves non-matching words unmapped", () => {
+        const result = matchResponsePreset(["Red", "Blue", "Green"]);
+        expect(result.preset).toBeNull();
+        expect(result.labels).toEqual([
+          { text: "Red", value: null, kind: "scale" },
+          { text: "Blue", value: null, kind: "scale" },
+          { text: "Green", value: null, kind: "scale" },
+        ]);
+      });
+
+      it("supports flipped and zero-start preset values", () => {
+        const labels = buildPresetLabels("5-pt Agreement", { flipped: true, startsAtZero: true });
+        expect(labels[0]).toMatchObject({ text: "Strongly Disagree", value: 4 });
+        expect(labels[4]).toMatchObject({ text: "Strongly Agree", value: 0 });
+      });
+
+      it("suggests a demographic or ID when there are more than 15 words", () => {
+        const result = matchResponsePreset(Array.from({ length: 16 }, (_, index) => `Person ${index + 1}`));
+        expect(result.suggestDemographicOrId).toBe(true);
+        expect(result.labels).toHaveLength(16);
+      });
     });
 
     it("suggests widening for three values one step beyond 1-4 in 300 responses", () => {

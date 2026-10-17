@@ -1,3 +1,5 @@
+import { COMMON_LIKERT_SCALES, type LikertPreset } from "./detection";
+
 export type ResponseScaleLabelKind = "scale" | "special";
 export type OutOfRangeAction = "missing" | "widen";
 
@@ -78,6 +80,10 @@ export interface ConventionalRangeDetection {
   outOfRange: RangeOutlierAssessment;
 }
 
+export function canReverseScore(scale: Pick<ResponseScaleV2, "confirmed">): boolean {
+  return scale.confirmed;
+}
+
 function numericValues(values: unknown[]): number[] {
   return values
     .map((value) => {
@@ -153,6 +159,77 @@ export function detectMixedRanges(itemValues: Record<string, unknown[]>): MixedR
   });
   const signatures = new Set(items.map(({ range }) => `${range.min}:${range.max}`));
   return { mixed: signatures.size > 1, items };
+}
+
+export interface PresetMatch {
+  preset: LikertPreset | null;
+  labels: ResponseScaleLabel[];
+  extraResponses: string[];
+  suggestDemographicOrId: boolean;
+}
+
+const BUILT_IN_SPECIAL_WORDS = new Set(["n/a", "na", "prefer not to say"]);
+
+function distinctResponses(values: unknown[]): string[] {
+  const responses = new Map<string, string>();
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim() === "") continue;
+    const normalized = normalizeResponseText(value);
+    if (!responses.has(normalized)) responses.set(normalized, value.trim());
+  }
+  return Array.from(responses.values());
+}
+
+function presetLabels(preset: LikertPreset, flipped: boolean, startsAtZero: boolean): ResponseScaleLabel[] {
+  return preset.labels.map(({ label, value }) => {
+    const baseValue = startsAtZero ? value - 1 : value;
+    const mappedValue = flipped
+      ? (startsAtZero ? preset.points - 1 - baseValue : preset.points + 1 - baseValue)
+      : baseValue;
+    return { text: label, value: mappedValue, kind: "scale" };
+  });
+}
+
+export function buildPresetLabels(
+  presetName: string,
+  options: { flipped?: boolean; startsAtZero?: boolean } = {},
+): ResponseScaleLabel[] {
+  const preset = COMMON_LIKERT_SCALES.find(({ name }) => name === presetName);
+  if (!preset) throw new Error(`Unknown response-scale preset "${presetName}".`);
+  return presetLabels(preset, options.flipped ?? false, options.startsAtZero ?? false);
+}
+
+export function matchResponsePreset(values: unknown[]): PresetMatch {
+  const responses = distinctResponses(values);
+  const words = responses.filter((response) => !BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(response)));
+  const suggestDemographicOrId = words.length > 15;
+  let best: { preset: LikertPreset; matched: number } | null = null;
+  for (const preset of COMMON_LIKERT_SCALES) {
+    const presetWords = new Set(preset.labels.map(({ label }) => normalizeResponseText(label)));
+    const matched = words.filter((word) => presetWords.has(normalizeResponseText(word))).length;
+    if (matched > words.length / 2 && (!best || matched > best.matched)) {
+      best = { preset, matched };
+    }
+  }
+
+  const matchedPreset = best?.preset ?? null;
+  const labels = matchedPreset ? presetLabels(matchedPreset, false, false) : responses.map((text) => ({
+    text,
+    value: null,
+    kind: BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(text)) ? "special" as const : "scale" as const,
+  }));
+  const presetWords = matchedPreset
+    ? new Set(matchedPreset.labels.map(({ label }) => normalizeResponseText(label)))
+    : new Set<string>();
+  const extraResponses = responses.filter((response) => !presetWords.has(normalizeResponseText(response)));
+  if (matchedPreset) {
+    labels.push(...extraResponses.map((text) => ({
+      text,
+      value: null,
+      kind: BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(text)) ? "special" as const : "scale" as const,
+    })));
+  }
+  return { preset: matchedPreset, labels, extraResponses, suggestDemographicOrId };
 }
 
 export function resolveResponse(raw: unknown, scale: ResponseScaleV2): ResolvedResponse {
