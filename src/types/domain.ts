@@ -67,6 +67,7 @@ export interface ResponseScale {
   label_map: { label: string; value: number }[];
   confirmed?: boolean;
   out_of_range?: 'missing' | 'widen';
+  out_of_range_decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
   created_at: string;
 }
 
@@ -115,6 +116,7 @@ export interface TemplateDefinition {
     maxValue: number | null;
     labelMap: { label: string; value: number }[];
     confirmed?: boolean;
+    outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
   }[];
   interpretationBands: {
     subscaleName: string;

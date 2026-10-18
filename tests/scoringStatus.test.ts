@@ -12,6 +12,8 @@ import {
   responseScaleSummaryLine,
   shouldOpenResponseScaleCard,
   waitingSubscaleStatus,
+  outOfRangeDecisionMatches,
+  outOfRangeDecisionSummary,
 } from '../src/lib/responseScaleUi';
 
 function scoringResult(
@@ -77,8 +79,27 @@ describe('scoring status', () => {
       'Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items).',
     );
     expect(waitingSubscaleStatus(['Subscale 1', 'Subscale 2'])).toBe(
-      'Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items). and 1 more.',
+      'Scoring is waiting: confirm the scale ranges for Subscale 1 and 1 more (they have reverse items).',
     );
+  });
+
+  it('keeps an out-of-range decision only while the same cells remain out of range', () => {
+    const decision = { action: 'missing' as const, cells: ['Q4:row-26'], values: [7] };
+    expect(outOfRangeDecisionMatches(decision, [
+      { column: 'Q4', rowIndex: 25, value: 7, cellKey: 'Q4:row-26', displayId: 'P26' },
+    ])).toBe(true);
+    expect(outOfRangeDecisionMatches(decision, [
+      { column: 'Q4', rowIndex: 25, value: 7, cellKey: 'Q4:row-26', displayId: 'P26' },
+      { column: 'Q5', rowIndex: 4, value: 0, cellKey: 'Q5:row-5' },
+    ])).toBe(false);
+    expect(outOfRangeDecisionSummary(decision, [
+      { column: 'Q4', rowIndex: 25, value: 7, cellKey: 'Q4:row-26', displayId: 'P26' },
+    ])).toBe('Decision: Treat as missing for Q4: P26 (Change)');
+    expect(outOfRangeDecisionSummary(
+      { action: 'widen', cells: ['Q4:row-26'], values: [7] },
+      [{ column: 'Q4', rowIndex: 25, value: 7, cellKey: 'Q4:row-26', displayId: 'P26' }],
+      { min: 1, max: 7 },
+    )).toBe('Decision: Widen range to 1-7 (Change)');
   });
 
   it('flags only item ranges with more than ten percent outside the scale', () => {

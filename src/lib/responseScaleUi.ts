@@ -17,6 +17,20 @@ export interface WaitingSubscale {
   rangeConfirmed: boolean;
 }
 
+export interface OutOfRangeDecision {
+  action: 'missing' | 'widen';
+  cells: string[];
+  values: number[];
+}
+
+export interface OutOfRangeDecisionCell {
+  column: string;
+  rowIndex: number;
+  value: number;
+  cellKey: string;
+  displayId?: string;
+}
+
 export function responseScaleSummaryLine(summary: ResponseScaleCardSummary): string {
   const range = summary.min === null || summary.max === null
     ? 'range not set'
@@ -35,7 +49,34 @@ export function shouldOpenResponseScaleCard(
 
 export function waitingSubscaleStatus(names: string[]): string | null {
   if (names.length === 0) return null;
-  return `Scoring is waiting: confirm the scale range for ${names[0]} (it has reverse items).${names.length > 1 ? ` and ${names.length - 1} more.` : ''}`;
+  if (names.length === 1) {
+    return `Scoring is waiting: confirm the scale range for ${names[0]} (it has reverse items).`;
+  }
+  return `Scoring is waiting: confirm the scale ranges for ${names[0]} and ${names.length - 1} more (they have reverse items).`;
+}
+
+export function outOfRangeDecisionMatches(
+  decision: OutOfRangeDecision | undefined,
+  cells: Pick<OutOfRangeDecisionCell, 'cellKey'>[],
+): boolean {
+  if (!decision) return false;
+  const current = cells.map((cell) => cell.cellKey).sort();
+  const previous = [...decision.cells].sort();
+  return current.length === previous.length && current.every((cell, index) => cell === previous[index]);
+}
+
+export function outOfRangeDecisionSummary(
+  decision: OutOfRangeDecision,
+  cells: OutOfRangeDecisionCell[],
+  widenedRange?: { min: number; max: number },
+): string {
+  const widenTarget = widenedRange
+    ? `${widenedRange.min}-${widenedRange.max}`
+    : `${Math.min(...decision.values)}-${Math.max(...decision.values)}`;
+  const action = decision.action === 'widen'
+    ? `Widen range to ${widenTarget}`
+    : `Treat as missing for ${cells.map((cell) => `${cell.column}: ${cell.displayId ?? `row ${cell.rowIndex + 1}`}`).join(', ')}`;
+  return `Decision: ${action} (Change)`;
 }
 
 export function getDisplayIds(

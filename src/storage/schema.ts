@@ -43,6 +43,8 @@ export interface SurveyConfigRecord {
     max?: number;
     label_map?: { label: string; value: number }[];
     confirmed?: boolean;
+    out_of_range?: 'missing' | 'widen';
+    out_of_range_decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
   };
   subscales: (SubscaleGroup & {
     response_scale?: ResponseScale;

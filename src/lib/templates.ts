@@ -27,6 +27,7 @@ export interface SubscaleStateLike {
   maxValue: number | null;
   labelMap: { label: string; value: number }[];
   confirmed?: boolean;
+  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
 }
 
 export interface BandStateLike {
@@ -117,6 +118,7 @@ export function buildTemplateDefinition(
       maxValue: s.maxValue,
       labelMap: s.labelMap,
       confirmed: s.confirmed === true,
+      outOfRangeDecision: s.outOfRangeDecision,
     })),
     interpretationBands: subscaleStates.flatMap((subscale) => {
       const outputs = bandsByOutput[subscale.name];

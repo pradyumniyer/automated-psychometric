@@ -22,6 +22,7 @@ export interface ScreenSubscaleState {
   labelMap: { label: string; value: number }[];
   confirmed?: boolean;
   outOfRange?: 'missing' | 'widen';
+  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
   displayOrder: number;
 }
 
@@ -83,6 +84,7 @@ function toStoredSubscale(
     label_map: state.labelMap,
     confirmed: state.confirmed ?? true,
     out_of_range: state.outOfRange ?? existing?.response_scale?.out_of_range ?? 'missing',
+    out_of_range_decision: state.outOfRangeDecision ?? existing?.response_scale?.out_of_range_decision,
     created_at: existing?.response_scale?.created_at ?? now,
   };
   const outputs = shownScoreOutputs(state.showOutputs, state.scoringMethod);
@@ -220,6 +222,7 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
     labelMap: subscale.response_scale?.label_map ?? [],
     confirmed: subscale.response_scale?.confirmed ?? true,
     outOfRange: subscale.response_scale?.out_of_range ?? 'missing',
+    outOfRangeDecision: subscale.response_scale?.out_of_range_decision,
     displayOrder: subscale.display_order,
   });
   const bands: ScreenSurveyConfig['bands'] = {};

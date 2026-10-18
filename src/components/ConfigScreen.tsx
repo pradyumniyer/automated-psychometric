@@ -38,7 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, type OutOfRangeDecision } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -53,6 +53,7 @@ interface SubscaleState {
   labelMap: { label: string; value: number }[];
   confirmed?: boolean;
   outOfRange?: 'missing' | 'widen';
+  outOfRangeDecision?: OutOfRangeDecision;
   displayOrder: number;
 }
 interface BandState { name: string; minScore: number; maxScore: number; color: string; }
@@ -847,6 +848,7 @@ export function ConfigScreen({
         maxValue: scale?.maxValue ?? null,
         labelMap: scale?.labelMap || [],
         confirmed: scale?.confirmed === true,
+        outOfRangeDecision: scale?.outOfRangeDecision,
         displayOrder: nextSubscales.length,
       });
       nextBandsByOutput[definition.name] = scoreSettings.bandsByOutput;
@@ -1250,7 +1252,7 @@ export function ConfigScreen({
                     onFocusHandled={() => setScaleFocusId(null)}
                     onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
                     onConfirmRange={confirmScaleRange}
-                    onApplyOutOfRange={async (id, action, values) => {
+                    onApplyOutOfRange={async (id, action, values, cells) => {
                       if (!dataset) return;
                       const subscale = subscaleStates.find((candidate) => candidate.id === id);
                       if (!subscale || subscale.minValue === null || subscale.maxValue === null) return;
@@ -1265,9 +1267,16 @@ export function ConfigScreen({
                         maxValue: result.scale.max,
                         confirmed: result.scale.confirmed,
                         outOfRange: action,
+                        outOfRangeDecision: { action, cells, values: [...values] },
                       } : candidate));
                       await logOutOfRangeAction(project.id, dataset.id, result.log);
                       setHistory(await fetchHistory(dataset.id));
+                      markDirty();
+                    }}
+                    onChangeOutOfRangeDecision={(id) => {
+                      setSubscaleStates((previous) => previous.map((candidate) => candidate.id === id
+                        ? { ...candidate, outOfRange: 'missing', outOfRangeDecision: undefined }
+                        : candidate));
                       markDirty();
                     }}
                     onHighlightCell={(rowIndex, columnKey) => setHighlightCell({ rowIndex, columnKey })}
@@ -1670,7 +1679,7 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onChangeOutOfRangeDecision, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
   displayIds: string[];
@@ -1679,7 +1688,8 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
   onConfirmRange: (id: string) => void;
-  onApplyOutOfRange: (id: string, action: 'missing' | 'widen', values: number[]) => Promise<void>;
+  onApplyOutOfRange: (id: string, action: 'missing' | 'widen', values: number[], cells: string[]) => Promise<void>;
+  onChangeOutOfRangeDecision: (id: string) => void;
   onHighlightCell: (rowIndex: number, columnKey: string) => void;
   onSetLabelMap: (id: string, lm: { label: string; value: number }[]) => void;
   onToggleOutput: (id: string, output: ScoreOutput) => void;
@@ -1824,7 +1834,9 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
             onConfirmRange={() => onConfirmRange(sub.id)}
             rows={rows}
             displayIds={displayIds}
-            onApplyOutOfRange={(action, values) => onApplyOutOfRange(sub.id, action, values)}
+            onApplyOutOfRange={(action, values, cells) => onApplyOutOfRange(sub.id, action, values, cells)}
+            outOfRangeDecision={sub.outOfRangeDecision}
+            onChangeOutOfRangeDecision={() => onChangeOutOfRangeDecision(sub.id)}
             onHighlightCell={onHighlightCell}
             collapsible
             cardId={sub.id}
@@ -1858,7 +1870,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, outOfRangeDecision, onChangeOutOfRangeDecision, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
@@ -1872,7 +1884,9 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   onToggleOpen?: () => void;
   summaryLine?: string;
   attentionChip?: string;
-  onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[]) => Promise<void>;
+  outOfRangeDecision?: OutOfRangeDecision;
+  onChangeOutOfRangeDecision?: () => void;
+  onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[], cells: string[]) => Promise<void>;
   onHighlightCell?: (rowIndex: number, columnKey: string) => void;
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
   onToggleOutput: (output: ScoreOutput) => void;
@@ -1893,6 +1907,12 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const affectedCells = rangeOutliers && minValue !== null && maxValue !== null
     ? findOutOfRangeCells(rows, itemCols, { min: minValue, max: maxValue }, displayIds)
     : [];
+  const decisionCells = affectedCells.map((cell) => ({
+    ...cell,
+    cellKey: `${cell.column}:${cell.rowIndex}`,
+    displayId: cell.rowId,
+  }));
+  const decisionApplied = outOfRangeDecisionMatches(outOfRangeDecision, decisionCells);
   const differentScaleItems = multipleOutputs && minValue !== null && maxValue !== null
     ? hasDifferentScaleItem(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])), minValue, maxValue)
     : [];
@@ -1944,7 +1964,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {!confirmed && <button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button>}
         </div>
       )}
-      {multipleOutputs && rangeOutliers && rangeOutliers.count > 0 && (
+      {multipleOutputs && rangeOutliers && rangeOutliers.count > 0 && !decisionApplied && (
         <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
           <div className="mb-1">
             {minValue}-{maxValue} detected. {rangeOutliers.count} value{rangeOutliers.count === 1 ? '' : 's'} outside (
@@ -1966,14 +1986,14 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
             <button
               type="button"
               className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'missing' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
-              onClick={() => onApplyOutOfRange?.('missing', rangeOutliers.values)}
+              onClick={() => onApplyOutOfRange?.('missing', rangeOutliers.values, decisionCells.map((cell) => cell.cellKey))}
             >
               Treat as missing
             </button>
             <button
               type="button"
               className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'widen' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
-              onClick={() => onApplyOutOfRange?.('widen', rangeOutliers.values)}
+              onClick={() => onApplyOutOfRange?.('widen', rangeOutliers.values, decisionCells.map((cell) => cell.cellKey))}
             >
               Widen range
             </button>
@@ -1982,6 +2002,12 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {entryErrorGuidance(rangeOutliers.suggestedAction) && (
             <p className="mt-2">{entryErrorGuidance(rangeOutliers.suggestedAction)}</p>
           )}
+        </div>
+      )}
+      {multipleOutputs && decisionApplied && outOfRangeDecision && (
+        <div className="mb-2 text-xs text-secondary-500">
+          {outOfRangeDecisionSummary(outOfRangeDecision, decisionCells, minValue !== null && maxValue !== null ? { min: minValue, max: maxValue } : undefined)}
+          <button type="button" className="ml-1 underline hover:text-secondary-700" onClick={onChangeOutOfRangeDecision}>Change</button>
         </div>
       )}
       <div className="flex items-center gap-1 mb-2">
