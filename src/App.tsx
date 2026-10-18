@@ -285,6 +285,7 @@ export default function App() {
           <ConfigScreen
             project={project}
             highlightRowIndex={highlightRowIndex}
+            onHighlightRow={(rowIndex) => setHighlightRowIndex(rowIndex)}
             onClearHighlight={() => setHighlightRowIndex(null)}
             excludedRows={excludedRows}
             onToggleRowExclusion={toggleRowExclusion}

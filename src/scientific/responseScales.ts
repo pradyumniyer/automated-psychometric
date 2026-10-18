@@ -21,6 +21,28 @@ export interface ResponseScaleV2 {
   outOfRange: OutOfRangeAction;
 }
 
+export interface ResponseScaleSettings {
+  minValue: number | null;
+  maxValue: number | null;
+  labelMap: { label: string; value: number }[];
+  confirmed?: boolean;
+  outOfRange?: OutOfRangeAction;
+}
+
+export function copyFirstResponseScaleSettings<T extends ResponseScaleSettings>(
+  first: T,
+  scales: T[],
+): T[] {
+  return scales.map((scale) => ({
+    ...scale,
+    minValue: first.minValue,
+    maxValue: first.maxValue,
+    labelMap: first.labelMap.map((label) => ({ ...label })),
+    confirmed: first.confirmed === true,
+    outOfRange: first.outOfRange,
+  }));
+}
+
 export type ResolvedResponse =
   | { kind: "blank"; value: null }
   | { kind: "valid"; value: number }

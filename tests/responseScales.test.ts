@@ -4,6 +4,7 @@ import {
   applyOutOfRangeAction,
   buildPresetLabels,
   canReverseScore,
+  copyFirstResponseScaleSettings,
   createOutOfRangeHistoryEntry,
   detectConventionalRange,
   detectMixedRanges,
@@ -28,6 +29,21 @@ const fixtureScale: ResponseScaleV2 = {
 };
 
 describe("resolveResponse", () => {
+  it("copies only response-scale settings and confirms recipients only when the first is confirmed", () => {
+    const scales = [
+      { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true, showOutputs: ["sum"] },
+      { minValue: 0, maxValue: 4, labelMap: [], confirmed: true, showOutputs: ["mean"] },
+    ];
+    const copied = copyFirstResponseScaleSettings(scales[0], scales);
+    expect(copied.map(({ minValue, maxValue, labelMap, confirmed }) => ({ minValue, maxValue, labelMap, confirmed }))).toEqual([
+      { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true },
+      { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true },
+    ]);
+    expect(copied[1].showOutputs).toEqual(["mean"]);
+    const unconfirmed = copyFirstResponseScaleSettings({ ...scales[0], confirmed: false }, scales);
+    expect(unconfirmed.every((scale) => scale.confirmed === false)).toBe(true);
+  });
+
   it("resolves Fixture A Q3/Q5 values and special responses", () => {
     expect(resolveResponse(4, fixtureScale)).toEqual({
       kind: "valid",

@@ -21,6 +21,7 @@ export interface ScreenSubscaleState {
   maxValue: number | null;
   labelMap: { label: string; value: number }[];
   confirmed?: boolean;
+  outOfRange?: 'missing' | 'widen';
   displayOrder: number;
 }
 
@@ -80,7 +81,8 @@ function toStoredSubscale(
     min_value: state.minValue,
     max_value: state.maxValue,
     label_map: state.labelMap,
-    confirmed: true,
+    confirmed: state.confirmed ?? true,
+    out_of_range: state.outOfRange ?? existing?.response_scale?.out_of_range ?? 'missing',
     created_at: existing?.response_scale?.created_at ?? now,
   };
   const outputs = shownScoreOutputs(state.showOutputs, state.scoringMethod);
@@ -216,6 +218,8 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
     minValue: subscale.response_scale?.min_value ?? null,
     maxValue: subscale.response_scale?.max_value ?? null,
     labelMap: subscale.response_scale?.label_map ?? [],
+    confirmed: subscale.response_scale?.confirmed ?? true,
+    outOfRange: subscale.response_scale?.out_of_range ?? 'missing',
     displayOrder: subscale.display_order,
   });
   const bands: ScreenSurveyConfig['bands'] = {};

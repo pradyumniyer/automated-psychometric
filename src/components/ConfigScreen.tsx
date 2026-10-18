@@ -26,12 +26,13 @@ import {
 } from '@/storage/repositories';
 import { createScoreHashes } from '@/storage/scoreHashes';
 import { fromSurveyConfigRecord, toSurveyConfigRecord } from '@/storage/viewAdapters';
-import { logAction, fetchHistory, deleteAction } from '@/lib/history';
+import { logAction, logOutOfRangeAction, fetchHistory, deleteAction } from '@/lib/history';
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
+import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, detectMixedRanges } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -49,6 +50,8 @@ interface SubscaleState {
   scaleType: 'numeric' | 'categorical';
   minValue: number | null; maxValue: number | null;
   labelMap: { label: string; value: number }[];
+  confirmed?: boolean;
+  outOfRange?: 'missing' | 'widen';
   displayOrder: number;
 }
 interface BandState { name: string; minScore: number; maxScore: number; color: string; }
@@ -63,13 +66,14 @@ interface SheetInfo { name: string; rows: number; cols: number; }
 type SaveState = 'idle' | 'saving' | 'saved';
 
 export function ConfigScreen({
-  project, highlightRowIndex, onClearHighlight,
+  project, highlightRowIndex, onHighlightRow, onClearHighlight,
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
   showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
 }: {
   project: Project;
   highlightRowIndex: number | null;
+  onHighlightRow: (rowIndex: number) => void;
   onClearHighlight: () => void;
   excludedRows: Set<number>;
   onToggleRowExclusion: (rowIndex: number) => Promise<void>;
@@ -102,7 +106,7 @@ export function ConfigScreen({
   const [scoringResult, setScoringResult] = useState<ReturnType<typeof scoreDataset> | null>(null);
   const [overallScale, setOverallScale] = useState<SubscaleState>({
     id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
-    scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
+    scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], confirmed: true, displayOrder: 0,
   });
   const [overallSettings, setOverallSettings] = useState<OverallSettings>({
     enabled: true, basedOn: 'sums', combineBy: 'sum', customFormula: '',
@@ -211,7 +215,7 @@ export function ConfigScreen({
       setBandStatesByOutput(adapted.bandsByOutput);
       setOverallScale(adapted.overallScale ?? {
         id: 'overall', name: 'Overall Scale', items: [], scoringMethod: 'sum', customFormula: '',
-        scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0,
+        scaleType: 'numeric', minValue: 1, maxValue: 5, labelMap: [], confirmed: true, displayOrder: 0,
       });
       setOverallSettings(adapted.overallSettings);
       const linked = config.linked_template_id
@@ -236,6 +240,7 @@ export function ConfigScreen({
           labelMap: detected.scaleType === 'categorical'
             ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
             : [],
+          confirmed: true,
           displayOrder: 0,
         };
       })();
@@ -251,6 +256,7 @@ export function ConfigScreen({
           minValue: sub.minValue ?? undefined,
           maxValue: sub.maxValue ?? undefined,
           labelMap: sub.labelMap,
+          confirmed: sub.confirmed === true,
         },
       }));
       const hashes = await createScoreHashes(ds, config, configs, excludedRowIds);
@@ -266,6 +272,21 @@ export function ConfigScreen({
   }, [activeDatasetId, datasets, onSetExcludedRows]);
 
   useEffect(() => { loadDatasetConfig(); }, [loadDatasetConfig]);
+
+  useEffect(() => {
+    if (!dataset) return;
+    setSubscaleStates((previous) => previous.map((subscale) => {
+      if (subscale.confirmed || subscale.scaleType !== 'numeric' || subscale.items.length === 0) return subscale;
+      const values = subscale.items.flatMap((item) => dataset.rows.map((row) => row[item.column]));
+      try {
+        const detected = detectConventionalRange(values);
+        if (detected.range.min === subscale.minValue && detected.range.max === subscale.maxValue) return subscale;
+        return { ...subscale, minValue: detected.range.min, maxValue: detected.range.max };
+      } catch {
+        return subscale;
+      }
+    }));
+  }, [dataset, subscaleStates.map((subscale) => `${subscale.id}:${subscale.items.map((item) => item.column).join(',')}:${subscale.confirmed}`).join('|')]);
 
   // ── Derived state ──
   const demoColumnNames = useMemo(() => new Set(demoCols.map((d) => d.column_name)), [demoCols]);
@@ -560,7 +581,8 @@ export function ConfigScreen({
   };
   const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
   const setScaleType = (id: string, t: 'numeric' | 'categorical') => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, scaleType: t } : s)); markDirty(); };
-  const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max } : s)); markDirty(); };
+  const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: true } : s)); markDirty(); };
+  const confirmScaleRange = (id: string) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true } : s)); markDirty(); };
   const setLabelMap = (id: string, lm: { label: string; value: number }[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm } : s)); markDirty(); };
 
   const autoDetectScale = (subscaleId: string) => {
@@ -570,6 +592,7 @@ export function ConfigScreen({
     setSubscaleStates((prev) => prev.map((s) => s.id !== subscaleId ? s : {
       ...s, scaleType: det.scaleType, minValue: det.minValue, maxValue: det.maxValue,
       labelMap: det.scaleType === 'categorical' ? det.uniqueValues.map((label, i) => ({ label, value: i + 1 })) : [],
+      confirmed: false,
     }));
     setStatusMsg({ type: 'success', text: det.suggestion });
     markDirty();
@@ -578,10 +601,9 @@ export function ConfigScreen({
   const applyScaleToAll = () => {
     if (subscaleStates.length === 0) return;
     const first = subscaleStates[0];
-    setSubscaleStates((prev) => prev.map((s) => ({
-      ...s, scaleType: first.scaleType, minValue: first.minValue, maxValue: first.maxValue,
-      labelMap: first.labelMap.map((lm) => ({ ...lm })), scoringMethod: first.scoringMethod,
-      showOutputs: shownScoreOutputs(first.showOutputs, first.scoringMethod),
+    setSubscaleStates((prev) => copyFirstResponseScaleSettings(first, prev).map((s) => ({
+      ...s,
+      scaleType: first.scaleType,
     })));
     setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${subscaleStates.length} subscales.` });
     markDirty();
@@ -651,7 +673,7 @@ export function ConfigScreen({
         id: s.id, name: s.name, items: s.items, scoringMethod: s.scoringMethod,
         showOutputs: shownScoreOutputs(s.showOutputs, s.scoringMethod),
         customFormula: s.customFormula || null,
-        responseScale: { scaleType: s.scaleType, minValue: s.minValue ?? undefined, maxValue: s.maxValue ?? undefined, labelMap: s.labelMap },
+        responseScale: { scaleType: s.scaleType, minValue: s.minValue ?? undefined, maxValue: s.maxValue ?? undefined, labelMap: s.labelMap, confirmed: s.confirmed === true },
       }));
       const bandConfigs: Record<string, BandConfig[]> = {};
       const bandConfigsByOutput: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>> = {};
@@ -661,7 +683,7 @@ export function ConfigScreen({
           items: overallScale.items, scoringMethod: overallScale.scoringMethod,
           showOutputs: shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod),
           customFormula: overallScale.customFormula || null,
-          responseScale: { scaleType: overallScale.scaleType, minValue: overallScale.minValue ?? undefined, maxValue: overallScale.maxValue ?? undefined, labelMap: overallScale.labelMap },
+          responseScale: { scaleType: overallScale.scaleType, minValue: overallScale.minValue ?? undefined, maxValue: overallScale.maxValue ?? undefined, labelMap: overallScale.labelMap, confirmed: overallScale.confirmed === true },
         }];
         bandConfigs[overallScale.name] = (bandStates[overallScale.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
       } else {
@@ -1188,8 +1210,33 @@ export function ConfigScreen({
                 )}
                 {activeStep === 'scales' && (
                   <ScalesPanel
-                    subscales={subscaleStates}
+                    subscales={subscaleStates} rows={dataset?.rows ?? []} rowIds={dataset?.row_ids ?? []}
                     onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
+                    onConfirmRange={confirmScaleRange}
+                    onApplyOutOfRange={async (id, action, values) => {
+                      if (!dataset) return;
+                      const subscale = subscaleStates.find((candidate) => candidate.id === id);
+                      if (!subscale || subscale.minValue === null || subscale.maxValue === null) return;
+                      const result = applyOutOfRangeAction({
+                        min: subscale.minValue, max: subscale.maxValue, rangeSource: 'manual',
+                        confirmed: subscale.confirmed === true, flipped: false, startsAtZero: false,
+                        labels: [], outOfRange: action,
+                      }, values, action);
+                      setSubscaleStates((previous) => previous.map((candidate) => candidate.id === id ? {
+                        ...candidate,
+                        minValue: result.scale.min,
+                        maxValue: result.scale.max,
+                        confirmed: result.scale.confirmed,
+                        outOfRange: action,
+                      } : candidate));
+                      await logOutOfRangeAction(project.id, dataset.id, result.log);
+                      setHistory(await fetchHistory(dataset.id));
+                      markDirty();
+                    }}
+                    onHighlightCell={(rowIndex) => {
+                      onHighlightRow(rowIndex);
+                      window.setTimeout(onClearHighlight, 4000);
+                    }}
                     onSetLabelMap={setLabelMap} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
@@ -1587,10 +1634,15 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, rowIds, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
+  rows: Record<string, unknown>[];
+  rowIds: string[];
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
+  onConfirmRange: (id: string) => void;
+  onApplyOutOfRange: (id: string, action: 'missing' | 'widen', values: number[]) => Promise<void>;
+  onHighlightCell: (rowIndex: number) => void;
   onSetLabelMap: (id: string, lm: { label: string; value: number }[]) => void;
   onToggleOutput: (id: string, output: ScoreOutput) => void;
   onSetCustomFormula: (id: string, f: string) => void;
@@ -1678,7 +1730,7 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
         {subscales.length === 0 && (
           <ScaleCardCompact name={overallScale.name} scaleType={overallScale.scaleType} scoringMethod={overallScale.scoringMethod} customFormula={overallScale.customFormula}
             showOutputs={shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod)}
-            minValue={overallScale.minValue} maxValue={overallScale.maxValue} labelMap={overallScale.labelMap}
+            minValue={overallScale.minValue} maxValue={overallScale.maxValue} labelMap={overallScale.labelMap} confirmed={overallScale.confirmed}
             itemCols={overallScale.items.map((i) => i.column)}
             onSetScoringMethod={(m) => onSetOverallScale({ scoringMethod: m })}
             onToggleOutput={() => {}}
@@ -1694,7 +1746,7 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
         {subscales.map((sub) => (
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
             showOutputs={shownScoreOutputs(sub.showOutputs, sub.scoringMethod)}
-            minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap}
+            minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap} confirmed={sub.confirmed}
             itemCols={sub.items.map((i) => i.column)}
             onSetScoringMethod={() => {}}
             onToggleOutput={(output) => onToggleOutput(sub.id, output)}
@@ -1702,6 +1754,11 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
             onSetCustomFormula={(f) => onSetCustomFormula(sub.id, f)}
             onSetScaleType={(t) => onSetScaleType(sub.id, t)}
             onSetScaleRange={(min, max) => onSetScaleRange(sub.id, min, max)}
+            onConfirmRange={() => onConfirmRange(sub.id)}
+            rows={rows}
+            rowIds={rowIds}
+            onApplyOutOfRange={(action, values) => onApplyOutOfRange(sub.id, action, values)}
+            onHighlightCell={onHighlightCell}
             onSetLabelMap={(lm) => onSetLabelMap(sub.id, lm)}
             onAutoDetect={() => onAutoDetect(sub.id)}
             formulaPreviewFn={formulaPreviewFn}
@@ -1712,15 +1769,21 @@ function ScalesPanel({ subscales, onSetScaleType, onSetScaleRange, onSetLabelMap
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, itemCols, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, itemCols, rows = [], rowIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
+  confirmed?: boolean;
+  rows?: Record<string, unknown>[];
+  rowIds?: string[];
+  onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[]) => Promise<void>;
+  onHighlightCell?: (rowIndex: number) => void;
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
   onToggleOutput: (output: ScoreOutput) => void;
   onSetCustomFormula: (f: string) => void;
   onSetScaleType: (t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (min: number | null, max: number | null) => void;
+  onConfirmRange?: () => void;
   onSetLabelMap: (lm: { label: string; value: number }[]) => void;
   onAutoDetect: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
@@ -1728,12 +1791,98 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const customVisible = multipleOutputs ? showOutputs.includes('custom') : scoringMethod === 'custom';
   const formulaError = customVisible && customFormula ? validateFormula(customFormula, itemCols) : null;
   const preview = customVisible && customFormula ? formulaPreviewFn(customFormula, itemCols) : '';
+  const rangeOutliers = scaleType === 'numeric' && minValue !== null && maxValue !== null
+    ? assessRangeOutliers(itemCols.flatMap((column) => rows.map((row) => row[column])), { min: minValue, max: maxValue })
+    : null;
+  const affectedCells = rangeOutliers && minValue !== null && maxValue !== null
+    ? rows.flatMap((row, rowIndex) => itemCols.flatMap((column) => {
+        const value = typeof row[column] === 'number' ? row[column] : Number(row[column]);
+        return Number.isFinite(value) && (value < minValue || value > maxValue)
+          ? [{ column, rowIndex, value }] : [];
+      }))
+    : [];
+  const mixedRanges = multipleOutputs && itemCols.length > 1
+    ? (() => {
+        try {
+          return detectMixedRanges(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])));
+        } catch {
+          return null;
+        }
+      })()
+    : null;
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between mb-2">
-        <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
-        <button onClick={onAutoDetect} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Auto</button>
+        <div className="flex items-center gap-2 min-w-0">
+          <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
+          {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
+            <span className="text-xs text-secondary-500 whitespace-nowrap">
+              Detected: {minValue}-{maxValue} scale
+            </span>
+          )}
+          {mixedRanges?.mixed && (
+            <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
+              Observed ranges differ by item: {mixedRanges.items.map(({ item, range }) => `${item} ${range.min}-${range.max}`).join(', ')}. Confirm the intended range.
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {multipleOutputs && (
+            <button
+              type="button"
+              onClick={onConfirmRange}
+              className={`text-xs px-2 py-1 rounded-md border ${confirmed ? 'border-secondary-200 text-secondary-500' : 'border-primary-300 text-primary-700 bg-primary-50'}`}
+            >
+              {confirmed ? 'Range confirmed' : 'Confirm range'}
+            </button>
+          )}
+          <button onClick={onAutoDetect} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Auto</button>
+        </div>
       </div>
+      {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
+        <div className="text-xs text-secondary-500 mb-2">
+          <span className={confirmed ? 'text-success-700' : 'text-warning-700'}>
+            {confirmed ? 'confirmed' : 'not confirmed'}
+          </span>
+          {!confirmed && <span> — suggestions can be changed before confirming.</span>}
+        </div>
+      )}
+      {multipleOutputs && rangeOutliers && rangeOutliers.count > 0 && (
+        <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
+          <div className="mb-1">
+            {minValue}-{maxValue} detected. {rangeOutliers.count} value{rangeOutliers.count === 1 ? '' : 's'} outside (
+            {affectedCells.map((cell, index) => (
+              <React.Fragment key={`${cell.column}-${cell.rowIndex}`}>
+                {index > 0 && ', '}
+                <button
+                  type="button"
+                  className="underline hover:text-warning-950"
+                  onClick={() => onHighlightCell?.(cell.rowIndex)}
+                >
+                  {cell.column}: {rowIds[cell.rowIndex] ?? `row ${cell.rowIndex + 1}`}
+                </button>
+              </React.Fragment>
+            ))}
+            ).
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'missing' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
+              onClick={() => onApplyOutOfRange?.('missing', rangeOutliers.values)}
+            >
+              Treat as missing
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'widen' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
+              onClick={() => onApplyOutOfRange?.('widen', rangeOutliers.values)}
+            >
+              Widen range
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-1 mb-2">
         {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
         {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
@@ -1795,9 +1944,9 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
       )}
       {scaleType === 'numeric' && (
         <div className="flex items-center gap-2">
-          <input type="number" value={minValue ?? ''} onChange={(e) => onSetScaleRange(e.target.value ? Number(e.target.value) : null, maxValue)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Min" />
+          <input type="number" value={minValue ?? ''} onChange={(e) => onSetScaleRange(e.target.value ? Number(e.target.value) : null, maxValue)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Min" aria-label={`${name} minimum`} />
           <span className="text-secondary-400 text-xs">to</span>
-          <input type="number" value={maxValue ?? ''} onChange={(e) => onSetScaleRange(minValue, e.target.value ? Number(e.target.value) : null)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Max" />
+          <input type="number" value={maxValue ?? ''} onChange={(e) => onSetScaleRange(minValue, e.target.value ? Number(e.target.value) : null)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Max" aria-label={`${name} maximum`} />
         </div>
       )}
       {scaleType === 'categorical' && (
