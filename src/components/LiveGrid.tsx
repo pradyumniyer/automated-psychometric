@@ -33,6 +33,8 @@ interface LiveGridProps {
   onToggleFilter: () => void;
   highlightRowIndex: number | null;
   highlightRef: React.RefObject<HTMLTableRowElement>;
+  highlightCell: { rowIndex: number; columnKey: string } | null;
+  highlightCellRef: React.RefObject<HTMLTableCellElement>;
   summary: SummaryData;
   showSummarySum: boolean;
   showSummaryMean: boolean;
@@ -42,7 +44,7 @@ interface LiveGridProps {
 
 export function LiveGrid({
   groups, rows, realRowCount, excludedRows, onToggleRow,
-  showExcludedOnly, onToggleFilter, highlightRowIndex, highlightRef,
+  showExcludedOnly, onToggleFilter, highlightRowIndex, highlightRef, highlightCell, highlightCellRef,
   summary, showSummarySum, showSummaryMean, hasScoring, maxDisplayRows = 200,
 }: LiveGridProps) {
   const displayRows = rows.slice(0, maxDisplayRows);
@@ -173,7 +175,9 @@ export function LiveGrid({
                     groups.map((g) => (
                       <React.Fragment key={g.name + '-row-' + i}>
                         {g.columns.map((col) => (
-                          <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap max-w-[180px] truncate border-r border-secondary-100 last:border-r-0 ${colTypeColors[col.type] || ''}`}>
+                          <td key={col.key}
+                            ref={highlightCell?.rowIndex === realIdx && highlightCell.columnKey === col.key ? highlightCellRef : undefined}
+                            className={`px-2 py-1.5 whitespace-nowrap max-w-[180px] truncate border-r border-secondary-100 last:border-r-0 ${highlightCell?.rowIndex === realIdx && highlightCell.columnKey === col.key ? 'bg-accent-200 ring-2 ring-inset ring-accent-500' : colTypeColors[col.type] || ''}`}>
                             {renderCell(row, col)}
                           </td>
                         ))}
@@ -181,7 +185,9 @@ export function LiveGrid({
                     ))
                   ) : (
                     flatColumns.map((col) => (
-                      <td key={col.key} className={`px-2 py-1.5 whitespace-nowrap max-w-[180px] truncate border-r border-secondary-100 last:border-r-0 ${colTypeColors[col.type] || ''}`}>
+                      <td key={col.key}
+                        ref={highlightCell?.rowIndex === realIdx && highlightCell.columnKey === col.key ? highlightCellRef : undefined}
+                        className={`px-2 py-1.5 whitespace-nowrap max-w-[180px] truncate border-r border-secondary-100 last:border-r-0 ${highlightCell?.rowIndex === realIdx && highlightCell.columnKey === col.key ? 'bg-accent-200 ring-2 ring-inset ring-accent-500' : colTypeColors[col.type] || ''}`}>
                         {renderCell(row, col)}
                       </td>
                     ))

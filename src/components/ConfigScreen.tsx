@@ -38,6 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
+import { getDisplayIds } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -66,14 +67,13 @@ interface SheetInfo { name: string; rows: number; cols: number; }
 type SaveState = 'idle' | 'saving' | 'saved';
 
 export function ConfigScreen({
-  project, highlightRowIndex, onHighlightRow, onClearHighlight,
+  project, highlightRowIndex, onClearHighlight,
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
   showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
 }: {
   project: Project;
   highlightRowIndex: number | null;
-  onHighlightRow: (rowIndex: number) => void;
   onClearHighlight: () => void;
   excludedRows: Set<number>;
   onToggleRowExclusion: (rowIndex: number) => Promise<void>;
@@ -126,6 +126,7 @@ export function ConfigScreen({
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [activeSubscaleId, setActiveSubscaleId] = useState<string | null>(null);
+  const [highlightCell, setHighlightCell] = useState<{ rowIndex: number; columnKey: string } | null>(null);
 
   const [activeStep, setActiveStep] = useState<'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring'>('demographics');
   const [leftPanelWidth, setLeftPanelWidth] = useState(280);
@@ -135,6 +136,7 @@ export function ConfigScreen({
   const [showUpdateTemplate, setShowUpdateTemplate] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const highlightRef = useRef<HTMLTableRowElement>(null);
+  const highlightCellRef = useRef<HTMLTableCellElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const performAutoSaveRef = useRef<() => Promise<void>>(async () => {});
@@ -177,6 +179,13 @@ export function ConfigScreen({
       return () => clearTimeout(timer);
     }
   }, [highlightRowIndex, onClearHighlight]);
+
+  useEffect(() => {
+    if (highlightCell == null || !highlightCellRef.current) return;
+    highlightCellRef.current.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    const timer = setTimeout(() => setHighlightCell(null), 4000);
+    return () => clearTimeout(timer);
+  }, [highlightCell]);
 
   // ── Load datasets ──
   const loadDatasets = useCallback(async () => {
@@ -1211,7 +1220,8 @@ export function ConfigScreen({
                 )}
                 {activeStep === 'scales' && (
                   <ScalesPanel
-                    subscales={subscaleStates} rows={dataset?.rows ?? []} rowIds={dataset?.row_ids ?? []}
+                    subscales={subscaleStates} rows={dataset?.rows ?? []}
+                    displayIds={getDisplayIds(dataset?.rows ?? [], demoCols)}
                     onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
                     onConfirmRange={confirmScaleRange}
                     onApplyOutOfRange={async (id, action, values) => {
@@ -1234,10 +1244,7 @@ export function ConfigScreen({
                       setHistory(await fetchHistory(dataset.id));
                       markDirty();
                     }}
-                    onHighlightCell={(rowIndex) => {
-                      onHighlightRow(rowIndex);
-                      window.setTimeout(onClearHighlight, 4000);
-                    }}
+                    onHighlightCell={(rowIndex, columnKey) => setHighlightCell({ rowIndex, columnKey })}
                     onSetLabelMap={setLabelMap} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
@@ -1333,6 +1340,8 @@ export function ConfigScreen({
                 onToggleFilter={() => setShowExcludedOnly(!showExcludedOnly)}
                 highlightRowIndex={highlightRowIndex}
                 highlightRef={highlightRef}
+                highlightCell={highlightCell}
+                highlightCellRef={highlightCellRef}
                 summary={summary}
                 showSummarySum={showSummarySum}
                 showSummaryMean={showSummaryMean}
@@ -1635,15 +1644,15 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, rowIds, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
-  rowIds: string[];
+  displayIds: string[];
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
   onConfirmRange: (id: string) => void;
   onApplyOutOfRange: (id: string, action: 'missing' | 'widen', values: number[]) => Promise<void>;
-  onHighlightCell: (rowIndex: number) => void;
+  onHighlightCell: (rowIndex: number, columnKey: string) => void;
   onSetLabelMap: (id: string, lm: { label: string; value: number }[]) => void;
   onToggleOutput: (id: string, output: ScoreOutput) => void;
   onSetCustomFormula: (id: string, f: string) => void;
@@ -1757,7 +1766,7 @@ function ScalesPanel({ subscales, rows, rowIds, onSetScaleType, onSetScaleRange,
             onSetScaleRange={(min, max) => onSetScaleRange(sub.id, min, max)}
             onConfirmRange={() => onConfirmRange(sub.id)}
             rows={rows}
-            rowIds={rowIds}
+            displayIds={displayIds}
             onApplyOutOfRange={(action, values) => onApplyOutOfRange(sub.id, action, values)}
             onHighlightCell={onHighlightCell}
             onSetLabelMap={(lm) => onSetLabelMap(sub.id, lm)}
@@ -1770,15 +1779,15 @@ function ScalesPanel({ subscales, rows, rowIds, onSetScaleType, onSetScaleRange,
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, itemCols, rows = [], rowIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, itemCols, rows = [], displayIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
   confirmed?: boolean;
   rows?: Record<string, unknown>[];
-  rowIds?: string[];
+  displayIds?: string[];
   onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[]) => Promise<void>;
-  onHighlightCell?: (rowIndex: number) => void;
+  onHighlightCell?: (rowIndex: number, columnKey: string) => void;
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
   onToggleOutput: (output: ScoreOutput) => void;
   onSetCustomFormula: (f: string) => void;
@@ -1796,7 +1805,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
     ? assessRangeOutliers(itemCols.flatMap((column) => rows.map((row) => row[column])), { min: minValue, max: maxValue })
     : null;
   const affectedCells = rangeOutliers && minValue !== null && maxValue !== null
-    ? findOutOfRangeCells(rows, itemCols, { min: minValue, max: maxValue }, rowIds)
+    ? findOutOfRangeCells(rows, itemCols, { min: minValue, max: maxValue }, displayIds)
     : [];
   const mixedRanges = multipleOutputs && itemCols.length > 1
     ? (() => {
@@ -1854,7 +1863,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
                 <button
                   type="button"
                   className="underline hover:text-warning-950"
-                  onClick={() => onHighlightCell?.(cell.rowIndex)}
+                  onClick={() => onHighlightCell?.(cell.rowIndex, cell.column)}
                 >
                   {cell.column}: {cell.rowId ?? `row ${cell.rowIndex + 1}`}
                 </button>

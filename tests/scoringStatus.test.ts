@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 import type { ScoringResult } from '../src/scientific/scoring';
 import { scoreDataset } from '../src/scientific/scoring';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '../src/lib/scoringStatus';
+import {
+  getDisplayIds,
+  hasDifferentScaleItem,
+  responseScaleSummaryLine,
+  shouldOpenResponseScaleCard,
+  waitingSubscaleStatus,
+} from '../src/lib/responseScaleUi';
 
 function scoringResult(
   rowIds: string[],
@@ -37,6 +44,48 @@ describe('scoring status', () => {
     expect(getUnscoredRowSummary(result, ['P1', 'P2', 'P3', 'P4'])).toBe(
       '3 rows have at least one score missing because an item is missing, N/A or outside the scale: P1, P2, P4',
     );
+  });
+
+  it('uses detected respondent IDs and row numbers without exposing internal IDs', () => {
+    expect(getDisplayIds(
+      [{ ID: 'P26' }, { ID: '' }, { value: 3 }],
+      [{ column_name: 'ID', detected_by: 'ID column' }],
+    )).toEqual(['P26', 'row 2', 'row 3']);
+  });
+
+  it('builds the response-scale card summary line', () => {
+    expect(responseScaleSummaryLine({
+      name: 'Subscale 1',
+      itemCount: 5,
+      min: 1,
+      max: 5,
+      confirmed: true,
+      outputs: ['Sum', 'Mean'],
+    })).toBe('5 items - scale 1-5 - Confirmed - shows Sum, Mean');
+  });
+
+  it('opens only cards that need a range or mixed-scale decision', () => {
+    expect(shouldOpenResponseScaleCard(true, true, false)).toBe(false);
+    expect(shouldOpenResponseScaleCard(false, true, false)).toBe(true);
+    expect(shouldOpenResponseScaleCard(true, false, true)).toBe(true);
+  });
+
+  it('names one or several waiting subscales', () => {
+    expect(waitingSubscaleStatus(['Subscale 1'])).toBe(
+      'Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items).',
+    );
+    expect(waitingSubscaleStatus(['Subscale 1', 'Subscale 2'])).toBe(
+      'Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items). and 1 more.',
+    );
+  });
+
+  it('flags only item ranges with more than ten percent outside the scale', () => {
+    expect(hasDifferentScaleItem({
+      Q7: [...Array(19).fill(3), 0],
+      Q8: [1, 2, 3, 4, 5, 6, 7],
+    }, 1, 5)).toEqual([
+      { item: 'Q8', min: 1, max: 7 },
+    ]);
   });
 
   it('uses singular wording and lists at most five IDs with the remaining count', () => {
