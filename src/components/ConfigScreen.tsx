@@ -32,13 +32,13 @@ import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
-import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, detectMixedRanges, findOutOfRangeCells } from '@/scientific/responseScales';
+import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, findOutOfRangeCells } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { getDisplayIds } from '@/lib/responseScaleUi';
+import { getDisplayIds, hasDifferentScaleItem } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -1807,15 +1807,9 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const affectedCells = rangeOutliers && minValue !== null && maxValue !== null
     ? findOutOfRangeCells(rows, itemCols, { min: minValue, max: maxValue }, displayIds)
     : [];
-  const mixedRanges = multipleOutputs && itemCols.length > 1
-    ? (() => {
-        try {
-          return detectMixedRanges(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])));
-        } catch {
-          return null;
-        }
-      })()
-    : null;
+  const differentScaleItems = multipleOutputs && minValue !== null && maxValue !== null
+    ? hasDifferentScaleItem(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])), minValue, maxValue)
+    : [];
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between mb-2">
@@ -1826,9 +1820,11 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
               Detected: {minValue}-{maxValue} scale
             </span>
           )}
-          {mixedRanges?.mixed && (
+          {differentScaleItems.length > 0 && (
             <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
-              Observed ranges differ by item: {mixedRanges.items.map(({ item, range }) => `${item} ${range.min}-${range.max}`).join(', ')}. Confirm the intended range.
+              {differentScaleItems.map(({ item, min: itemMin, max: itemMax }) => (
+                <div key={item}>{item} may use a different scale than the rest (values {itemMin}-{itemMax}).</div>
+              ))}
             </div>
           )}
         </div>
