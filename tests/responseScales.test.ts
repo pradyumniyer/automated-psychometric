@@ -8,6 +8,7 @@ import {
   createOutOfRangeHistoryEntry,
   detectConventionalRange,
   detectMixedRanges,
+  findOutOfRangeCells,
   matchResponsePreset,
   resolveResponse,
   type ResponseScaleV2,
@@ -29,6 +30,15 @@ const fixtureScale: ResponseScaleV2 = {
 };
 
 describe("resolveResponse", () => {
+  it("identifies affected item cells without changing their raw values", () => {
+    expect(findOutOfRangeCells(
+      [{ Q3: 4, Q4: 7 }, { Q3: 5, Q4: 1 }],
+      ["Q3", "Q4"],
+      { min: 1, max: 5 },
+      ["P25", "P26"],
+    )).toEqual([{ column: "Q4", rowIndex: 0, rowId: "P25", value: 7 }]);
+  });
+
   it("copies only response-scale settings and confirms recipients only when the first is confirmed", () => {
     const scales = [
       { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true, showOutputs: ["sum"] },

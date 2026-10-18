@@ -94,6 +94,27 @@ export interface RangeOutlierAssessment {
   suggestedAction: OutOfRangeAction;
 }
 
+export interface OutOfRangeCell {
+  column: string;
+  rowIndex: number;
+  rowId?: string;
+  value: number;
+}
+
+export function findOutOfRangeCells(
+  rows: Record<string, unknown>[],
+  columns: string[],
+  range: NumericRange,
+  rowIds: string[] = [],
+): OutOfRangeCell[] {
+  return rows.flatMap((row, rowIndex) => columns.flatMap((column) => {
+    const raw = row[column];
+    const value = typeof raw === "number" ? raw : typeof raw === "string" ? parseNumeric(normalizeResponseText(raw)) : null;
+    if (value === null || (value >= range.min && value <= range.max)) return [];
+    return [{ column, rowIndex, ...(rowIds[rowIndex] ? { rowId: rowIds[rowIndex] } : {}), value }];
+  }));
+}
+
 export interface OutOfRangeActionLog {
   action: OutOfRangeAction;
   count: number;

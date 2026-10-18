@@ -32,7 +32,7 @@ import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
-import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, detectMixedRanges } from '@/scientific/responseScales';
+import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, detectMixedRanges, findOutOfRangeCells } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -1795,11 +1795,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
     ? assessRangeOutliers(itemCols.flatMap((column) => rows.map((row) => row[column])), { min: minValue, max: maxValue })
     : null;
   const affectedCells = rangeOutliers && minValue !== null && maxValue !== null
-    ? rows.flatMap((row, rowIndex) => itemCols.flatMap((column) => {
-        const value = typeof row[column] === 'number' ? row[column] : Number(row[column]);
-        return Number.isFinite(value) && (value < minValue || value > maxValue)
-          ? [{ column, rowIndex, value }] : [];
-      }))
+    ? findOutOfRangeCells(rows, itemCols, { min: minValue, max: maxValue }, rowIds)
     : [];
   const mixedRanges = multipleOutputs && itemCols.length > 1
     ? (() => {
@@ -1859,7 +1855,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
                   className="underline hover:text-warning-950"
                   onClick={() => onHighlightCell?.(cell.rowIndex)}
                 >
-                  {cell.column}: {rowIds[cell.rowIndex] ?? `row ${cell.rowIndex + 1}`}
+                  {cell.column}: {cell.rowId ?? `row ${cell.rowIndex + 1}`}
                 </button>
               </React.Fragment>
             ))}
