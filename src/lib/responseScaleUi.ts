@@ -55,6 +55,14 @@ export function waitingSubscaleStatus(names: string[]): string | null {
   return `Scoring is waiting: confirm the scale ranges for ${names[0]} and ${names.length - 1} more (they have reverse items).`;
 }
 
+export function waitingSubscaleTarget(
+  subscales: { id: string; name: string }[],
+  waitingIds: string[],
+): { id: string; name: string } | null {
+  const firstId = waitingIds[0];
+  return firstId ? subscales.find((subscale) => subscale.id === firstId) ?? null : null;
+}
+
 export function outOfRangeDecisionMatches(
   decision: OutOfRangeDecision | undefined,
   cells: Pick<OutOfRangeDecisionCell, 'cellKey'>[],

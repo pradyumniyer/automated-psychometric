@@ -38,7 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWideningImpact, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, type OutOfRangeDecision } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWideningImpact, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, waitingSubscaleTarget, type OutOfRangeDecision } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -120,7 +120,7 @@ export function ConfigScreen({
   const [showExcludedOnly, setShowExcludedOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [scoring, setScoring] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string; targetId?: string } | null>(null);
   const [scaleFocusId, setScaleFocusId] = useState<string | null>(null);
   const [sheetInfos, setSheetInfos] = useState<SheetInfo[] | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -682,7 +682,7 @@ export function ConfigScreen({
       subscale.items.some((item) => item.reverse) && subscale.confirmed !== true,
     );
     if (waiting.length > 0) {
-      setStatusMsg({ type: 'waiting', text: waitingSubscaleStatus(waiting.map((subscale) => subscale.name))! });
+      setStatusMsg({ type: 'waiting', text: waitingSubscaleStatus(waiting.map((subscale) => subscale.name))!, targetId: waiting[0].id });
       setScaleFocusId(waiting[0].id);
       setActiveStep('scales');
       return;
@@ -1186,13 +1186,19 @@ export function ConfigScreen({
               type="button"
               className="ml-auto underline font-medium"
               onClick={() => {
-                const waiting = subscaleStates.find((subscale) => subscale.items.some((item) => item.reverse) && subscale.confirmed !== true);
+                const waiting = waitingSubscaleTarget(
+                  subscaleStates.map((subscale) => ({ id: subscale.id, name: subscale.name })),
+                  statusMsg.targetId ? [statusMsg.targetId] : [],
+                );
                 if (!waiting) return;
                 setActiveStep('scales');
                 setScaleFocusId(waiting.id);
               }}
             >
-              Go to {subscaleStates.find((subscale) => subscale.items.some((item) => item.reverse) && subscale.confirmed !== true)?.name ?? 'subscale'}
+              Go to {waitingSubscaleTarget(
+                subscaleStates.map((subscale) => ({ id: subscale.id, name: subscale.name })),
+                statusMsg.targetId ? [statusMsg.targetId] : [],
+              )?.name ?? 'subscale'}
             </button>
           )}
           <button onClick={() => setStatusMsg(null)}><X className="w-3.5 h-3.5" /></button>

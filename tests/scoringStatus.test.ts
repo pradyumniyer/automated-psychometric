@@ -15,6 +15,7 @@ import {
   outOfRangeDecisionMatches,
   outOfRangeDecisionSummary,
   hasReverseWideningImpact,
+  waitingSubscaleTarget,
 } from '../src/lib/responseScaleUi';
 
 function scoringResult(
@@ -82,6 +83,10 @@ describe('scoring status', () => {
     expect(waitingSubscaleStatus(['Subscale 1', 'Subscale 2'])).toBe(
       'Scoring is waiting: confirm the scale ranges for Subscale 1 and 1 more (they have reverse items).',
     );
+    expect(waitingSubscaleTarget(
+      [{ id: 's1', name: 'Subscale 1' }, { id: 's2', name: 'Subscale 2' }],
+      ['s1', 's2'],
+    )).toEqual({ id: 's1', name: 'Subscale 1' });
   });
 
   it('keeps an out-of-range decision only while the same cells remain out of range', () => {
