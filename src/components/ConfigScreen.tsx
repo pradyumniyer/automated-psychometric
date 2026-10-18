@@ -706,7 +706,7 @@ export function ConfigScreen({
     }
     setScoring(true); setStatusMsg(null);
     try {
-      let subConfigs: SubscaleConfig[] = subscaleStates.map((s) => ({
+      const subConfigs: SubscaleConfig[] = subscaleStates.map((s) => ({
         id: s.id, name: s.name, items: s.items, scoringMethod: s.scoringMethod,
         showOutputs: shownScoreOutputs(s.showOutputs, s.scoringMethod),
         customFormula: s.customFormula || null,
@@ -795,10 +795,15 @@ export function ConfigScreen({
   const saveAsTemplate = async (name: string, description: string, instrument: string): Promise<string | null> => {
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) return validation.error;
-    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput, {
-      ...overallSettings,
-      bands: bandStates[overallScale.name] ?? [],
-    });
+    const def = buildTemplateDefinition(
+      subscaleStates,
+      bandStates,
+      bandStatesByOutput,
+      realSubscales.length >= 2 ? {
+        ...overallSettings,
+        bands: bandStates[overallScale.name] ?? [],
+      } : undefined,
+    );
     try {
       await templateRepository.save({ name, description, instrument, definition: def, version: 1 });
       await logAction(project.id, 'template_save', `Saved template: ${name}`);
@@ -847,7 +852,7 @@ export function ConfigScreen({
       const scale = def.responseScales.find((item) => item.subscaleName === definition.name);
       const scoreSettings = templateSubscaleScoreSettings(def, definition.name);
       nextSubscales.push({
-        id: crypto.randomUUID(),
+        id: definition.name === 'Overall scale' ? 'auto-overall' : crypto.randomUUID(),
         name: definition.name,
         items: matched,
         scoringMethod: scoreSettings.showOutputs[0],
@@ -926,10 +931,15 @@ export function ConfigScreen({
     if (!dataset || !linkedTemplate) return;
     const validation = validateTemplateConfig(subscaleStates);
     if (!validation.valid) { setStatusMsg({ type: 'error', text: validation.error! }); return; }
-    const def = buildTemplateDefinition(subscaleStates, bandStates, bandStatesByOutput, {
-      ...overallSettings,
-      bands: bandStates[overallScale.name] ?? [],
-    });
+    const def = buildTemplateDefinition(
+      subscaleStates,
+      bandStates,
+      bandStatesByOutput,
+      realSubscales.length >= 2 ? {
+        ...overallSettings,
+        bands: bandStates[overallScale.name] ?? [],
+      } : undefined,
+    );
     try {
       await templateRepository.update(linkedTemplate.id, { definition: def, version: linkedTemplate.version + 1 });
       await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
@@ -1299,17 +1309,8 @@ export function ConfigScreen({
                     onSetLabelMap={setLabelMap} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
-                    overallScale={overallScale} onSetOverallScale={(patch) => { setOverallScale((prev) => ({ ...prev, ...patch })); markDirty(); }}
                     overallSettings={overallSettings}
                     onSetOverallSettings={(patch) => { setOverallSettings((prev) => ({ ...prev, ...patch })); markDirty(); }}
-                    onAutoDetectOverall={() => {
-                      if (!dataset) return;
-                      const itemCols = allColumns.filter((c) => !demoColumnNames.has(c));
-                      if (itemCols.length === 0) return;
-                      const det = detectScale(dataset.headers, dataset.rows as Record<string, unknown>[], itemCols);
-                      setOverallScale({ ...overallScale, scaleType: det.scaleType, minValue: det.minValue, maxValue: det.maxValue, labelMap: det.scaleType === 'categorical' ? det.uniqueValues.map((label, i) => ({ label, value: i + 1 })) : [] });
-                      setStatusMsg({ type: 'success', text: det.suggestion }); markDirty();
-                    }}
                     formulaPreviewFn={formulaPreview}
                   />
                 )}
@@ -1695,7 +1696,7 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onChangeOutOfRangeDecision, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onChangeOutOfRangeDecision, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
   displayIds: string[];
@@ -1712,11 +1713,8 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   onSetCustomFormula: (id: string, f: string) => void;
   onAutoDetect: (id: string) => void;
   onApplyToAll: () => void;
-  overallScale: SubscaleState;
   overallSettings: OverallSettings;
   onSetOverallSettings: (patch: Partial<OverallSettings>) => void;
-  onSetOverallScale: (patch: Partial<SubscaleState>) => void;
-  onAutoDetectOverall: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
 }) {
   const [openCardId, setOpenCardId] = useState<string | null>(null);

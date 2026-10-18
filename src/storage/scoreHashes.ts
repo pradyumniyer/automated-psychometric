@@ -1,10 +1,24 @@
-import { normalizeResponseMatrix, type SubscaleConfig } from '../scientific/scoring';
+import { buildAutoScale, normalizeResponseMatrix, type SubscaleConfig } from '../scientific/scoring';
 import type { Dataset } from '../types/domain';
 import type { ScoreResultRecord, SurveyConfigRecord } from './schema';
 
 export const SCIENTIFIC_SPEC_VERSION = 'scientific-spec-v3';
 
-export function buildSubscaleConfigs(config: SurveyConfigRecord): SubscaleConfig[] {
+export function buildSubscaleConfigs(
+  config: SurveyConfigRecord,
+  dataset?: Pick<Dataset, 'headers' | 'rows'>,
+): SubscaleConfig[] {
+  const automatic = config.subscales.length === 0 && dataset
+    ? buildAutoScale(
+        dataset.headers,
+        config.demographic_columns.map((column) => column.column_name),
+        dataset.rows,
+        config.id_columns,
+      )
+    : null;
+  if (automatic) {
+    return [automatic];
+  }
   const scales = config.subscales.length > 0
     ? config.subscales
     : config.overall_scale ? [config.overall_scale] : [];

@@ -312,3 +312,27 @@ export function fromSurveyConfigRecord(
     ),
   };
 }
+
+export function ensureAutomaticSubscale(
+  config: SurveyConfigRecord,
+  dataset: { headers: string[]; rows: Record<string, unknown>[] },
+): SurveyConfigRecord {
+  if (config.subscales.length > 0) return config;
+  const adapted = fromSurveyConfigRecord(config, {
+    headers: dataset.headers,
+    rows: dataset.rows,
+    idColumns: config.id_columns,
+  });
+  return toSurveyConfigRecord({
+    datasetId: config.dataset_id,
+    projectId: config.demographic_columns[0]?.project_id ?? '',
+    headers: dataset.headers,
+    demographicColumns: adapted.demographicColumns,
+    subscales: adapted.subscales,
+    bands: adapted.bands,
+    bandsByOutput: adapted.bandsByOutput,
+    overallScale: null,
+    overallSettings: adapted.overallSettings,
+    linkedTemplateId: config.linked_template_id,
+  }, config);
+}

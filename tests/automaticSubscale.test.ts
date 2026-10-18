@@ -3,7 +3,9 @@ import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import { getUnscoredRowSummary } from '../src/lib/scoringStatus';
 import { buildAutoScale, isAutomaticSubscale, scoreDataset } from '../src/scientific/scoring';
-import { fromSurveyConfigRecord } from '../src/storage/viewAdapters';
+import { ensureAutomaticSubscale, fromSurveyConfigRecord } from '../src/storage/viewAdapters';
+import { buildSubscaleConfigs, createScoreHashes } from '../src/storage/scoreHashes';
+import type { Dataset } from '../src/types/domain';
 import type { SurveyConfigRecord } from '../src/storage/schema';
 
 function fixtureA() {
@@ -121,5 +123,45 @@ describe('automatic overall subscale', () => {
       maxValue: 5,
       confirmed: true,
     });
+  });
+
+  it('invalidates the score cache when automatic settings change', async () => {
+    const { rows, headers } = fixtureA();
+    const dataset: Dataset = {
+      id: 'dataset',
+      project_id: 'project',
+      file_name: 'fixture.csv',
+      sheet_name: null,
+      headers,
+      rows,
+      column_meta: {},
+      row_ids: rows.map((row) => row.ID),
+      row_count: rows.length,
+      col_count: headers.length,
+      linked_template_id: null,
+      created_at: new Date(0).toISOString(),
+    };
+    const initial = ensureAutomaticSubscale(emptyConfig(dataset.id), dataset);
+    const changed = {
+      ...initial,
+      subscales: initial.subscales.map((subscale) => ({
+        ...subscale,
+        response_scale: { ...subscale.response_scale, max_value: 6 },
+      })),
+    };
+    const initialHashes = await createScoreHashes(
+      dataset,
+      initial,
+      buildSubscaleConfigs(initial, dataset),
+      [],
+    );
+    const changedHashes = await createScoreHashes(
+      dataset,
+      changed,
+      buildSubscaleConfigs(changed, dataset),
+      [],
+    );
+
+    expect(changedHashes.config_hash).not.toBe(initialHashes.config_hash);
   });
 });

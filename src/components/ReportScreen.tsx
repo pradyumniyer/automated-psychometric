@@ -9,6 +9,7 @@ import {
 import type { Project, Dataset, DemographicColumn, SubscaleGroup, ResponseScale, SubscaleItem } from '@/types/domain';
 import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/storage/repositories';
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
+import { ensureAutomaticSubscale } from '@/storage/viewAdapters';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { mean, sd } from '@/scientific/descriptives';
 import { Button, Card } from './ui';
@@ -67,15 +68,16 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
     let cancelled = false;
     (async () => {
       try {
-        const config = await surveyConfigRepository.get(activeDatasetId);
-        if (!config) throw new Error('Dataset configuration is missing.');
+        const savedConfig = await surveyConfigRepository.get(activeDatasetId);
+        if (!savedConfig) throw new Error('Dataset configuration is missing.');
+        const config = ensureAutomaticSubscale(savedConfig, ds);
         const latest = await scoreRepository.getLatest(activeDatasetId);
         const excludedRowIds = [...excludedRows].map((index) => {
           const rowId = ds.row_ids[index];
           if (!rowId) throw new Error(`Excluded row ${index + 1} has no stable ID.`);
           return rowId;
         });
-        const hashes = await createScoreHashes(ds, config, buildSubscaleConfigs(config), excludedRowIds);
+        const hashes = await createScoreHashes(ds, config, buildSubscaleConfigs(config, ds), excludedRowIds);
         const current = await scoreRepository.getCurrent(activeDatasetId, hashes);
         const result = current?.payload.result as ReturnType<typeof scoreDataset> | undefined;
         const resultIsValid = !!result && Array.isArray(result.headers) && Array.isArray(result.rows);

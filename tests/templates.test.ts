@@ -1,10 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTemplateDefinition,
+  matchTemplateToHeaders,
   templateSubscaleScoreSettings,
 } from '../src/lib/templates';
 
 describe('template score output settings', () => {
+  it('saves and matches the automatic subscale without a separate Overall definition', () => {
+    const template = buildTemplateDefinition([{
+      name: 'Overall scale',
+      items: [
+        { column: 'Q1', order: 0, reverse: false },
+        { column: 'Q2', order: 1, reverse: false },
+      ],
+      scoringMethod: 'sum',
+      showOutputs: ['sum', 'mean'],
+      customFormula: '',
+      scaleType: 'numeric',
+      minValue: 1,
+      maxValue: 5,
+      labelMap: [],
+      confirmed: true,
+    }], {}, {});
+
+    expect(template.overall).toBeUndefined();
+    expect(matchTemplateToHeaders('Automatic', template, ['ID', 'Q1', 'Q2']).matchedCount).toBe(2);
+    expect(matchTemplateToHeaders('Automatic', template, ['ID', 'Other']).unmatchedCount).toBe(2);
+  });
+
   it('round-trips shown outputs and cut-offs for each output', () => {
     const template = buildTemplateDefinition([{
       name: 'Stress',
