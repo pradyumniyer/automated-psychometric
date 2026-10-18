@@ -16,6 +16,7 @@ describe('template score output settings', () => {
       minValue: 1,
       maxValue: 5,
       labelMap: [],
+      confirmed: true,
     }], {}, {
       Stress: {
         sum: [{ name: 'High sum', minScore: 20, maxScore: 25, color: '#ff0000' }],
@@ -24,6 +25,7 @@ describe('template score output settings', () => {
     });
 
     expect(template.subscales[0].showOutputs).toEqual(['sum', 'mean']);
+    expect(template.responseScales[0].confirmed).toBe(true);
     expect(template.interpretationBands.map(({ output }) => output)).toEqual(['sum', 'mean']);
     expect(templateSubscaleScoreSettings(template, 'Stress')).toEqual({
       showOutputs: ['sum', 'mean'],

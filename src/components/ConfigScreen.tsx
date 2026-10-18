@@ -827,6 +827,7 @@ export function ConfigScreen({
         minValue: scale?.minValue ?? null,
         maxValue: scale?.maxValue ?? null,
         labelMap: scale?.labelMap || [],
+        confirmed: scale?.confirmed === true,
         displayOrder: nextSubscales.length,
       });
       nextBandsByOutput[definition.name] = scoreSettings.bandsByOutput;

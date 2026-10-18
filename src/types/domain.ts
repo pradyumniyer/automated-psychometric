@@ -114,6 +114,7 @@ export interface TemplateDefinition {
     minValue: number | null;
     maxValue: number | null;
     labelMap: { label: string; value: number }[];
+    confirmed?: boolean;
   }[];
   interpretationBands: {
     subscaleName: string;
