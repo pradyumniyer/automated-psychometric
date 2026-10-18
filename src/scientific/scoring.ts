@@ -28,6 +28,7 @@ import {
   normalizeResponseText,
   resolveResponse,
   type ResponseScaleV2,
+  detectConventionalRange,
 } from './responseScales';
 
 export type ItemValueState = 'valid' | 'blank' | 'allowed' | 'special_scored' | 'unmapped' | 'out_of_range';
@@ -539,13 +540,51 @@ export function scoreDataset(
 export function buildAutoScale(
   allHeaders: string[],
   demographicColumns: string[],
+  rows: Record<string, unknown>[] = [],
+  idColumns: string[] = [],
 ): SubscaleConfig {
-  const itemColumns = allHeaders.filter((header) => !demographicColumns.includes(header));
+  const excludedColumns = new Set([
+    ...demographicColumns,
+    ...idColumns,
+    ...allHeaders.filter((header) => /^id$/i.test(header)),
+  ]);
+  const itemColumns = allHeaders.filter((header) => !excludedColumns.has(header));
+  const observedValues = rows.flatMap((row) => itemColumns
+    .map((column) => row[column])
+    .filter((value) => value != null && String(value).trim() !== '')
+    .map((value) => String(value).trim()));
+  const numericValues = observedValues
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  const numeric = numericValues.length > 0
+    && numericValues.length / Math.max(observedValues.length, 1) >= 0.8;
+  const conventional = numeric ? detectConventionalRange(numericValues).range : null;
+  const detected = numeric
+    ? {
+        scaleType: 'numeric' as const,
+        minValue: conventional?.min ?? Math.min(...numericValues),
+        maxValue: conventional?.max ?? Math.max(...numericValues),
+        uniqueValues: [] as string[],
+      }
+    : {
+        scaleType: 'categorical' as const,
+        minValue: undefined,
+        maxValue: undefined,
+        uniqueValues: [...new Set(observedValues)],
+      };
   return {
     id: 'auto-overall',
-    name: 'Overall Scale',
+    name: 'Overall scale',
     items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
     scoringMethod: 'sum',
-    responseScale: { scaleType: 'numeric' },
+    responseScale: {
+      scaleType: detected.scaleType,
+      minValue: detected.minValue ?? undefined,
+      maxValue: detected.maxValue ?? undefined,
+      labelMap: detected.scaleType === 'categorical'
+        ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
+        : [],
+      confirmed: true,
+    },
   };
 }

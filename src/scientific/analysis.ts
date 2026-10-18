@@ -36,7 +36,7 @@ export function runFullAnalysis(
   let effectiveSubscales = subscales;
   let usedAutoScale = false;
   if (subscales.length === 0) {
-    effectiveSubscales = [buildAutoScale(rawHeaders, demographicColumns)];
+    effectiveSubscales = [buildAutoScale(rawHeaders, demographicColumns, rawRows)];
     usedAutoScale = true;
   }
 

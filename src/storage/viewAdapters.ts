@@ -8,6 +8,7 @@ import type {
 } from '@/types/domain';
 import type { SurveyConfigRecord } from './schema';
 import { shownScoreOutputs } from '../lib/scoreOutputs';
+import { buildAutoScale } from '../scientific/scoring';
 
 export interface ScreenSubscaleState {
   id: string;
@@ -206,6 +207,18 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
   overallScale: ScreenSubscaleState | null;
   overallSettings: NonNullable<ScreenSurveyConfig['overallSettings']>;
   responseScales: ResponseScale[];
+}
+export function fromSurveyConfigRecord(
+  config: SurveyConfigRecord,
+  dataset?: { headers: string[]; rows: Record<string, unknown>[]; idColumns?: string[] },
+): {
+  demographicColumns: DemographicColumn[];
+  subscales: ScreenSubscaleState[];
+  bands: ScreenSurveyConfig['bands'];
+  bandsByOutput: NonNullable<ScreenSurveyConfig['bandsByOutput']>;
+  overallScale: ScreenSubscaleState | null;
+  overallSettings: NonNullable<ScreenSurveyConfig['overallSettings']>;
+  responseScales: ResponseScale[];
 } {
   const toState = (subscale: NonNullable<SurveyConfigRecord['overall_scale']>): ScreenSubscaleState => ({
     id: subscale.id,
@@ -252,7 +265,43 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
       color: band.color,
     }));
   }
-  const subscales = config.subscales.map(toState);
+  const automatic = config.subscales.length === 0 && dataset
+    ? buildAutoScale(
+        dataset.headers,
+        config.demographic_columns.map((column) => column.column_name),
+        dataset.rows,
+        dataset.idColumns ?? config.id_columns,
+      )
+    : null;
+  const configuredSubscales = automatic
+    ? [{
+        id: automatic.id,
+        project_id: config.demographic_columns[0]?.project_id ?? '',
+        dataset_id: config.dataset_id,
+        name: automatic.name,
+        description: '',
+        items: automatic.items,
+        scoring_method: automatic.scoringMethod,
+        score_outputs: ['sum'] as ScoreOutput[],
+        custom_formula: null,
+        display_order: 0,
+        created_at: new Date(0).toISOString(),
+        response_scale: {
+          id: 'auto-overall-response',
+          project_id: config.demographic_columns[0]?.project_id ?? '',
+          dataset_id: config.dataset_id,
+          subscale_id: automatic.id,
+          scale_type: automatic.responseScale.scaleType,
+          min_value: automatic.responseScale.minValue ?? null,
+          max_value: automatic.responseScale.maxValue ?? null,
+          label_map: automatic.responseScale.labelMap ?? [],
+          confirmed: true,
+          created_at: new Date(0).toISOString(),
+        },
+        bands: [],
+      } as NonNullable<SurveyConfigRecord['overall_scale']>]
+    : config.subscales;
+  const subscales = configuredSubscales.map(toState);
   return {
     demographicColumns: config.demographic_columns,
     subscales,
@@ -267,7 +316,7 @@ export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
         ?? (config.subscales.length > 0 && config.subscales.every((subscale) => subscale.scoring_method === 'mean') ? 'mean' : 'sum'),
       customFormula: config.overall_settings?.custom_formula ?? '',
     },
-    responseScales: config.subscales.flatMap((subscale) =>
+    responseScales: configuredSubscales.flatMap((subscale) =>
       subscale.response_scale ? [subscale.response_scale] : [],
     ),
   };
