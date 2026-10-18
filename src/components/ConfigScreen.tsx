@@ -5,7 +5,7 @@ import {
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
-  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck,
+  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import {
   ActionHistory,
@@ -38,7 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, reverseWideningExplanation } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -119,7 +119,8 @@ export function ConfigScreen({
   const [showExcludedOnly, setShowExcludedOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [scoring, setScoring] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string } | null>(null);
+  const [scaleFocusId, setScaleFocusId] = useState<string | null>(null);
   const [sheetInfos, setSheetInfos] = useState<SheetInfo[] | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [checkedSheets, setCheckedSheets] = useState<Set<string>>(new Set());
@@ -676,6 +677,15 @@ export function ConfigScreen({
   // ── Scoring ──
   const runScoring = async () => {
     if (!dataset) return;
+    const waiting = subscaleStates.filter((subscale) =>
+      subscale.items.some((item) => item.reverse) && subscale.confirmed !== true,
+    );
+    if (waiting.length > 0) {
+      setStatusMsg({ type: 'waiting', text: waitingSubscaleStatus(waiting.map((subscale) => subscale.name))! });
+      setScaleFocusId(waiting[0].id);
+      setActiveStep('scales');
+      return;
+    }
     setScoring(true); setStatusMsg(null);
     try {
       let subConfigs: SubscaleConfig[] = subscaleStates.map((s) => ({
@@ -1166,10 +1176,24 @@ export function ConfigScreen({
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }} />
 
       {statusMsg && (
-        <div className={`px-5 py-2 text-sm flex items-center gap-2 ${statusMsg.type === 'success' ? 'bg-success-50 text-success-700' : statusMsg.type === 'error' ? 'bg-error-50 text-error-700' : 'bg-info-50 text-info-700'}`}>
+        <div className={`px-5 py-2 text-sm flex items-center gap-2 ${statusMsg.type === 'success' ? 'bg-success-50 text-success-700' : statusMsg.type === 'error' ? 'bg-error-50 text-error-700' : statusMsg.type === 'waiting' ? 'bg-warning-50 text-warning-800' : 'bg-info-50 text-info-700'}`}>
           {statusMsg.type === 'success' ? <Check className="w-4 h-4" /> : statusMsg.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <Info className="w-4 h-4" />}
           {statusMsg.text}
-          <button onClick={() => setStatusMsg(null)} className="ml-auto"><X className="w-3.5 h-3.5" /></button>
+          {statusMsg.type === 'waiting' && (
+            <button
+              type="button"
+              className="ml-auto underline font-medium"
+              onClick={() => {
+                const waiting = subscaleStates.find((subscale) => subscale.items.some((item) => item.reverse) && subscale.confirmed !== true);
+                if (!waiting) return;
+                setActiveStep('scales');
+                setScaleFocusId(waiting.id);
+              }}
+            >
+              Go to {subscaleStates.find((subscale) => subscale.items.some((item) => item.reverse) && subscale.confirmed !== true)?.name ?? 'subscale'}
+            </button>
+          )}
+          <button onClick={() => setStatusMsg(null)}><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
 
@@ -1222,6 +1246,8 @@ export function ConfigScreen({
                   <ScalesPanel
                     subscales={subscaleStates} rows={dataset?.rows ?? []}
                     displayIds={getDisplayIds(dataset?.rows ?? [], demoCols)}
+                    focusSubscaleId={scaleFocusId}
+                    onFocusHandled={() => setScaleFocusId(null)}
                     onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
                     onConfirmRange={confirmScaleRange}
                     onApplyOutOfRange={async (id, action, values) => {
@@ -1644,10 +1670,12 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallScale, overallSettings, onSetOverallSettings, onSetOverallScale, onAutoDetectOverall, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
   displayIds: string[];
+  focusSubscaleId: string | null;
+  onFocusHandled: () => void;
   onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
   onConfirmRange: (id: string) => void;
@@ -1665,6 +1693,34 @@ function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRa
   onAutoDetectOverall: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
 }) {
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const issueCardId = subscales.find((subscale) => {
+    const different = subscale.minValue !== null && subscale.maxValue !== null && hasDifferentScaleItem(
+      Object.fromEntries(subscale.items.map((item) => [item.column, rows.map((row) => row[item.column])])),
+      subscale.minValue,
+      subscale.maxValue,
+    ).length > 0;
+    return shouldOpenResponseScaleCard(
+      subscale.confirmed === true,
+      subscale.items.some((item) => item.reverse),
+      different,
+    );
+  })?.id ?? null;
+
+  useEffect(() => {
+    if (focusSubscaleId) setOpenCardId(focusSubscaleId);
+    else if (openCardId === null && issueCardId) setOpenCardId(issueCardId);
+  }, [focusSubscaleId, issueCardId, openCardId]);
+
+  useEffect(() => {
+    if (!openCardId) return;
+    const card = document.querySelector(`[data-response-scale-id="${openCardId}"]`);
+    if ((focusSubscaleId || openCardId === issueCardId) && card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (focusSubscaleId) onFocusHandled();
+    }
+  }, [openCardId, focusSubscaleId, issueCardId, onFocusHandled]);
+
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
@@ -1770,6 +1826,28 @@ function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRa
             displayIds={displayIds}
             onApplyOutOfRange={(action, values) => onApplyOutOfRange(sub.id, action, values)}
             onHighlightCell={onHighlightCell}
+            collapsible
+            cardId={sub.id}
+            isOpen={openCardId === sub.id}
+            onToggleOpen={() => setOpenCardId((current) => current === sub.id ? null : sub.id)}
+            summaryLine={responseScaleSummaryLine({
+              name: sub.name,
+              itemCount: sub.items.length,
+              min: sub.minValue,
+              max: sub.maxValue,
+              confirmed: sub.confirmed === true,
+              outputs: shownScoreOutputs(sub.showOutputs, sub.scoringMethod).map((output) => output === 'custom' ? 'Custom' : output.charAt(0).toUpperCase() + output.slice(1)),
+            })}
+            attentionChip={sub.minValue !== null && sub.maxValue !== null && assessRangeOutliers(
+              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
+              { min: sub.minValue, max: sub.maxValue },
+            ).count > 0 ? `${assessRangeOutliers(
+              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
+              { min: sub.minValue, max: sub.maxValue },
+            ).count} value${assessRangeOutliers(
+              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
+              { min: sub.minValue, max: sub.maxValue },
+            ).count === 1 ? '' : 's'} outside the scale` : undefined}
             onSetLabelMap={(lm) => onSetLabelMap(sub.id, lm)}
             onAutoDetect={() => onAutoDetect(sub.id)}
             formulaPreviewFn={formulaPreviewFn}
@@ -1780,7 +1858,7 @@ function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRa
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
@@ -1788,6 +1866,12 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   items?: { column: string; reverse: boolean }[];
   rows?: Record<string, unknown>[];
   displayIds?: string[];
+  cardId?: string;
+  collapsible?: boolean;
+  isOpen?: boolean;
+  onToggleOpen?: () => void;
+  summaryLine?: string;
+  attentionChip?: string;
   onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[]) => Promise<void>;
   onHighlightCell?: (rowIndex: number, columnKey: string) => void;
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
@@ -1816,42 +1900,48 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
     ? reverseWideningExplanation(items, minValue, maxValue, Math.min(minValue, ...rangeOutliers.values), Math.max(maxValue, ...rangeOutliers.values))
     : null;
   return (
-    <Card className="p-3">
+    <Card className="p-3" data-response-scale-id={collapsible ? cardId : undefined}>
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
-          {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
-            <span className="text-xs text-secondary-500 whitespace-nowrap">
-              Detected: {minValue}-{maxValue} scale
-            </span>
-          )}
-          {differentScaleItems.length > 0 && (
-            <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
-              {differentScaleItems.map(({ item, min: itemMin, max: itemMax }) => (
-                <div key={item}>{item} may use a different scale than the rest (values {itemMin}-{itemMax}).</div>
-              ))}
+        {collapsible ? (
+          <button type="button" onClick={onToggleOpen} className="w-full text-left flex items-center gap-2">
+            {isOpen ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
+            <span className="font-semibold text-sm text-secondary-900">{name}</span>
+            {summaryLine && <span className="text-xs text-secondary-500">{summaryLine}</span>}
+            {attentionChip && <span className="ml-auto px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">{attentionChip}</span>}
+          </button>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 min-w-0">
+              <h4 className="font-semibold text-sm text-secondary-900 truncate">{name}</h4>
+              {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
+                <span className="text-xs text-secondary-500 whitespace-nowrap">Detected: {minValue}-{maxValue} scale</span>
+              )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {multipleOutputs && (
-            <button
-              type="button"
-              onClick={onConfirmRange}
-              className={`text-xs px-2 py-1 rounded-md border ${confirmed ? 'border-secondary-200 text-secondary-500' : 'border-primary-300 text-primary-700 bg-primary-50'}`}
-            >
-              {confirmed ? 'Range confirmed' : 'Confirm range'}
-            </button>
-          )}
-          <button onClick={onAutoDetect} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Auto</button>
-        </div>
+            <div className="flex items-center gap-2">
+              <button onClick={onAutoDetect} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Sparkles className="w-3 h-3" /> Auto</button>
+            </div>
+          </>
+        )}
       </div>
+      {(!collapsible || isOpen) && (
+        <div>
+      {differentScaleItems.length > 0 && (
+        <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
+          {differentScaleItems.map(({ item, min: itemMin, max: itemMax }) => (
+            <div key={item}>{item} may use a different scale than the rest (values {itemMin}-{itemMax}).</div>
+          ))}
+        </div>
+      )}
       {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
-        <div className="text-xs text-secondary-500 mb-2">
+        <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
+          <Tooltip text="The lowest and highest answer the questionnaire allows. It is used to reverse-score items and to spot values that do not belong.">
+            <Info className="w-3.5 h-3.5 text-secondary-400" />
+          </Tooltip>
           <span className={confirmed ? 'text-success-700' : 'text-warning-700'}>
             {confirmed ? 'confirmed' : 'not confirmed'}
           </span>
           {!confirmed && <span> — suggestions can be changed before confirming.</span>}
+          {!confirmed && <button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button>}
         </div>
       )}
       {multipleOutputs && rangeOutliers && rangeOutliers.count > 0 && (
@@ -1971,6 +2061,8 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
             </div>
           ))}
           <button onClick={() => onSetLabelMap([...labelMap, { label: '', value: 0 }])} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add label</button>
+        </div>
+      )}
         </div>
       )}
     </Card>

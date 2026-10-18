@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ChevronDown, ChevronRight } from 'lucide-react';
+import { X } from 'lucide-react';
 
 export function ConfidenceBadge({ confidence }: { confidence: number }) {
   const pct = Math.round(confidence * 100);
