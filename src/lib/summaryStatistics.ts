@@ -138,7 +138,7 @@ export function buildSummaryExportContent(
     ['Notes'],
     ['Statistics use included respondents only; respondents the user excluded are not counted.'],
     [
-      'Blank cells and cells that could not be scored (N/A, Prefer not to say, other text, or values outside the scale) are not counted. A subscale or Overall score is blank when any of its items is missing.',
+      'Blank, special missing (N/A, Prefer not to say, -99 and similar), out of range, and unmapped text cells are not counted. A subscale or Overall score is blank when any of its items is missing.',
     ],
   );
 
@@ -153,7 +153,10 @@ export function buildSummaryExportContent(
         if (!breakdown) return `${header} (${statistics.columns[header].nNotCounted})`;
         const kinds = Object.entries(breakdown)
           .filter(([, count]) => count > 0)
-          .map(([kind, count]) => `${kind}: ${count}`)
+          .map(([kind, count]) => `${kind === 'special_missing' ? 'special missing'
+            : kind === 'out_of_range' ? 'out of range'
+              : kind === 'unmapped' ? 'unmapped text'
+                : kind}: ${count}`)
           .join(', ');
         return kinds
           ? `${header} (${statistics.columns[header].nNotCounted}) [${kinds}]`

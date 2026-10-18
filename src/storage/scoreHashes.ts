@@ -20,6 +20,8 @@ export function buildSubscaleConfigs(config: SurveyConfigRecord): SubscaleConfig
       minValue: subscale.response_scale?.min_value ?? undefined,
       maxValue: subscale.response_scale?.max_value ?? undefined,
       labelMap: subscale.response_scale?.label_map ?? [],
+      allowedNonresponse: config.allowed_nonresponse,
+      confirmed: subscale.response_scale?.confirmed,
     },
   }));
 }

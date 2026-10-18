@@ -299,6 +299,9 @@ export function resolveResponse(raw: unknown, scale: ResponseScaleV2): ResolvedR
   if (BUILT_IN_NUMERIC_MISSING_CODES.has(normalized)) {
     return { kind: "special_missing", value: null };
   }
+  if (BUILT_IN_SPECIAL_WORDS.has(normalized)) {
+    return { kind: "special_missing", value: null };
+  }
 
   const numeric = typeof raw === "number" ? raw : parseNumeric(normalized);
   if (numeric === null) return { kind: "unmapped", value: null, raw };
