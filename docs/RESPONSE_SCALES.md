@@ -83,3 +83,11 @@ Fixture A Q3/Q5 (detected 1–5; N/A and Prefer not to say as `special_missing`;
 
 ## 12. Widening and reverse items (owner finding, 18 Oct 2026)
 Reverse scoring is (range minimum + range maximum) minus the answer, so widening a range changes every reversed value and every score of the subscale (Fixture A: widening Subscale 1 to 1-7 moves P01's Overall from 37 to 39). The Widen range action therefore shows a warning when the subscale has reverse items, and says that far-out stray values (more than one step beyond) usually are entry errors for which Treat as missing is right. Cell links name the respondent ID (never an internal ID) and highlight only the cell.
+
+## 13. Out-of-range decision and waiting status (owner, 18 Oct 2026; built)
+- Both actions are real buttons; "Treat as missing" is highlighted as the recommended default until the user chooses. Choosing either removes the amber message and the card chip and leaves one grey line: "Decision: Treat as missing for Q4: P26 (Change)" or "Decision: Widen range to 1-7 (Change)". The decision is saved with the scale, keyed to the exact set of out-of-range cells (a changed set reopens the question), logged once per decision. Scoring uses Treat as missing until the user decides otherwise.
+- The reverse-scoring warning ("Q3 becomes 8 minus the answer instead of 6 minus the answer ...") is shown whenever the subscale has a reverse item and any out-of-range value exists.
+- Waiting status: "Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items)." (several: "... ranges for Subscale 1 and 1 more (they have reverse items)."), amber, with a "Go to Subscale 1" button that opens the card.
+
+## 14. No subscales (owner, 18 Oct 2026; P2c-U)
+A dataset with no real subscales uses one automatic subscale (id auto-overall, name "Overall scale", all item columns, no reverse items). It is hidden from the Subscales step, appears as a normal card in Response scales and Bands, and uses the normal code path for scoring, export, Summary and templates. Adding a real subscale removes it after a warning.

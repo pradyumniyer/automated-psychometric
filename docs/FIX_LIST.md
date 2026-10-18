@@ -55,3 +55,7 @@ Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
 6. Overall transparency (owner chose option 1, 17 Oct 2026): the Overall card shows one plain sentence such as "Overall = Sum of subscale Means (Subscale 1 Mean + Subscale 2 Mean). Means are calculated even though their columns are hidden." plus a "Show these columns" button that switches on the matching Show toggles for every subscale; the Overall column header says how it was calculated. Sum and Mean stay calculated in the background for every subscale.
 
 **F13. Clarity pass** (owner, 18 Oct 2026): follow `UX_PRINCIPLES.md`. Card pattern first (P2c-1b, P2c-2), then C1 and C2 after P2d. Absorbs backlog items 1 and 2 (unified checks and precise per-cell reasons) and item 3 ((i) tips).
+7. Collapsed Response scales cards need a visible open affordance (a small "show full" button or a down arrow).
+8. Reword "Confirmed" in the card's one-line summary to something more direct (wording to be chosen with the owner).
+
+**F14. No subscales = one automatic subscale** (owner, 18 Oct 2026; P2c-U). The old separate "Overall Scale" path lacked the Show toggles, bands per output, Confirm range, out-of-range decision, collapsed card and cell links. The dataset is treated as one automatic subscale ("Overall scale") that uses the normal code path; headers follow the subscale pattern; no migration of old projects.
