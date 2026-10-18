@@ -7,6 +7,8 @@ import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } fr
 import {
   getDisplayIds,
   hasDifferentScaleItem,
+  entryErrorGuidance,
+  reverseWideningExplanation,
   responseScaleSummaryLine,
   shouldOpenResponseScaleCard,
   waitingSubscaleStatus,
@@ -86,6 +88,18 @@ describe('scoring status', () => {
     }, 1, 5)).toEqual([
       { item: 'Q8', min: 1, max: 7 },
     ]);
+  });
+
+  it('explains how widening changes reverse-scored items', () => {
+    expect(reverseWideningExplanation(
+      [{ column: 'Q3', reverse: true }, { column: 'Q4', reverse: false }],
+      1, 5, 1, 7,
+    )).toBe(
+      'Widening changes how reverse-scored items are calculated (Q3 becomes 8 minus the answer instead of 6 minus the answer) and changes scores for every respondent.',
+    );
+    expect(entryErrorGuidance('missing')).toBe(
+      'These values look like entry errors; Treat as missing is usually the right choice.',
+    );
   });
 
   it('uses singular wording and lists at most five IDs with the remaining count', () => {

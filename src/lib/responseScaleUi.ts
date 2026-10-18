@@ -65,3 +65,23 @@ export function hasDifferentScaleItem(
   });
 }
 
+export function reverseWideningExplanation(
+  items: { column: string; reverse: boolean }[],
+  oldMin: number,
+  oldMax: number,
+  newMin: number,
+  newMax: number,
+): string | null {
+  const reverseItems = items.filter((item) => item.reverse);
+  if (reverseItems.length === 0) return null;
+  const changes = reverseItems.map((item) =>
+    `${item.column} becomes ${newMin + newMax} minus the answer instead of ${oldMin + oldMax} minus the answer`,
+  );
+  return `Widening changes how reverse-scored items are calculated (${changes.join('; ')}) and changes scores for every respondent.`;
+}
+
+export function entryErrorGuidance(suggestedAction: 'missing' | 'widen'): string | null {
+  return suggestedAction === 'missing'
+    ? 'These values look like entry errors; Treat as missing is usually the right choice.'
+    : null;
+}

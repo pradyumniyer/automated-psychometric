@@ -38,7 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { getDisplayIds, hasDifferentScaleItem } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, reverseWideningExplanation } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -1757,6 +1757,7 @@ function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRa
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
             showOutputs={shownScoreOutputs(sub.showOutputs, sub.scoringMethod)}
             minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap} confirmed={sub.confirmed}
+            items={sub.items}
             itemCols={sub.items.map((i) => i.column)}
             onSetScoringMethod={() => {}}
             onToggleOutput={(output) => onToggleOutput(sub.id, output)}
@@ -1779,11 +1780,12 @@ function ScalesPanel({ subscales, rows, displayIds, onSetScaleType, onSetScaleRa
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, itemCols, rows = [], displayIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
   confirmed?: boolean;
+  items?: { column: string; reverse: boolean }[];
   rows?: Record<string, unknown>[];
   displayIds?: string[];
   onApplyOutOfRange?: (action: 'missing' | 'widen', values: number[]) => Promise<void>;
@@ -1810,6 +1812,9 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const differentScaleItems = multipleOutputs && minValue !== null && maxValue !== null
     ? hasDifferentScaleItem(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])), minValue, maxValue)
     : [];
+  const reverseWarning = minValue !== null && maxValue !== null && rangeOutliers?.suggestedAction === 'widen'
+    ? reverseWideningExplanation(items, minValue, maxValue, Math.min(minValue, ...rangeOutliers.values), Math.max(maxValue, ...rangeOutliers.values))
+    : null;
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between mb-2">
@@ -1883,6 +1888,10 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
               Widen range
             </button>
           </div>
+          {reverseWarning && <p className="mt-2">{reverseWarning}</p>}
+          {entryErrorGuidance(rangeOutliers.suggestedAction) && (
+            <p className="mt-2">{entryErrorGuidance(rangeOutliers.suggestedAction)}</p>
+          )}
         </div>
       )}
       <div className="flex items-center gap-1 mb-2">
