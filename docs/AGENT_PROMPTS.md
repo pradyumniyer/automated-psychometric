@@ -96,11 +96,44 @@ Follow the working agreement. Read only `docs/RESPONSE_SCALES.md` §2, §3, §7,
 Test-first, separate local commits: (a) make scoring, data quality, reliability and item analysis all use `resolveResponse()`, keeping existing exported names via adapters; Fixture A numbers must not change (add a test that proves it). (b) Write out-of-range actions (treat as missing / widen) and their counts to the history/cleaning log; cells are never altered. (c) Add `confirmed` to the stored scale record; migrate existing saved `response_scale` records (old numeric and old categorical) and mark migrated records `confirmed: true`. (d) A subscale with reverse items whose range is not confirmed is not scored; the status area shows "Confirm the range for <subscale> (it has reverse items)". Until the new Response Scales step exists (P2c), every scale saved through the current screen is stored as confirmed: true (that screen shows the range for the user to edit), so nothing is blocked in the meantime; unconfirmed records can only come from the new detection function. (f) Replace the P1c2 shortcut for deciding whether a Sum is integer-valued (response-scale minimum and maximum are whole numbers) with the real rule: a Sum is continuous when any of its items has decimals (slider), using the resolved data. (e) Update the notes of the Summary sheet/file added in P1b so that "not counted" cells are broken down per column by resolved kind (blank, special missing such as N/A or Prefer not to say, out of range, unmapped). Run test, typecheck and build after each. Report; stop for review.
 ```
 
-## P2c. Response Scales v2, part 3: the Response Scales step UI
+## P2c-1. Response Scales screen, part 1: range, confirm, out-of-range actions
 ```
-Follow the working agreement. Read only `docs/RESPONSE_SCALES.md` (all, especially §6 and §10) and the source files you need. Do NOT push. These UI changes are owner-approved.
+Follow the working agreement in `.github/copilot-instructions.md`. Read only `docs/RESPONSE_SCALES.md` (all sections, especially sections 4, 6, 10 and 11) and the source files you need. Do NOT push. These UI changes are owner-approved. Never use eval or new Function. Do not ask me questions unless you are blocked; make the smallest sensible assumption and list it in your report. Use the existing functions in `src/scientific/responseScales.ts` (resolveResponse, range detection, applyOutOfRangeAction, canReverseScore and the cleaning-log payload), the existing components and the existing styles; do not write a second copy of any logic. Do not touch the import flow or the subscale builder (Subscales step).
 
-Rebuild the Response Scales step per §6, using existing components and styles: "Apply first to all" at the top; then one combined card per subscale: detected range with editable min/max and a Confirm range button and status; out-of-range message with links to the cells and the two actions; "Other responses found" table; word-labels section (preset, Flip order, Start at 0, mapping rows); the Show: Sum / Mean / Custom toggles and the Overall scale switch and card exactly as built in P1c (see RESPONSE_SCALES section 11; keep them working, do not redesign them). Implement every UI-related item of the §10 checklist. Separate local commits; test where logic is involved; run test, typecheck and build after each. Report visible behavior changes, results, `git status` and `git diff --stat`; stop for review.
+This step covers the top of the Response Scales step and the range part of each subscale card. The "Other responses found" table and the word-labels section come in the next step; leave the existing Type: Numeric / Categorical control working as it is until then.
+
+(a) Top of the step: keep the Overall scale switch and card exactly as built (RESPONSE_SCALES section 11). Keep "Apply first to all": it copies the first subscale's range, labels, flip and start options to the others, copies the confirmed state only if the first subscale is confirmed, then re-runs detection and the out-of-range check on each subscale; it never touches the Overall card or the Show toggles.
+
+(b) Each subscale card, range part: a header line "Detected: 1-5 scale" with editable min and max, and a "Confirm range" button with a status ("not confirmed" or "confirmed"). Editing min or max confirms. Detection runs automatically when the card has no confirmed range and only suggests; when no conventional range fits, say "unusual range, please confirm". Keep the existing Show: Sum / Mean / Custom toggles unchanged.
+
+(c) Out-of-range message (only when needed), for example "1-5 detected. 1 value outside (Q4: P26)", with a link for each affected cell and two actions: "Treat as missing" (default) and "Widen range" (pre-selected when the stray values are exactly one step beyond the range, as in section 4). Applying an action uses applyOutOfRangeAction and writes its log entry (action, count, values) to the history / cleaning log; cells are never altered. Each link scrolls the grid to the cell and highlights it for a few seconds.
+
+(d) Mixed ranges: when the items of a subscale differ in observed range, list the differing items and ask; never silently use one.
+
+(e) A subscale with reverse items whose range is not confirmed keeps the existing status message "Confirm the range for <subscale> (it has reverse items)" and its card shows the Confirm range button prominently; confirming re-scores.
+
+(f) Persist range, confirmed state and chosen actions; a reload restores them; templates keep range and confirmed state.
+
+Tests where logic is involved, written first: Apply first to all (copy, confirmed-state rule, re-check, Overall and Show untouched); confirmation by button and by editing; the actions write the right log entries; links target the right cells; reverse-item blocking and unblocking; mixed ranges listed; template round trip of range and confirmed state. Fixture A must not change: P01 Overall 37 and the status line P25, P26, P29, P30.
+
+Separate local commits for (a)+(b), (c)+(d), (e)+(f); run the full npm test, typecheck and build after each. Report: visible behavior changes in plain language, the assumptions you made, the results, lint totals before and after (no new findings), `git status` and `git diff --stat`. Commit locally and stop for review.
+```
+
+## P2c-2. Response Scales screen, part 2: other responses and word labels (run after P2c-1)
+```
+Follow the working agreement in `.github/copilot-instructions.md`. Read only `docs/RESPONSE_SCALES.md` (sections 2, 3, 5, 6, 8, 10 and 11) and the source files you need. Do NOT push. These UI changes are owner-approved. Never use eval or new Function. Do not ask me questions unless you are blocked; make the smallest sensible assumption and list it in your report. Use the existing functions in `src/scientific/responseScales.ts` and the existing components and styles; do not write a second copy of any logic. Do not touch the import flow, the subscale builder, the Overall card or the range / confirm part built in the previous step.
+
+(a) "Other responses found" table inside each subscale card (only when there are any): response, count, and a number box (empty = not scored). Built-in missing codes (N/A, NA, n/a, Prefer not to say, -99, -999 and similar) appear grey and pre-filled as not scored; unknown responses appear amber. A small caption lists the built-in codes. A number typed in a row makes that response scored as that number; it is not reversed on a reverse item unless that row's "reverse" tick is on. Counts come from resolveResponse over the subscale's items. There is no other place to edit this list.
+
+(b) Word-labels section inside the card: shown automatically when words are found, otherwise behind a "Responses are words" link. It has a preset dropdown (existing presets; the preset is matched automatically with the preset-matching function including word variants), "Flip order", "Start at 0", the mapping rows (word, number), a message for values without a label, and, for more than 15 distinct words, the suggestion "this looks like a demographic or ID, not a scale item" instead of a huge table. The range follows the numbers typed.
+
+(c) Replace the Type: Numeric / Categorical control: numeric behaviour is the default and categorical is the word-labels section; existing saved scales (already migrated) must display correctly in the new layout.
+
+(d) Templates keep range, labels, values, flip / start flags and the per-row numbers; new values in another file appear as "needs a number". Reload restores everything.
+
+Tests where logic is involved, written first: the table lists each response with the right count and kind (grey or amber); typing a number scores that response and the score changes accordingly; N/A scored 0 is not reversed on a reverse item unless ticked; preset match with an extra N/A row; non-matching words listed with empty numbers; flip and start at 0; more than 15 words suggestion; template round trip including "needs a number". Fixture A must not change: P01 Overall 37 and the status line P25, P26, P29, P30; Q3 and Q5 still show as special missing.
+
+Separate local commits for (a), (b)+(c), (d); run the full npm test, typecheck and build after each. Report: visible behavior changes in plain language, the assumptions you made, the results, lint totals before and after (no new findings), `git status` and `git diff --stat`. Commit locally and stop for review.
 ```
 
 ## P2d. Response Scales v2, part 4: Data Quality screen
