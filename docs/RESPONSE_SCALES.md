@@ -26,7 +26,7 @@ Decimals present in a column → treated as continuous (slider): range from obse
 - **One step beyond:** if the stray values are exactly one step past a detected end and the widened range is itself a candidate (e.g. a few 5s on a detected 1–4, widened to 1–5), the message says "N values are 5, one above the detected range: this may be a 1–5 scale" and the **default action is Widen range**. Values farther away (e.g. P26's 7 on a 1–5 scale) default to **Treat as missing**.
 - The range is otherwise **not** widened to include stray values (that would make out-of-range undetectable): "1–5 detected. 1 value outside (Q4, P26)" with a link to the cell, and the two actions **Treat as missing** or **Widen range**.
 - If the user enters a range by hand, outside values are reported the same way.
-- Mixed ranges within a subscale: list the items that differ and ask; never silently use one.
+- Mixed ranges within a subscale: an item is flagged ("may use a different scale than the rest") only when more than 10% of its numeric responses fall outside the subscale's range. Differences in observed minimum or maximum between items are normal (nobody chose an extreme answer, one stray value) and are never flagged; strays are handled by the out-of-range message.
 
 ## 5. Word scales
 - If most distinct non-special words match a preset (after normalization and common variants) the preset is applied automatically: labels → 1…k, range updates, **Flip order** and **Start at 0** buttons. Any other response in the data becomes an extra row.
@@ -62,7 +62,7 @@ Fixture A Q3/Q5 (detected 1–5; N/A and Prefer not to say as `special_missing`;
 3. Numeric missing codes (-99, -999) appear in the table as built-in codes, not as out-of-range errors; unknown out-of-range numbers stay flagged.
 4. Decimals in a column: treated as continuous (slider), not flagged.
 5. More than 15 distinct words: suggest demographic/ID instead of building a huge table.
-6. Mixed ranges within a subscale: list the differing items, never silently pick one.
+6. Mixed ranges within a subscale: flag items with more than 10% of responses outside the range (see section 4); never silently pick one.
 7. Scored special responses (N/A → 0) are not reversed unless ticked.
 8. Out-of-range actions (treat as missing / widen range) are written to the cleaning log with counts; cells are never altered.
 9. Out-of-range and unmapped messages link to the cells in the LiveGrid.
@@ -80,3 +80,6 @@ Fixture A Q3/Q5 (detected 1–5; N/A and Prefer not to say as `special_missing`;
 - Defaults reproduce today: switch on; Sums + Sum, or Means + Mean when every subscale is Mean-only.
 - Templates (section 8) also keep the Show toggles, the Overall settings and the bands per output.
 - Tests: Fixture A P01 Overall 37 (Sums, Sum), 18.5 (Sums, Mean); Sum of means; Mean of means; custom example; Custom disabled without subscale formulas; off removes the column; migration; cache invalidation on any of these settings.
+
+## 12. Widening and reverse items (owner finding, 18 Oct 2026)
+Reverse scoring is (range minimum + range maximum) minus the answer, so widening a range changes every reversed value and every score of the subscale (Fixture A: widening Subscale 1 to 1-7 moves P01's Overall from 37 to 39). The Widen range action therefore shows a warning when the subscale has reverse items, and says that far-out stray values (more than one step beyond) usually are entry errors for which Treat as missing is right. Cell links name the respondent ID (never an internal ID) and highlight only the cell.
