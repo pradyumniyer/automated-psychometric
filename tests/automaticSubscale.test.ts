@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import { getUnscoredRowSummary } from '../src/lib/scoringStatus';
-import { buildAutoScale } from '../src/scientific/scoring';
+import { buildAutoScale, isAutomaticSubscale, scoreDataset } from '../src/scientific/scoring';
 import { fromSurveyConfigRecord } from '../src/storage/viewAdapters';
 import type { SurveyConfigRecord } from '../src/storage/schema';
 
@@ -45,7 +45,7 @@ describe('automatic overall subscale', () => {
   it('reproduces Fixture A as one normal Sum and Mean subscale', async () => {
     const { rows, headers } = fixtureA();
     const automatic = buildAutoScale(headers, ['ID', 'Age'], rows);
-    const result = (await import('../src/scientific/scoring')).scoreDataset(
+    const result = scoreDataset(
       rows,
       headers,
       [{ ...automatic, showOutputs: ['sum', 'mean'] }],
@@ -75,6 +75,29 @@ describe('automatic overall subscale', () => {
     expect(getUnscoredRowSummary(result, rows.map((row) => row.ID))).toBe(
       '4 rows have at least one score missing because an item is missing, N/A or outside the scale: P25, P26, P29, P30',
     );
+    expect(isAutomaticSubscale(automatic)).toBe(true);
+  });
+
+  it('uses per-output bands on the automatic subscale', () => {
+    const { rows, headers } = fixtureA();
+    const automatic = { ...buildAutoScale(headers, ['ID', 'Age'], rows), showOutputs: ['sum', 'mean'] as const };
+    const result = scoreDataset(rows, headers, [automatic], {}, [], {
+      bandsByOutput: {
+        [automatic.id]: {
+          sum: [{ name: 'Higher', minScore: 30, maxScore: 50, color: '#000000' }],
+          mean: [{ name: 'Higher', minScore: 3, maxScore: 5, color: '#000000' }],
+        },
+      },
+    });
+
+    expect(result.headers).toEqual(expect.arrayContaining([
+      'Overall scale Sum',
+      'Overall scale Sum interpretation',
+      'Overall scale Mean',
+      'Overall scale Mean interpretation',
+    ]));
+    expect(result.rows[0]['Overall scale Sum interpretation']).toBe('Higher');
+    expect(result.rows[0]['Overall scale Mean interpretation']).toBe('Higher');
   });
 
   it('rebuilds defaults when an old saved config has no subscales', () => {

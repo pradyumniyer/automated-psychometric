@@ -30,7 +30,7 @@ import { logAction, logOutOfRangeAction, fetchHistory, deleteAction } from '@/li
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
-import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
+import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
 import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
 import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, findOutOfRangeCells } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
@@ -161,9 +161,12 @@ export function ConfigScreen({
       subscales: overrides.subscales ?? subscaleStates,
       bands: overrides.bands ?? bandStates,
       bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
-      overallScale: overrides.overallScale === undefined
+      overallScale: (overrides.overallScale === undefined
         ? overallScale
-        : overrides.overallScale,
+        : overrides.overallScale)
+        && (overrides.subscales ?? subscaleStates).some((subscale) => !isAutomaticSubscale(subscale))
+        ? (overrides.overallScale === undefined ? overallScale : overrides.overallScale)
+        : null,
       overallSettings: overrides.overallSettings ?? overallSettings,
       linkedTemplateId: overrides.linkedTemplateId,
     }, existing);
@@ -219,7 +222,11 @@ export function ConfigScreen({
     try {
       const config = await surveyConfigRepository.get(activeDatasetId);
       if (!config) throw new Error('Dataset configuration is missing.');
-      const adapted = fromSurveyConfigRecord(config);
+      const adapted = fromSurveyConfigRecord(config, {
+        headers: ds.headers,
+        rows: ds.rows,
+        idColumns: config.id_columns,
+      });
       setDemoCols(adapted.demographicColumns);
       setSubscaleStates(adapted.subscales);
       setBandStates(adapted.bands);
@@ -238,25 +245,7 @@ export function ConfigScreen({
       const excludedIndices = await exclusionRepository.getExcludedIndices(activeDatasetId);
       await onSetExcludedRows(new Set(excludedIndices));
 
-      const effectiveOverall = adapted.overallScale ?? (() => {
-        const itemColumns = ds.headers.filter((header) =>
-          !adapted.demographicColumns.some((column) => column.column_name === header),
-        );
-        const detected = detectScale(ds.headers, ds.rows, itemColumns);
-        return {
-          id: 'overall', name: 'Overall Scale',
-          items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
-          scoringMethod: 'sum' as const, customFormula: '',
-          scaleType: detected.scaleType, minValue: detected.minValue, maxValue: detected.maxValue,
-          labelMap: detected.scaleType === 'categorical'
-            ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
-            : [],
-          confirmed: true,
-          displayOrder: 0,
-        };
-      })();
-      if (adapted.subscales.length === 0) setOverallScale(effectiveOverall);
-      const configs: SubscaleConfig[] = (adapted.subscales.length ? adapted.subscales : [effectiveOverall]).map((sub) => ({
+      const configs: SubscaleConfig[] = adapted.subscales.map((sub) => ({
         id: sub.id,
         name: sub.name,
         items: sub.items,
@@ -303,7 +292,9 @@ export function ConfigScreen({
   const demoColumnNames = useMemo(() => new Set(demoCols.map((d) => d.column_name)), [demoCols]);
   const allColumns = dataset?.headers || [];
   const itemColumns = allColumns.filter((c) => !demoColumnNames.has(c));
-  const unassignedItems = itemColumns.filter((col) => !subscaleStates.some((s) => s.items.some((item) => item.column === col)));
+  const realSubscales = subscaleStates.filter((subscale) => !isAutomaticSubscale(subscale));
+  const hasRealSubscales = realSubscales.length > 0;
+  const unassignedItems = itemColumns.filter((col) => !realSubscales.some((s) => s.items.some((item) => item.column === col)));
 
   // ── Auto-save (debounced) ──
   const performAutoSave = useCallback(async () => {
@@ -481,8 +472,34 @@ export function ConfigScreen({
   // ── Subscales ──
   const addSubscale = async () => {
     if (!dataset) return;
-    const name = `Subscale ${subscaleStates.length + 1}`;
-    const order = subscaleStates.length;
+    const automatic = subscaleStates.find((subscale) => isAutomaticSubscale(subscale));
+    if (automatic) {
+      const hasSettings = automatic.confirmed === true
+        || automatic.outOfRangeDecision !== undefined
+        || (bandStatesByOutput[automatic.name] && Object.values(bandStatesByOutput[automatic.name]).some((bands) => bands?.length));
+      if (hasSettings && !window.confirm('Your settings for the Overall scale will be removed. Continue?')) return;
+      const withoutAutomatic = subscaleStates.filter((subscale) => !isAutomaticSubscale(subscale));
+      const nextBands = { ...bandStates };
+      delete nextBands[automatic.name];
+      const nextBandsByOutput = { ...bandStatesByOutput };
+      delete nextBandsByOutput[automatic.name];
+      const name = 'Subscale 1';
+      const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, labelMap: [], displayOrder: 0 };
+      try {
+        await persistSurveyConfig({ subscales: [...withoutAutomatic, newSub], bands: nextBands, bandsByOutput: nextBandsByOutput, overallScale: null });
+        setSubscaleStates([...withoutAutomatic, newSub]);
+        setBandStates(nextBands);
+        setBandStatesByOutput(nextBandsByOutput);
+        setActiveSubscaleId(newSub.id);
+        setActiveStep('subscales');
+        markDirty();
+      } catch (error) {
+        setStatusMsg({ type: 'error', text: `Failed to create subscale: ${(error as Error).message}` });
+      }
+      return;
+    }
+    const name = `Subscale ${realSubscales.length + 1}`;
+    const order = realSubscales.length;
     const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, labelMap: [], displayOrder: order };
     try {
       await persistSurveyConfig({ subscales: [...subscaleStates, newSub] });
@@ -610,13 +627,13 @@ export function ConfigScreen({
   };
 
   const applyScaleToAll = () => {
-    if (subscaleStates.length === 0) return;
-    const first = subscaleStates[0];
+    if (realSubscales.length === 0) return;
+    const first = realSubscales[0];
     setSubscaleStates((prev) => copyFirstResponseScaleSettings(first, prev).map((s) => ({
       ...s,
       scaleType: first.scaleType,
     })));
-    setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${subscaleStates.length} subscales.` });
+    setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${realSubscales.length} subscales.` });
     markDirty();
   };
 
@@ -697,42 +714,36 @@ export function ConfigScreen({
       }));
       const bandConfigs: Record<string, BandConfig[]> = {};
       const bandConfigsByOutput: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>> = {};
-      if (subConfigs.length === 0) {
-        subConfigs = [{
-          id: overallScale.id, name: overallScale.name,
-          items: overallScale.items, scoringMethod: overallScale.scoringMethod,
-          showOutputs: shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod),
-          customFormula: overallScale.customFormula || null,
-          responseScale: { scaleType: overallScale.scaleType, minValue: overallScale.minValue ?? undefined, maxValue: overallScale.maxValue ?? undefined, labelMap: overallScale.labelMap, confirmed: overallScale.confirmed === true },
-        }];
-        bandConfigs[overallScale.name] = (bandStates[overallScale.name] || []).map((b) => ({ name: b.name, minScore: b.minScore, maxScore: b.maxScore, color: b.color }));
-      } else {
-        for (const sub of subscaleStates) {
-          const outputBands: Partial<Record<ScoreOutput, BandConfig[]>> = {};
-          for (const output of SCORE_OUTPUT_ORDER) {
-            const bands = bandStatesByOutput[sub.name]?.[output];
-            if (bands) {
-              outputBands[output] = bands.map((band) => ({
-                name: band.name,
-                minScore: band.minScore,
-                maxScore: band.maxScore,
-                color: band.color,
-              }));
-            }
-          }
-          bandConfigsByOutput[sub.id] = outputBands;
-        }
-        const overallBands = bandStates[overallScale.name] ?? [];
-        if (overallBands.length > 0) {
-          bandConfigsByOutput.overall = {
-            [overallSettings.combineBy === 'custom' ? 'custom' : overallSettings.combineBy]: overallBands.map((band) => ({
+      for (const sub of subscaleStates) {
+        const outputBands: Partial<Record<ScoreOutput, BandConfig[]>> = {};
+        for (const output of SCORE_OUTPUT_ORDER) {
+          const bands = bandStatesByOutput[sub.name]?.[output];
+          if (bands) {
+            outputBands[output] = bands.map((band) => ({
               name: band.name,
               minScore: band.minScore,
               maxScore: band.maxScore,
               color: band.color,
-            })),
-          };
+            }));
+          }
         }
+        bandConfigsByOutput[sub.id] = outputBands;
+        const firstOutput = shownScoreOutputs(sub.showOutputs, sub.scoringMethod)[0];
+        const firstBands = outputBands[firstOutput];
+        if (firstBands) {
+          bandConfigs[sub.name] = firstBands;
+        }
+      }
+      const overallBands = bandStates[overallScale.name] ?? [];
+      if (realSubscales.length >= 2 && overallBands.length > 0) {
+        bandConfigsByOutput.overall = {
+          [overallSettings.combineBy === 'custom' ? 'custom' : overallSettings.combineBy]: overallBands.map((band) => ({
+            name: band.name,
+            minScore: band.minScore,
+            maxScore: band.maxScore,
+            color: band.color,
+          })),
+        };
       }
       const config = await persistSurveyConfig();
       const excludedRowIds = [...sharedExcludedRows].map((index) => dataset.row_ids[index]).filter((id): id is string => !!id);
@@ -745,8 +756,7 @@ export function ConfigScreen({
         {
           rowIds: dataset.row_ids,
           bandsByOutput: bandConfigsByOutput,
-          legacyScoreColumnIds: subscaleStates.length === 0 ? [overallScale.id] : [],
-          overall: subscaleStates.length > 0 ? {
+          overall: realSubscales.length >= 2 ? {
             enabled: overallSettings.enabled,
             basedOn: overallSettings.basedOn,
             combineBy: overallSettings.combineBy,
@@ -823,7 +833,7 @@ export function ConfigScreen({
     const report = applyMatchReport;
     if (!dataset || !template || !report) return;
 
-    if (subscaleStates.length > 0) {
+    if (realSubscales.length > 0) {
       if (!window.confirm('This will replace the current scale configuration. Continue?')) return;
     }
 
@@ -1075,7 +1085,7 @@ export function ConfigScreen({
   const displayRows = showExcludedOnly
     ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))
     : scoredColumnData.rows;
-  const canScore = !!dataset && (subscaleStates.length === 0 || subscaleStates.every((s) => s.items.length > 0 || (shownScoreOutputs(s.showOutputs, s.scoringMethod).length === 1 && s.scoringMethod === 'custom'))) && itemColumns.length > 0;
+  const canScore = !!dataset && realSubscales.every((s) => s.items.length > 0 || (shownScoreOutputs(s.showOutputs, s.scoringMethod).length === 1 && s.scoringMethod === 'custom')) && itemColumns.length > 0;
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
 
@@ -1216,8 +1226,8 @@ export function ConfigScreen({
             {/* Step rail */}
             <StepRail activeStep={activeStep} onStepClick={setActiveStep} stepStatuses={{
               demographics: demoCols.length > 0 ? 'done' : 'pending',
-              subscales: subscaleStates.length > 0 ? (subscaleStates.every((s) => s.items.length > 0) ? 'done' : 'active') : 'pending',
-              scales: subscaleStates.length > 0 ? (subscaleStates.some((s) => s.scaleType === 'categorical' && s.labelMap.length > 0) ? 'done' : 'active') : (overallScale.scaleType === 'categorical' && overallScale.labelMap.length > 0 ? 'done' : 'active'),
+              subscales: realSubscales.length > 0 ? (realSubscales.every((s) => s.items.length > 0) ? 'done' : 'active') : 'pending',
+              scales: subscaleStates.length > 0 ? (subscaleStates.some((s) => s.scaleType === 'categorical' && s.labelMap.length > 0) ? 'done' : 'active') : 'pending',
               bands: Object.values(bandStates).some((bs) => bs.length > 0)
                 || Object.values(bandStatesByOutput).some((outputs) =>
                   Object.values(outputs).some((bs) => (bs?.length ?? 0) > 0))
@@ -1242,7 +1252,7 @@ export function ConfigScreen({
                 )}
                 {activeStep === 'subscales' && (
                   <SubscalesPanel
-                    subscales={subscaleStates} unassignedItems={unassignedItems}
+                    subscales={realSubscales} unassignedItems={unassignedItems}
                     onAddSubscale={addSubscale} onDeleteSubscale={deleteSubscale} onRenameSubscale={renameSubscale}
                     onRemoveItem={removeItemFromSubscale} onToggleReverse={toggleReverse} onMoveItem={moveItem}
                     selectedItems={selectedItems} onToggleSelection={toggleItemSelection}
@@ -1319,11 +1329,11 @@ export function ConfigScreen({
                   <ScoringPanel
                     canScore={canScore} scoring={scoring} onRunScoring={runScoring}
                     scoringResult={scoringResult} onExport={handleExport}
-                    excludedCount={sharedExcludedRows.size} subscaleCount={subscaleStates.length || (itemColumns.length > 0 ? 1 : 0)}
-                    usedAutoScale={subscaleStates.length === 0 && !!dataset}
+                    excludedCount={sharedExcludedRows.size} subscaleCount={realSubscales.length || (itemColumns.length > 0 ? 1 : 0)}
+                    usedAutoScale={!hasRealSubscales && !!dataset}
                     originalColCount={originalColCount} computedColCount={computedColCount}
-                    hasSubscaleItems={subscaleStates.length > 0 && subscaleStates.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom')}
-                    unassignedItemCount={subscaleStates.length > 0 ? getUnassignedItemCount(itemColumns, subscaleStates) : 0}
+                    hasSubscaleItems={realSubscales.length > 0 && realSubscales.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom')}
+                    unassignedItemCount={realSubscales.length > 0 ? getUnassignedItemCount(itemColumns, realSubscales) : 0}
                   />
                 )}
               </div>
@@ -1710,6 +1720,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
 }) {
   const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const realSubscales = subscales.filter((subscale) => !isAutomaticSubscale(subscale));
   const issueCardId = subscales.find((subscale) => {
     const different = subscale.minValue !== null && subscale.maxValue !== null && hasDifferentScaleItem(
       Object.fromEntries(subscale.items.map((item) => [item.column, rows.map((row) => row[item.column])])),
@@ -1742,8 +1753,8 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Response Scales</span>
         <div className="flex items-center gap-3">
-          {subscales.length >= 2 && <button onClick={onApplyToAll} className="text-xs text-primary-600 hover:underline">Apply first to all</button>}
-          {subscales.length >= 2 && (
+          {realSubscales.length >= 2 && <button onClick={onApplyToAll} className="text-xs text-primary-600 hover:underline">Apply first to all</button>}
+          {realSubscales.length >= 2 && (
             <button
               type="button"
               role="switch"
@@ -1757,7 +1768,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
         </div>
       </div>
       <div className="space-y-3">
-        {subscales.length >= 2 && overallSettings.enabled && (
+        {realSubscales.length >= 2 && overallSettings.enabled && (
           <Card className="p-3">
             <h4 className="font-semibold text-sm text-secondary-900 mb-2">Overall Scale</h4>
             <div className="text-xs text-secondary-500 mb-1">Based on</div>
@@ -1767,7 +1778,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
                 ['means', 'Means'],
                 ['custom', 'Custom scores'],
               ] as const).map(([value, label]) => {
-                const customDisabled = value === 'custom' && !subscales.every((subscale) => !!subscale.customFormula.trim());
+                const customDisabled = value === 'custom' && !realSubscales.every((subscale) => !!subscale.customFormula.trim());
                 return (
                   <button
                     key={value}
@@ -1808,22 +1819,6 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
               />
             )}
           </Card>
-        )}
-        {subscales.length === 0 && (
-          <ScaleCardCompact name={overallScale.name} scaleType={overallScale.scaleType} scoringMethod={overallScale.scoringMethod} customFormula={overallScale.customFormula}
-            showOutputs={shownScoreOutputs(overallScale.showOutputs, overallScale.scoringMethod)}
-            minValue={overallScale.minValue} maxValue={overallScale.maxValue} labelMap={overallScale.labelMap} confirmed={overallScale.confirmed}
-            itemCols={overallScale.items.map((i) => i.column)}
-            onSetScoringMethod={(m) => onSetOverallScale({ scoringMethod: m })}
-            onToggleOutput={() => {}}
-            multipleOutputs={false}
-            onSetCustomFormula={(f) => onSetOverallScale({ customFormula: f })}
-            onSetScaleType={(t) => onSetOverallScale({ scaleType: t })}
-            onSetScaleRange={(min, max) => onSetOverallScale({ minValue: min, maxValue: max })}
-            onSetLabelMap={(lm) => onSetOverallScale({ labelMap: lm })}
-            onAutoDetect={onAutoDetectOverall}
-            formulaPreviewFn={formulaPreviewFn}
-          />
         )}
         {subscales.map((sub) => (
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
@@ -2139,16 +2134,17 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
   overallScale: SubscaleState;
   overallSettings: OverallSettings;
 }) {
-  const scales = subscales.length > 0
-    ? (overallSettings.enabled ? [...subscales, overallScale] : subscales)
-    : [overallScale];
+  const realSubscales = subscales.filter((subscale) => !isAutomaticSubscale(subscale));
+  const scales = realSubscales.length >= 2 && overallSettings.enabled
+    ? [...subscales, overallScale]
+    : subscales;
   return (
     <div className="p-3">
       <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-2 block">Interpretation Bands</span>
       <div className="space-y-3">
         {scales.map((sub) => {
-          const isOverall = sub.id === overallScale.id && subscales.length > 0;
-          const isSubscale = subscales.length > 0 && !isOverall;
+          const isOverall = sub.id === overallScale.id && realSubscales.length >= 2;
+          const isSubscale = !isOverall;
           const outputs = isSubscale ? shownScoreOutputs(sub.showOutputs, sub.scoringMethod) : [];
           const chosenOutput = selectedBandOutputs[sub.id];
           const output = isSubscale

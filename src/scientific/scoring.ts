@@ -15,6 +15,11 @@ export interface SubscaleConfig {
   responseScale: ResponseScaleConfig;
 }
 export interface BandConfig { name: string; minScore: number; maxScore: number; color: string; }
+export const AUTOMATIC_SUBSCALE_ID = 'auto-overall';
+
+export function isAutomaticSubscale(subscale: Pick<SubscaleConfig, 'id'>): boolean {
+  return subscale.id === AUTOMATIC_SUBSCALE_ID;
+}
 import { evaluateFormula } from './formula';
 import {
   interpretationColumnKey,
@@ -53,7 +58,6 @@ export interface ScoringOptions {
   proration?: { enabled?: boolean; maxMissingPercent?: number };
   outputs?: Record<string, { sum?: boolean; mean?: boolean }>;
   bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandConfig[]>>>;
-  legacyScoreColumnIds?: string[];
   overall?: {
     enabled?: boolean;
     source?: 'subscales' | 'items';
@@ -308,8 +312,7 @@ export function scoreDataset(
         ?? (output === shownOutputs[0] ? legacyBands : undefined),
     ] as const);
     for (const output of shownOutputs) {
-      const isLegacyScore = options.legacyScoreColumnIds?.includes(subscale.id) && shownOutputs.length === 1;
-      headers.push(isLegacyScore ? `${groupName} Score` : scoreColumnKey(groupName, output));
+      headers.push(scoreColumnKey(groupName, output));
       const outputBandList = outputBands.find(([candidate]) => candidate === output)?.[1];
       if (outputBandList?.length) {
         headers.push(interpretationColumnKey(groupName, output, shownOutputs.length));
@@ -573,7 +576,7 @@ export function buildAutoScale(
         uniqueValues: [...new Set(observedValues)],
       };
   return {
-    id: 'auto-overall',
+    id: AUTOMATIC_SUBSCALE_ID,
     name: 'Overall scale',
     items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
     scoringMethod: 'sum',

@@ -199,15 +199,6 @@ export function migrateSurveyConfigRecord(config: SurveyConfigRecord): SurveyCon
   };
 }
 
-export function fromSurveyConfigRecord(config: SurveyConfigRecord): {
-  demographicColumns: DemographicColumn[];
-  subscales: ScreenSubscaleState[];
-  bands: ScreenSurveyConfig['bands'];
-  bandsByOutput: NonNullable<ScreenSurveyConfig['bandsByOutput']>;
-  overallScale: ScreenSubscaleState | null;
-  overallSettings: NonNullable<ScreenSurveyConfig['overallSettings']>;
-  responseScales: ResponseScale[];
-}
 export function fromSurveyConfigRecord(
   config: SurveyConfigRecord,
   dataset?: { headers: string[]; rows: Record<string, unknown>[]; idColumns?: string[] },

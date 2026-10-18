@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createCsvContent, createXlsxSheetData } from '../src/lib/fileParser';
 import { buildScoredColumnData, scoreOnlyColumnKeys } from '../src/lib/scoredColumns';
 import { buildSummaryExportContent } from '../src/lib/summaryStatistics';
-import { scoreDataset } from '../src/scientific/scoring';
+import { buildAutoScale, scoreDataset } from '../src/scientific/scoring';
 
 const rawHeaders = ['Participant', 'Age', 'Q1', 'Q2', 'Q3'];
 const rows = [
@@ -362,28 +362,24 @@ describe('shared scored columns', () => {
     expect(new Set(data.headers).size).toBe(data.headers.length);
   });
 
-  it('preserves the automatic Overall score column when no subscales are configured', () => {
-    const overall = {
-      ...subscales[0],
-      id: 'overall',
-      name: 'Overall Scale',
-      scoringMethod: 'mean' as const,
-      showOutputs: ['mean'] as const,
+  it('uses normal automatic subscale headers without an extra Overall column', () => {
+    const automatic = {
+      ...buildAutoScale(rawHeaders, ['Participant', 'Age'], rows),
+      showOutputs: ['sum', 'mean'] as const,
     };
-    const resultWithoutSubscales = scoreDataset(rows, rawHeaders, [overall], {}, [], {
-      legacyScoreColumnIds: ['overall'],
-    });
+    const resultWithoutSubscales = scoreDataset(rows, rawHeaders, [automatic], {});
     const data = buildScoredColumnData({
       result: resultWithoutSubscales,
       rawHeaders,
       rawRows: rows,
       demographicColumns: ['Participant', 'Age'],
       idColumns: ['Participant'],
-      subscales: [],
+      subscales: [automatic],
     });
 
-    expect(data.headers).toContain('Overall Scale Score');
-    expect(data.headers).not.toContain('Overall Scale Mean');
+    expect(data.headers).toContain('Overall scale Sum');
+    expect(data.headers).toContain('Overall scale Mean');
+    expect(data.headers).not.toContain('Overall Scale Score');
   });
 
   it('avoids collisions between generated outputs and existing source headers', () => {
