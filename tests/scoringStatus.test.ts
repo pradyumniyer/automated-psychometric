@@ -14,6 +14,7 @@ import {
   waitingSubscaleStatus,
   outOfRangeDecisionMatches,
   outOfRangeDecisionSummary,
+  hasReverseWideningImpact,
 } from '../src/lib/responseScaleUi';
 
 function scoringResult(
@@ -112,6 +113,8 @@ describe('scoring status', () => {
   });
 
   it('explains how widening changes reverse-scored items', () => {
+    expect(hasReverseWideningImpact([{ column: 'Q3', reverse: true }], 1)).toBe(true);
+    expect(hasReverseWideningImpact([{ column: 'Q4', reverse: false }], 1)).toBe(false);
     expect(reverseWideningExplanation(
       [{ column: 'Q3', reverse: true }, { column: 'Q4', reverse: false }],
       1, 5, 1, 7,

@@ -38,7 +38,7 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, type OutOfRangeDecision } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWideningImpact, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, type OutOfRangeDecision } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
@@ -1916,7 +1916,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const differentScaleItems = multipleOutputs && minValue !== null && maxValue !== null
     ? hasDifferentScaleItem(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])), minValue, maxValue)
     : [];
-  const reverseWarning = minValue !== null && maxValue !== null && rangeOutliers?.suggestedAction === 'widen'
+  const reverseWarning = minValue !== null && maxValue !== null && rangeOutliers && hasReverseWideningImpact(items, rangeOutliers.count)
     ? reverseWideningExplanation(items, minValue, maxValue, Math.min(minValue, ...rangeOutliers.values), Math.max(maxValue, ...rangeOutliers.values))
     : null;
   return (

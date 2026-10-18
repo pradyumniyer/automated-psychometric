@@ -121,6 +121,13 @@ export function reverseWideningExplanation(
   return `Widening changes how reverse-scored items are calculated (${changes.join('; ')}) and changes scores for every respondent.`;
 }
 
+export function hasReverseWideningImpact(
+  items: { column: string; reverse: boolean }[],
+  outOfRangeCount: number,
+): boolean {
+  return outOfRangeCount > 0 && items.some((item) => item.reverse);
+}
+
 export function entryErrorGuidance(suggestedAction: 'missing' | 'widen'): string | null {
   return suggestedAction === 'missing'
     ? 'These values look like entry errors; Treat as missing is usually the right choice.'
