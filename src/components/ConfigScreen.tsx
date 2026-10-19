@@ -5,7 +5,7 @@ import {
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
-  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight,
+  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight, ChevronUp,
 } from 'lucide-react';
 import {
   ActionHistory,
@@ -31,8 +31,8 @@ import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
-import { detectDemographics, detectScale, COMMON_LIKERT_SCALES, LikertCategory } from '@/scientific/detection';
-import { applyOutOfRangeAction, assessRangeOutliers, copyFirstResponseScaleSettings, detectConventionalRange, findOutOfRangeCells } from '@/scientific/responseScales';
+import { detectDemographics, detectScale, COMMON_LIKERT_SCALES } from '@/scientific/detection';
+import { applyOutOfRangeAction, assessRangeOutliers, buildPresetLabels, collectOtherResponses, copyFirstResponseScaleSettings, detectConventionalRange, findOutOfRangeCells, matchResponsePreset, responseScaleFromLabels, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -50,7 +50,9 @@ interface SubscaleState {
   customFormula: string;
   scaleType: 'numeric' | 'categorical';
   minValue: number | null; maxValue: number | null;
-  labelMap: { label: string; value: number }[];
+  labelMap: ResponseScaleLabelSetting[];
+  flipped?: boolean;
+  startsAtZero?: boolean;
   confirmed?: boolean;
   outOfRange?: 'missing' | 'widen';
   outOfRangeDecision?: OutOfRangeDecision;
@@ -610,10 +612,13 @@ export function ConfigScreen({
     markDirty();
   };
   const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
-  const setScaleType = (id: string, t: 'numeric' | 'categorical') => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, scaleType: t } : s)); markDirty(); };
   const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: true } : s)); markDirty(); };
   const confirmScaleRange = (id: string) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true } : s)); markDirty(); };
-  const setLabelMap = (id: string, lm: { label: string; value: number }[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm } : s)); markDirty(); };
+  const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm } : s)); markDirty(); };
+  const setWordOptions = (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => {
+    setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, ...patch } : s));
+    markDirty();
+  };
 
   const autoDetectScale = (subscaleId: string) => {
     const sub = subscaleStates.find((s) => s.id === subscaleId);
@@ -864,6 +869,8 @@ export function ConfigScreen({
         minValue: scale?.minValue ?? null,
         maxValue: scale?.maxValue ?? null,
         labelMap: scale?.labelMap || [],
+        flipped: scale?.flipped ?? false,
+        startsAtZero: scale?.startsAtZero ?? false,
         confirmed: scale?.confirmed === true,
         outOfRangeDecision: scale?.outOfRangeDecision,
         displayOrder: nextSubscales.length,
@@ -1278,7 +1285,7 @@ export function ConfigScreen({
                     displayIds={getDisplayIds(dataset?.rows ?? [], demoCols)}
                     focusSubscaleId={scaleFocusId}
                     onFocusHandled={() => setScaleFocusId(null)}
-                    onSetScaleType={setScaleType} onSetScaleRange={setScaleRange}
+                    onSetScaleRange={setScaleRange}
                     onConfirmRange={confirmScaleRange}
                     onApplyOutOfRange={async (id, action, values, cells) => {
                       if (!dataset) return;
@@ -1308,7 +1315,7 @@ export function ConfigScreen({
                       markDirty();
                     }}
                     onHighlightCell={(rowIndex, columnKey) => setHighlightCell({ rowIndex, columnKey })}
-                    onSetLabelMap={setLabelMap} onToggleOutput={toggleScoreOutput}
+                    onSetLabelMap={setLabelMap} onSetWordOptions={setWordOptions} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
                     onApplyToAll={applyScaleToAll}
                     overallSettings={overallSettings}
@@ -1705,19 +1712,19 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleType, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onChangeOutOfRangeDecision, onHighlightCell, onSetLabelMap, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onChangeOutOfRangeDecision, onHighlightCell, onSetLabelMap, onSetWordOptions, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
   displayIds: string[];
   focusSubscaleId: string | null;
   onFocusHandled: () => void;
-  onSetScaleType: (id: string, t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
   onConfirmRange: (id: string) => void;
   onApplyOutOfRange: (id: string, action: 'missing' | 'widen', values: number[], cells: string[]) => Promise<void>;
   onChangeOutOfRangeDecision: (id: string) => void;
   onHighlightCell: (rowIndex: number, columnKey: string) => void;
-  onSetLabelMap: (id: string, lm: { label: string; value: number }[]) => void;
+  onSetLabelMap: (id: string, lm: ResponseScaleLabelSetting[]) => void;
+  onSetWordOptions: (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => void;
   onToggleOutput: (id: string, output: ScoreOutput) => void;
   onSetCustomFormula: (id: string, f: string) => void;
   onAutoDetect: (id: string) => void;
@@ -1830,14 +1837,13 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
         {subscales.map((sub) => (
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
             showOutputs={shownScoreOutputs(sub.showOutputs, sub.scoringMethod)}
-            minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap} confirmed={sub.confirmed}
+            minValue={sub.minValue} maxValue={sub.maxValue} labelMap={sub.labelMap} confirmed={sub.confirmed} flipped={sub.flipped} startsAtZero={sub.startsAtZero}
             items={sub.items}
             itemCols={sub.items.map((i) => i.column)}
             onSetScoringMethod={() => {}}
             onToggleOutput={(output) => onToggleOutput(sub.id, output)}
             multipleOutputs
             onSetCustomFormula={(f) => onSetCustomFormula(sub.id, f)}
-            onSetScaleType={(t) => onSetScaleType(sub.id, t)}
             onSetScaleRange={(min, max) => onSetScaleRange(sub.id, min, max)}
             onConfirmRange={() => onConfirmRange(sub.id)}
             rows={rows}
@@ -1869,6 +1875,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
               { min: sub.minValue, max: sub.maxValue },
             ).count === 1 ? '' : 's'} outside the scale` : undefined}
             onSetLabelMap={(lm) => onSetLabelMap(sub.id, lm)}
+            onSetWordOptions={(patch) => onSetWordOptions(sub.id, patch)}
             onAutoDetect={() => onAutoDetect(sub.id)}
             formulaPreviewFn={formulaPreviewFn}
           />
@@ -1878,10 +1885,11 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   );
 }
 
-function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, outOfRangeDecision, onChangeOutOfRangeDecision, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleType, onSetScaleRange, onConfirmRange, onSetLabelMap, onAutoDetect, formulaPreviewFn }: {
+function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, labelMap, confirmed, flipped = false, startsAtZero = false, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, outOfRangeDecision, onChangeOutOfRangeDecision, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleRange, onConfirmRange, onSetLabelMap, onSetWordOptions, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
-  minValue: number | null; maxValue: number | null; labelMap: { label: string; value: number }[]; itemCols: string[];
+  minValue: number | null; maxValue: number | null; labelMap: ResponseScaleLabelSetting[]; itemCols: string[];
+  flipped?: boolean; startsAtZero?: boolean;
   confirmed?: boolean;
   items?: { column: string; reverse: boolean }[];
   rows?: Record<string, unknown>[];
@@ -1899,10 +1907,10 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
   onToggleOutput: (output: ScoreOutput) => void;
   onSetCustomFormula: (f: string) => void;
-  onSetScaleType: (t: 'numeric' | 'categorical') => void;
   onSetScaleRange: (min: number | null, max: number | null) => void;
   onConfirmRange?: () => void;
-  onSetLabelMap: (lm: { label: string; value: number }[]) => void;
+  onSetLabelMap: (lm: ResponseScaleLabelSetting[]) => void;
+  onSetWordOptions: (patch: { flipped?: boolean; startsAtZero?: boolean }) => void;
   onAutoDetect: () => void;
   formulaPreviewFn: (formula: string, itemCols: string[]) => string;
 }) {
@@ -1927,15 +1935,39 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const reverseWarning = minValue !== null && maxValue !== null && rangeOutliers && hasReverseWideningImpact(items, rangeOutliers.count)
     ? reverseWideningExplanation(items, minValue, maxValue, Math.min(minValue, ...rangeOutliers.values), Math.max(maxValue, ...rangeOutliers.values))
     : null;
+  const responseScale = responseScaleFromLabels(labelMap, { min: minValue ?? 0, max: maxValue ?? 0 });
+  const otherResponses = collectOtherResponses(rows, itemCols, responseScale);
+  const distinctWords = [...new Set(itemCols.flatMap((column) => rows.map((row) => row[column]))
+    .filter((value): value is string => typeof value === 'string' && value.trim() !== '' && Number.isNaN(Number(value))))];
+  const presetMatch = matchResponsePreset(distinctWords);
+  const [showWordLabels, setShowWordLabels] = useState(scaleType === 'categorical' || distinctWords.length > 0);
+  const wordsVisible = showWordLabels || scaleType === 'categorical' || distinctWords.length > 0;
+  const updateLabel = (index: number, value: number | null) => {
+    const next = labelMap.map((entry, entryIndex) => entryIndex === index ? { ...entry, value } : entry);
+    onSetLabelMap(next);
+    const numeric = next.map((entry) => entry.value).filter((entry): entry is number => entry !== null && Number.isFinite(entry));
+    if (numeric.length) onSetScaleRange(Math.min(...numeric), Math.max(...numeric));
+  };
+  const applyPreset = (nameValue: string) => {
+    if (!nameValue) return;
+    const preset = matchResponsePreset(distinctWords).preset;
+    if (!preset || preset.name !== nameValue) return;
+    const presetLabels = buildPresetLabels(nameValue, { flipped, startsAtZero });
+    const extras = presetMatch.extraResponses.map((text) => ({ text, value: null, kind: 'special' as const }));
+    onSetLabelMap([...presetLabels, ...extras].map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
+    onSetScaleRange(Math.min(...presetLabels.map((entry) => entry.value!)), Math.max(...presetLabels.map((entry) => entry.value!)));
+    onSetWordOptions({});
+  };
   return (
     <Card className="p-3" data-response-scale-id={collapsible ? cardId : undefined}>
       <div className="flex items-center justify-between mb-2">
         {collapsible ? (
-          <button type="button" onClick={onToggleOpen} className="w-full text-left flex items-center gap-2">
+          <button type="button" onClick={onToggleOpen} aria-expanded={isOpen} aria-controls={cardId ? `${cardId}-details` : undefined} className="w-full text-left flex items-center gap-2">
             {isOpen ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
             <span className="font-semibold text-sm text-secondary-900">{name}</span>
             {summaryLine && <span className="text-xs text-secondary-500">{summaryLine}</span>}
             {attentionChip && <span className="ml-auto px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">{attentionChip}</span>}
+            <span className="ml-auto text-xs text-primary-600 flex items-center gap-1">{isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{isOpen ? 'Hide details' : 'Show details'}</span>
           </button>
         ) : (
           <>
@@ -1952,7 +1984,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
         )}
       </div>
       {(!collapsible || isOpen) && (
-        <div>
+        <div id={cardId ? `${cardId}-details` : undefined}>
       {differentScaleItems.length > 0 && (
         <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
           {differentScaleItems.map(({ item, min: itemMin, max: itemMax }) => (
@@ -2018,6 +2050,69 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           <button type="button" className="ml-1 underline hover:text-secondary-700" onClick={onChangeOutOfRangeDecision}>Change</button>
         </div>
       )}
+      {otherResponses.length > 0 && (
+        <div className="mb-2">
+          <div className="text-xs font-medium text-secondary-600 mb-1">Other responses found</div>
+          <table className="w-full text-xs">
+            <thead><tr className="text-left text-secondary-500"><th className="font-normal">Response</th><th className="font-normal">Count</th><th className="font-normal">Number</th></tr></thead>
+            <tbody>{otherResponses.map((entry) => {
+              const labelIndex = labelMap.findIndex((label) => label.label.trim().toLocaleLowerCase() === entry.response.toLocaleLowerCase());
+              const currentValue = labelIndex >= 0 ? labelMap[labelIndex].value : entry.value;
+              return <tr key={entry.response} className={entry.kind === 'built_in' ? 'text-secondary-400' : 'text-warning-700'}>
+                <td className="py-1">{entry.response}</td><td className="py-1">{entry.count}</td>
+                <td className="py-1"><input type="number" value={currentValue ?? ''} aria-label={`${entry.response} score`} onChange={(event) => {
+                  const value = event.target.value === '' ? null : Number(event.target.value);
+                  if (labelIndex >= 0) updateLabel(labelIndex, value);
+                  else {
+                    const next = [...labelMap, { label: entry.response, value, kind: entry.kind === 'built_in' ? 'special' as const : 'scale' as const }];
+                    onSetLabelMap(next);
+                    const numeric = next.map((label) => label.value).filter((number): number is number => number !== null);
+                    if (numeric.length) onSetScaleRange(Math.min(...numeric), Math.max(...numeric));
+                  }
+                }} className="w-16 px-2 py-1 border border-secondary-200 rounded" placeholder="—" /></td>
+              </tr>;
+            })}</tbody>
+          </table>
+          <p className="mt-1 text-[11px] text-secondary-400">Built-in missing codes: N/A, NA, Prefer not to say, -99, -999.</p>
+        </div>
+      )}
+      {!wordsVisible && <button type="button" onClick={() => setShowWordLabels(true)} className="text-xs text-primary-600 hover:underline mb-2">Responses are words</button>}
+      {wordsVisible && (
+        <div className="mb-2 space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-secondary-500">Preset</label>
+            <select value={presetMatch.preset?.name ?? ''} onChange={(event) => applyPreset(event.target.value)} className="flex-1 px-2 py-1 text-xs border border-secondary-200 rounded bg-white">
+              <option value="">Choose a preset…</option>
+              {COMMON_LIKERT_SCALES.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+            </select>
+            <button type="button" onClick={() => {
+              const nextFlipped = !flipped;
+              const matched: ResponseScaleLabelSetting[] = presetMatch.preset
+                ? buildPresetLabels(presetMatch.preset.name, { flipped: nextFlipped, startsAtZero }).map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind }))
+                : labelMap.slice().reverse();
+              onSetWordOptions({ flipped: nextFlipped });
+              if (presetMatch.preset) onSetLabelMap([...matched, ...presetMatch.extraResponses.map((text) => ({ label: text, value: null, kind: 'special' as const }))]);
+              else onSetLabelMap(matched);
+            }} className="text-xs text-primary-600 hover:underline">Flip order</button>
+            <button type="button" onClick={() => {
+              const nextStarts = !startsAtZero;
+              onSetWordOptions({ startsAtZero: nextStarts });
+              if (presetMatch.preset) {
+                const mapped = buildPresetLabels(presetMatch.preset.name, { flipped, startsAtZero: nextStarts });
+                onSetLabelMap(mapped.map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
+              }
+            }} className="text-xs text-primary-600 hover:underline">Start at 0</button>
+          </div>
+          {presetMatch.suggestDemographicOrId ? <p className="text-xs text-warning-700">This looks like a demographic or ID, not a scale item.</p> : <>
+            {labelMap.map((entry, index) => <div key={`${entry.label}-${index}`} className="flex items-center gap-1">
+              <span className="flex-1 px-2 py-1 text-xs border border-secondary-100 rounded text-secondary-700">{entry.label}</span><ArrowRight className="w-3 h-3 text-secondary-400" />
+              <input type="number" value={entry.value ?? ''} onChange={(event) => updateLabel(index, event.target.value === '' ? null : Number(event.target.value))} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded" placeholder="needs a number" />
+              {entry.kind === 'special' && <label className="text-[11px] text-secondary-500"><input type="checkbox" checked={entry.reverse === true} onChange={(event) => onSetLabelMap(labelMap.map((label, labelIndex) => labelIndex === index ? { ...label, reverse: event.target.checked } : label))} /> reverse</label>}
+            </div>)}
+            {presetMatch.extraResponses.length > 0 && <p className="text-xs text-warning-700">Values without a label need a number.</p>}
+          </>}
+        </div>
+      )}
       <div className="flex items-center gap-1 mb-2">
         {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
         {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
@@ -2044,57 +2139,11 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {preview && !formulaError && <p className="text-xs text-success-600 mb-1">Preview: {preview}</p>}
         </div>
       )}
-      {/* Scale type */}
-      <div className="flex items-center gap-1 mb-2">
-        <span className="text-xs text-secondary-500">Type:</span>
-        {(['numeric', 'categorical'] as const).map((t) => (
-          <button key={t} onClick={() => onSetScaleType(t)} className={`px-2 py-0.5 text-xs rounded-md transition-colors ${scaleType === t ? 'bg-primary-600 text-white' : 'bg-secondary-100 text-secondary-600 hover:bg-secondary-200'}`}>{t === 'numeric' ? 'Numeric' : 'Categorical'}</button>
-        ))}
-      </div>
-      {/* Likert preset picker (categorical only) */}
-      {scaleType === 'categorical' && (
-      <div className="mb-2">
-        <label className="text-xs text-secondary-500 block mb-1">Preset scale:</label>
-        <select
-          value=""
-          onChange={(e) => {
-            const preset = COMMON_LIKERT_SCALES.find((p) => p.name === e.target.value);
-            if (preset) {
-              onSetLabelMap(preset.labels.map((l) => ({ label: l.label, value: l.value })));
-              onSetScaleRange(Math.min(...preset.labels.map((l) => l.value)), Math.max(...preset.labels.map((l) => l.value)));
-            }
-          }}
-          className="w-full px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400 bg-white"
-        >
-          <option value="">Choose a preset…</option>
-          {(['agreement', 'frequency', 'satisfaction', 'quality', 'importance', 'likelihood', 'severity'] as LikertCategory[]).map((cat) => (
-            <optgroup key={cat} label={cat.charAt(0).toUpperCase() + cat.slice(1)}>
-              {COMMON_LIKERT_SCALES.filter((p) => p.category === cat).map((p) => (
-                <option key={p.name} value={p.name}>{p.name}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
-      )}
       {scaleType === 'numeric' && (
         <div className="flex items-center gap-2">
           <input type="number" value={minValue ?? ''} onChange={(e) => onSetScaleRange(e.target.value ? Number(e.target.value) : null, maxValue)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Min" aria-label={`${name} minimum`} />
           <span className="text-secondary-400 text-xs">to</span>
           <input type="number" value={maxValue ?? ''} onChange={(e) => onSetScaleRange(minValue, e.target.value ? Number(e.target.value) : null)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Max" aria-label={`${name} maximum`} />
-        </div>
-      )}
-      {scaleType === 'categorical' && (
-        <div className="space-y-1">
-          {labelMap.map((e, i) => (
-            <div key={i} className="flex items-center gap-1 w-full">
-              <input value={e.label} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, label: ev.target.value } : lm))} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-              <ArrowRight className="w-3 h-3 text-secondary-400 flex-shrink-0" />
-              <input type="number" value={e.value} onChange={(ev) => onSetLabelMap(labelMap.map((lm, j) => j === i ? { ...lm, value: Number(ev.target.value) } : lm))} className="w-12 flex-shrink-0 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" />
-              <button onClick={() => onSetLabelMap(labelMap.filter((_, j) => j !== i))} className="p-0.5 text-error-400 hover:text-error-600 flex-shrink-0"><X className="w-3 h-3" /></button>
-            </div>
-          ))}
-          <button onClick={() => onSetLabelMap([...labelMap, { label: '', value: 0 }])} className="text-xs text-primary-600 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add label</button>
         </div>
       )}
         </div>
@@ -2159,10 +2208,10 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
             : undefined;
           const scaleRange = sub.minValue !== null && sub.maxValue !== null
             ? { min: sub.minValue, max: sub.maxValue }
-            : sub.labelMap.length
+              : sub.labelMap.some((entry) => entry.value !== null)
               ? {
-                  min: Math.min(...sub.labelMap.map((entry) => entry.value)),
-                  max: Math.max(...sub.labelMap.map((entry) => entry.value)),
+                  min: Math.min(...sub.labelMap.flatMap((entry) => entry.value === null ? [] : [entry.value])),
+                  max: Math.max(...sub.labelMap.flatMap((entry) => entry.value === null ? [] : [entry.value])),
                 }
               : null;
           const outputRange = isSubscale && output

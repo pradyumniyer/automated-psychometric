@@ -41,7 +41,7 @@ export interface SurveyConfigRecord {
     type: 'numeric' | 'categorical';
     min?: number;
     max?: number;
-    label_map?: { label: string; value: number }[];
+    label_map?: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
     confirmed?: boolean;
     out_of_range?: 'missing' | 'widen';
     out_of_range_decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };

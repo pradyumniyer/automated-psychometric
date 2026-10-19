@@ -20,7 +20,7 @@ export interface ScreenSubscaleState {
   scaleType: 'numeric' | 'categorical';
   minValue: number | null;
   maxValue: number | null;
-  labelMap: { label: string; value: number }[];
+  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   confirmed?: boolean;
   outOfRange?: 'missing' | 'widen';
   outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };

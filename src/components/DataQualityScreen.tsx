@@ -38,7 +38,7 @@ function configuredRange(subscale: SubscaleState): { min: number; max: number } 
   ) {
     return { min: subscale.minValue!, max: subscale.maxValue! };
   }
-  const values = subscale.labelMap.map((entry) => entry.value);
+  const values = subscale.labelMap.map((entry) => entry.value).filter((value): value is number => value !== null);
   if (values.length > 0 && values.every(Number.isFinite)) {
     return { min: Math.min(...values), max: Math.max(...values) };
   }

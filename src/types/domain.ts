@@ -64,7 +64,7 @@ export interface ResponseScale {
   scale_type: 'numeric' | 'categorical';
   min_value: number | null;
   max_value: number | null;
-  label_map: { label: string; value: number }[];
+  label_map: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   confirmed?: boolean;
   out_of_range?: 'missing' | 'widen';
   out_of_range_decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
@@ -114,7 +114,9 @@ export interface TemplateDefinition {
     scaleType: 'numeric' | 'categorical';
     minValue: number | null;
     maxValue: number | null;
-    labelMap: { label: string; value: number }[];
+    labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+    flipped?: boolean;
+    startsAtZero?: boolean;
     confirmed?: boolean;
     outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
   }[];
