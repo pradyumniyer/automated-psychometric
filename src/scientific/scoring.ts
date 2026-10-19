@@ -587,7 +587,7 @@ export function buildAutoScale(
       labelMap: detected.scaleType === 'categorical'
         ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
         : [],
-      confirmed: true,
+      confirmed: false,
     },
   };
 }

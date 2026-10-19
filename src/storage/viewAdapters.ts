@@ -286,7 +286,7 @@ export function fromSurveyConfigRecord(
           min_value: automatic.responseScale.minValue ?? null,
           max_value: automatic.responseScale.maxValue ?? null,
           label_map: automatic.responseScale.labelMap ?? [],
-          confirmed: true,
+          confirmed: false,
           created_at: new Date(0).toISOString(),
         },
         bands: [],

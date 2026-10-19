@@ -64,7 +64,7 @@ describe('automatic overall subscale', () => {
         .filter((header) => !['ID', 'Age'].includes(header))
         .map((column, order) => ({ column, order, reverse: false })),
       scoringMethod: 'sum',
-      responseScale: { scaleType: 'numeric', minValue: 1, maxValue: 5, confirmed: true },
+      responseScale: { scaleType: 'numeric', minValue: 1, maxValue: 5, confirmed: false },
     });
 
     expect(result.rows.map((row) => row['Overall scale Sum'])).toEqual([
@@ -164,7 +164,7 @@ describe('automatic overall subscale', () => {
       scoringMethod: 'sum',
       minValue: 1,
       maxValue: 5,
-      confirmed: true,
+      confirmed: false,
     });
   });
 
