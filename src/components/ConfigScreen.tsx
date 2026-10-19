@@ -294,6 +294,7 @@ export function ConfigScreen({
   const itemColumns = allColumns.filter((c) => !demoColumnNames.has(c));
   const realSubscales = subscaleStates.filter((subscale) => !isAutomaticSubscale(subscale));
   const hasRealSubscales = realSubscales.length > 0;
+  const subscalesForPanel = hasRealSubscales ? realSubscales : subscaleStates;
   const unassignedItems = itemColumns.filter((col) => !realSubscales.some((s) => s.items.some((item) => item.column === col)));
 
   // ── Auto-save (debounced) ──
@@ -476,8 +477,9 @@ export function ConfigScreen({
     if (automatic) {
       const hasSettings = automatic.confirmed === true
         || automatic.outOfRangeDecision !== undefined
+        || automatic.items.some((item) => item.reverse)
         || (bandStatesByOutput[automatic.name] && Object.values(bandStatesByOutput[automatic.name]).some((bands) => bands?.length));
-      if (hasSettings && !window.confirm('Your settings for the Overall scale will be removed. Continue?')) return;
+      if (hasSettings && !window.confirm('Your settings for the Overall scale, including reverse-item settings, will be removed. Continue?')) return;
       const withoutAutomatic = subscaleStates.filter((subscale) => !isAutomaticSubscale(subscale));
       const nextBands = { ...bandStates };
       delete nextBands[automatic.name];
@@ -1262,7 +1264,7 @@ export function ConfigScreen({
                 )}
                 {activeStep === 'subscales' && (
                   <SubscalesPanel
-                    subscales={realSubscales} unassignedItems={unassignedItems}
+                    subscales={subscalesForPanel} unassignedItems={unassignedItems}
                     onAddSubscale={addSubscale} onDeleteSubscale={deleteSubscale} onRenameSubscale={renameSubscale}
                     onRemoveItem={removeItemFromSubscale} onToggleReverse={toggleReverse} onMoveItem={moveItem}
                     selectedItems={selectedItems} onToggleSelection={toggleItemSelection}
@@ -1666,9 +1668,16 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
             onClick={() => onSetActiveSubscale(sub.id)}
             className={`p-3 rounded-xl border bg-white transition-all cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-secondary-200 hover:border-secondary-300'}`}>
             <div className="flex items-center justify-between mb-2">
-              <input value={sub.name} onChange={(e) => onRenameSubscale(sub.id, e.target.value)} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold text-secondary-900 bg-transparent border-none outline-none flex-1 min-w-0 focus:underline" />
-              <button onClick={(e) => { e.stopPropagation(); onDeleteSubscale(sub.id); }} className="p-1 text-error-400 hover:text-error-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+              {isAutomaticSubscale(sub) ? (
+                <span className="text-sm font-semibold text-secondary-900">Overall scale (all items)</span>
+              ) : (
+                <>
+                  <input value={sub.name} onChange={(e) => onRenameSubscale(sub.id, e.target.value)} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold text-secondary-900 bg-transparent border-none outline-none flex-1 min-w-0 focus:underline" />
+                  <button onClick={(e) => { e.stopPropagation(); onDeleteSubscale(sub.id); }} className="p-1 text-error-400 hover:text-error-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                </>
+              )}
             </div>
+            {isAutomaticSubscale(sub) && <p className="text-xs text-secondary-500 mb-2">No subscales yet: all items are scored together as one scale. Add a subscale to group items.</p>}
             {sub.items.length === 0 ? (
               <p className="text-xs text-secondary-400 py-2 text-center border border-dashed border-secondary-100 rounded">Select items above and add them here</p>
             ) : (
@@ -1679,10 +1688,10 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
                     <span className="text-secondary-400 font-mono w-4 flex-shrink-0">{idx + 1}.</span>
                     <span className="flex-1 min-w-0 text-secondary-700 truncate" title={item.column}>{item.column}</span>
                     <div className="flex items-center gap-0.5 flex-shrink-0">
-                      <button onClick={() => onMoveItem(sub.id, idx, 'up')} disabled={idx === 0} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-[-90deg]" /></button>
-                      <button onClick={() => onMoveItem(sub.id, idx, 'down')} disabled={idx === sub.items.length - 1} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-90" /></button>
+                      {!isAutomaticSubscale(sub) && <button onClick={() => onMoveItem(sub.id, idx, 'up')} disabled={idx === 0} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-[-90deg]" /></button>}
+                      {!isAutomaticSubscale(sub) && <button onClick={() => onMoveItem(sub.id, idx, 'down')} disabled={idx === sub.items.length - 1} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-90" /></button>}
                       <button onClick={() => onToggleReverse(sub.id, item.column)} className={`px-1.5 py-0.5 text-xs rounded-full font-medium transition-colors ${item.reverse ? 'bg-warning-100 text-warning-700 border border-warning-300' : 'bg-secondary-100 text-secondary-400 border border-secondary-200 hover:text-secondary-600'}`}>Rev</button>
-                      <button onClick={() => onRemoveItem(sub.id, item.column)} className="p-0.5 text-error-400 hover:text-error-600"><X className="w-3 h-3" /></button>
+                      {!isAutomaticSubscale(sub) && <button onClick={() => onRemoveItem(sub.id, item.column)} className="p-0.5 text-error-400 hover:text-error-600"><X className="w-3 h-3" /></button>}
                     </div>
                   </div>
                 ))}

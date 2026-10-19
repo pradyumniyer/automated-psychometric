@@ -174,4 +174,49 @@ describe('score-cache invalidation for scoring configuration changes', () => {
     const changedHashes = await createScoreHashes(dataset, changedConfig, buildSubscaleConfigs(changedConfig), []);
     await expect(scoreRepository.getCurrent(dataset.id, changedHashes)).resolves.toBeNull();
   });
+
+  it('invalidates the cached score when an automatic item reverse flag changes', async () => {
+    const project = await projectRepository.create({ name: 'Automatic reverse hash study', description: '' });
+    const dataset = await datasetRepository.import({
+      projectId: project.id,
+      fileName: 'automatic-reverse.csv',
+      sheetName: 'Responses',
+      headers: ['ID', 'Q1', 'Q2'],
+      rows: [{ ID: 'P1', Q1: 1, Q2: 2 }],
+      columnMeta: {},
+    });
+    const automatic = {
+      id: 'auto-overall',
+      name: 'Overall scale',
+      items: [
+        { column: 'Q1', order: 0, reverse: false },
+        { column: 'Q2', order: 1, reverse: false },
+      ],
+      scoringMethod: 'sum' as const,
+      customFormula: '',
+      scaleType: 'numeric' as const,
+      minValue: 1,
+      maxValue: 5,
+      labelMap: [],
+      confirmed: false,
+      displayOrder: 0,
+    };
+    const makeConfig = (reverse: boolean) => toSurveyConfigRecord({
+      datasetId: dataset.id,
+      projectId: project.id,
+      headers: dataset.headers,
+      demographicColumns: [],
+      subscales: [{
+        ...automatic,
+        items: automatic.items.map((item) => item.column === 'Q1' ? { ...item, reverse } : item),
+      }],
+      bands: {},
+      overallScale: null,
+    });
+    const initial = makeConfig(false);
+    const changed = makeConfig(true);
+    const initialHashes = await createScoreHashes(dataset, initial, buildSubscaleConfigs(initial), []);
+    const changedHashes = await createScoreHashes(dataset, changed, buildSubscaleConfigs(changed), []);
+    expect(changedHashes.config_hash).not.toBe(initialHashes.config_hash);
+  });
 });

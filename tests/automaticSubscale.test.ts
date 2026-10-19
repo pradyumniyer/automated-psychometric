@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Papa from 'papaparse';
 import { describe, expect, it } from 'vitest';
 import { getUnscoredRowSummary } from '../src/lib/scoringStatus';
+import { waitingSubscaleStatus } from '../src/lib/responseScaleUi';
 import { buildAutoScale, isAutomaticSubscale, scoreDataset } from '../src/scientific/scoring';
 import { ensureAutomaticSubscale, fromSurveyConfigRecord } from '../src/storage/viewAdapters';
 import { buildSubscaleConfigs, createScoreHashes } from '../src/storage/scoreHashes';
@@ -65,6 +66,7 @@ describe('automatic overall subscale', () => {
       scoringMethod: 'sum',
       responseScale: { scaleType: 'numeric', minValue: 1, maxValue: 5, confirmed: true },
     });
+
     expect(result.rows.map((row) => row['Overall scale Sum'])).toEqual([
       33, 34, 27, 28, 37, 36, 37, 28, 37, 34, 31, 25, 25, 26, 39,
       34, 30, 26, 33, 29, 21, 34, 31, 32, null, null, 30, 34, null, null,
@@ -78,6 +80,47 @@ describe('automatic overall subscale', () => {
       '4 rows have at least one score missing because an item is missing, N/A or outside the scale: P25, P26, P29, P30',
     );
     expect(isAutomaticSubscale(automatic)).toBe(true);
+  });
+
+  it('scores reverse items like the committed Overall fixture and leaves invalid rows blank', () => {
+    const { rows, headers } = fixtureA();
+    const automatic = { ...buildAutoScale(headers, ['ID', 'Age'], rows), responseScale: { ...buildAutoScale(headers, ['ID', 'Age'], rows).responseScale, confirmed: false } };
+    const reversed = {
+      ...automatic,
+      items: automatic.items.map((item) => ({ ...item, reverse: ['Q3', 'Q6', 'Q9'].includes(item.column) })),
+      responseScale: { ...automatic.responseScale, confirmed: true },
+    };
+    const result = scoreDataset(rows, headers, [{ ...reversed, showOutputs: ['sum', 'mean'] }], {}, [], {
+      rowIds: rows.map((row) => row.ID),
+      allowedNonresponse: ['N/A', 'Prefer not to say'],
+    });
+    const expected = JSON.parse(readFileSync(
+      new URL('../docs/fixtures/fixture_A_expected.json', import.meta.url),
+      'utf8',
+    )) as { per_row: Record<string, { scores_no_proration: { Overall: { sum: number | null; mean: number | null } } }> };
+    for (const row of rows) {
+      const actual = result.rows.find((candidate) => candidate.ID === row.ID);
+      const expectedScore = expected.per_row[row.ID].scores_no_proration.Overall;
+      expect(actual?.['Overall scale Sum']).toBe(expectedScore.sum);
+      expect(actual?.['Overall scale Mean']).toBe(expectedScore.mean);
+    }
+  });
+
+  it('does not score an unconfirmed automatic range when reverse items are present', () => {
+    const { rows, headers } = fixtureA();
+    const automatic = {
+      ...buildAutoScale(headers, ['ID', 'Age'], rows),
+      responseScale: { ...buildAutoScale(headers, ['ID', 'Age'], rows).responseScale, confirmed: false },
+    };
+    const score = () => scoreDataset(rows.slice(0, 1), headers, [{
+      ...automatic,
+      items: automatic.items.map((item) => ({ ...item, reverse: item.column === 'Q3' })),
+      showOutputs: ['sum'],
+    }], {}, [], { rowIds: ['P01'] });
+    expect(score).toThrow('Confirm the range for Overall scale (it has reverse items)');
+    expect(waitingSubscaleStatus(['Overall scale'])).toBe(
+      'Scoring is waiting: confirm the scale range for Overall scale (it has reverse items).',
+    );
   });
 
   it('uses per-output bands on the automatic subscale', () => {
