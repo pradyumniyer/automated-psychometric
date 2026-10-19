@@ -1962,7 +1962,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
     <Card className="p-3" data-response-scale-id={collapsible ? cardId : undefined}>
       <div className="flex items-center justify-between mb-2">
         {collapsible ? (
-          <button type="button" onClick={onToggleOpen} aria-expanded={isOpen} aria-controls={cardId ? `${cardId}-details` : undefined} className="w-full text-left flex items-center gap-2">
+          <button type="button" onClick={onToggleOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${name}`} aria-expanded={isOpen} aria-controls={cardId ? `${cardId}-details` : undefined} className="w-full text-left flex items-center gap-2">
             {isOpen ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
             <span className="font-semibold text-sm text-secondary-900">{name}</span>
             {summaryLine && <span className="text-xs text-secondary-500">{summaryLine}</span>}
