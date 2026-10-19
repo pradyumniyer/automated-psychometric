@@ -25,7 +25,9 @@ export interface SubscaleStateLike {
   scaleType: 'numeric' | 'categorical';
   minValue: number | null;
   maxValue: number | null;
-  labelMap: { label: string; value: number }[];
+  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+  flipped?: boolean;
+  startsAtZero?: boolean;
   confirmed?: boolean;
   outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
 }
@@ -118,6 +120,8 @@ export function buildTemplateDefinition(
       maxValue: s.maxValue,
       labelMap: s.labelMap,
       confirmed: s.confirmed === true,
+      flipped: s.flipped ?? false,
+      startsAtZero: s.startsAtZero ?? false,
       outOfRangeDecision: s.outOfRangeDecision,
     })),
     interpretationBands: subscaleStates.flatMap((subscale) => {

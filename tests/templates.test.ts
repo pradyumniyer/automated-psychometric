@@ -80,4 +80,19 @@ describe('template score output settings', () => {
       mean: [{ name: 'Legacy band', minScore: 4, maxScore: 8, color: '#ff0000' }],
     });
   });
+
+  it('round-trips word values, flags, and an unmatched value as needs a number', () => {
+    const template = buildTemplateDefinition([{
+      name: 'Mood', items: [], scoringMethod: 'mean', customFormula: '', scaleType: 'categorical',
+      minValue: 0, maxValue: 4, labelMap: [
+        { label: 'Never', value: 0 },
+        { label: 'Maybe', value: null },
+      ], confirmed: true, flipped: true, startsAtZero: true,
+    }], {}, {});
+    expect(template.responseScales[0]).toMatchObject({
+      minValue: 0, maxValue: 4, confirmed: true,
+      labelMap: [{ label: 'Never', value: 0 }, { label: 'Maybe', value: null }],
+      flipped: true, startsAtZero: true,
+    });
+  });
 });
