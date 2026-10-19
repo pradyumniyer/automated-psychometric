@@ -10,6 +10,13 @@ export interface ResponseScaleLabel {
   reverse?: boolean;
 }
 
+export interface ResponseScaleLabelSetting {
+  label: string;
+  value: number | null;
+  kind?: ResponseScaleLabelKind;
+  reverse?: boolean;
+}
+
 export interface ResponseScaleV2 {
   min: number;
   max: number;
@@ -24,9 +31,11 @@ export interface ResponseScaleV2 {
 export interface ResponseScaleSettings {
   minValue: number | null;
   maxValue: number | null;
-  labelMap: { label: string; value: number }[];
+  labelMap: ResponseScaleLabelSetting[];
   confirmed?: boolean;
   outOfRange?: OutOfRangeAction;
+  flipped?: boolean;
+  startsAtZero?: boolean;
 }
 
 export function copyFirstResponseScaleSettings<T extends ResponseScaleSettings>(
@@ -38,6 +47,8 @@ export function copyFirstResponseScaleSettings<T extends ResponseScaleSettings>(
     minValue: first.minValue,
     maxValue: first.maxValue,
     labelMap: first.labelMap.map((label) => ({ ...label })),
+    flipped: first.flipped ?? false,
+    startsAtZero: first.startsAtZero ?? false,
     confirmed: first.confirmed === true,
     outOfRange: first.outOfRange,
   }));
@@ -52,6 +63,7 @@ export type ResolvedResponse =
   | { kind: "unmapped"; value: null; raw: unknown };
 
 const BUILT_IN_NUMERIC_MISSING_CODES = new Set(["-99", "-999"]);
+export const BUILT_IN_MISSING_CODES = ["N/A", "NA", "Prefer not to say", "-99", "-999"];
 const CONVENTIONAL_RANGES = [
   { min: 0, max: 3 },
   { min: 0, max: 4 },
@@ -71,6 +83,36 @@ const CONVENTIONAL_RANGES = [
 
 export function normalizeResponseText(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+export function responseScaleFromLabels(labels: ResponseScaleLabelSetting[], range: NumericRange): ResponseScaleV2 {
+  return {
+    min: range.min, max: range.max, rangeSource: "manual", confirmed: true,
+    flipped: false, startsAtZero: false, outOfRange: "missing",
+    labels: labels.map((label) => ({ text: label.label, value: label.value,
+      kind: label.kind ?? (label.value === null ? "special" : "scale"), reverse: label.reverse })),
+  };
+}
+
+export interface OtherResponse { response: string; count: number; kind: "built_in" | "unknown"; value: number | null; }
+
+export function collectOtherResponses(rows: Record<string, unknown>[], columns: string[], scale: ResponseScaleV2): OtherResponse[] {
+  const entries = new Map<string, OtherResponse>();
+  const builtIns = new Set(BUILT_IN_MISSING_CODES.map(normalizeResponseText));
+  for (const row of rows) for (const column of columns) {
+    const raw = row[column];
+    if (raw == null || String(raw).trim() === "") continue;
+    const resolved = resolveResponse(raw, scale);
+    if (resolved.kind === "valid") continue;
+    const response = String(raw).trim();
+    const key = normalizeResponseText(response);
+    const existing = entries.get(key);
+    if (existing) existing.count += 1;
+    else entries.set(key, { response, count: 1,
+      kind: builtIns.has(key) || resolved.kind === "special_missing" ? "built_in" : "unknown",
+      value: resolved.kind === "special_scored" ? resolved.value : null });
+  }
+  return [...entries.values()];
 }
 
 function parseNumeric(value: string): number | null {

@@ -4,7 +4,7 @@ export interface SubscaleItemConfig { column: string; order: number; reverse: bo
 export interface ResponseScaleConfig {
   scaleType: 'numeric' | 'categorical';
   minValue?: number; maxValue?: number;
-  labelMap?: { label: string; value: number }[];
+  labelMap?: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   allowedNonresponse?: string[];
   confirmed?: boolean;
 }
@@ -93,7 +93,7 @@ export function responseScaleRange(scale: ResponseScaleConfig): ScaleRange {
     return { min: scale.minValue!, max: scale.maxValue! };
   }
   if (scale.labelMap?.length) {
-    const values = scale.labelMap.map((entry) => entry.value);
+    const values = scale.labelMap.map((entry) => entry.value).filter((value): value is number => value !== null);
     if (values.every(Number.isFinite)) {
       return { min: Math.min(...values), max: Math.max(...values) };
     }
@@ -105,7 +105,7 @@ function scaleSignature(scale: ResponseScaleConfig): string {
   return JSON.stringify({
     scaleType: scale.scaleType,
     range: responseScaleRange(scale),
-    labels: scale.labelMap?.map(({ label, value }) => [label.trim().toLowerCase(), value]).sort(),
+    labels: scale.labelMap?.map(({ label, value, kind, reverse }) => [label.trim().toLowerCase(), value, kind, reverse]).sort(),
     allowed: scale.allowedNonresponse?.map((value) => value.trim().toLowerCase()).sort(),
   });
 }
@@ -116,7 +116,7 @@ function toResolverScale(
   allowedNonresponse: Set<string>,
 ): ResponseScaleV2 {
   const labels = [
-    ...(scale.labelMap ?? []).map((entry) => ({ text: entry.label, value: entry.value, kind: 'scale' as const })),
+    ...(scale.labelMap ?? []).map((entry) => ({ text: entry.label, value: entry.value, kind: entry.kind ?? (entry.value === null ? 'special' as const : 'scale' as const), reverse: entry.reverse })),
     ...[...allowedNonresponse].map((text) => ({ text, value: null, kind: 'special' as const })),
   ];
   return {

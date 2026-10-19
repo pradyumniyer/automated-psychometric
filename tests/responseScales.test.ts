@@ -11,6 +11,8 @@ import {
   findOutOfRangeCells,
   matchResponsePreset,
   resolveResponse,
+  collectOtherResponses,
+  responseScaleFromLabels,
   type ResponseScaleV2,
 } from "../src/scientific/responseScales";
 
@@ -41,7 +43,7 @@ describe("resolveResponse", () => {
 
   it("copies only response-scale settings and confirms recipients only when the first is confirmed", () => {
     const scales = [
-      { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true, showOutputs: ["sum"] },
+      { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true, flipped: true, startsAtZero: true, showOutputs: ["sum"] },
       { minValue: 0, maxValue: 4, labelMap: [], confirmed: true, showOutputs: ["mean"] },
     ];
     const copied = copyFirstResponseScaleSettings(scales[0], scales);
@@ -50,6 +52,8 @@ describe("resolveResponse", () => {
       { minValue: 1, maxValue: 5, labelMap: [{ label: "Agree", value: 5 }], confirmed: true },
     ]);
     expect(copied[1].showOutputs).toEqual(["mean"]);
+    expect(copied[1].flipped).toBe(true);
+    expect(copied[1].startsAtZero).toBe(true);
     const unconfirmed = copyFirstResponseScaleSettings({ ...scales[0], confirmed: false }, scales);
     expect(unconfirmed.every((scale) => scale.confirmed === false)).toBe(true);
   });
@@ -267,5 +271,24 @@ describe("resolveResponse", () => {
   it("treats decimal values as valid continuous responses", () => {
     const scale: ResponseScaleV2 = { ...fixtureScale, min: 0, max: 10 };
     expect(resolveResponse("2.5", scale)).toEqual({ kind: "valid", value: 2.5 });
+  });
+
+  it("lists other responses with counts and built-in/unknown kinds", () => {
+    const result = collectOtherResponses(
+      [{ Q1: "N/A" }, { Q1: "n/a" }, { Q1: "Maybe" }, { Q1: -99 }, { Q1: 3 }],
+      ["Q1"],
+      responseScaleFromLabels([], { min: 1, max: 5 }),
+    );
+    expect(result).toEqual([
+      { response: "N/A", count: 2, kind: "built_in", value: null },
+      { response: "Maybe", count: 1, kind: "unknown", value: null },
+      { response: "-99", count: 1, kind: "built_in", value: null },
+    ]);
+  });
+
+  it("scores a typed special response without reversing it unless its row is reversed", () => {
+    const scale = responseScaleFromLabels([{ label: "N/A", value: 0, kind: "special" }], { min: 0, max: 5 });
+    expect(resolveResponse("N/A", scale)).toEqual({ kind: "special_scored", value: 0 });
+    expect(resolveResponse("N/A", { ...scale, labels: [{ ...scale.labels[0], reverse: true }] })).toEqual({ kind: "special_scored", value: 5 });
   });
 });
