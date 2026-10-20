@@ -56,6 +56,8 @@ Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
 
 **F13. Clarity pass** (owner, 18 Oct 2026): follow `UX_PRINCIPLES.md`. Card pattern first (P2c-1b, P2c-2), then C1 and C2 after P2d. Absorbs backlog items 1 and 2 (unified checks and precise per-cell reasons) and item 3 ((i) tips).
 7. Collapsed Response scales cards need a visible open affordance (a small "show full" button or a down arrow). Built as part of P2c-2.
-8. Reword "Confirmed" in the card's one-line summary to something more direct (wording to be chosen with the owner).
+8. Reword "Confirmed" in the card's one-line summary (handled by the P2c-3 design: the status appears only for subscales with reverse items).
 
 **F14. No subscales = one automatic subscale** (owner, 18 Oct 2026; P2c-U). The old separate "Overall Scale" path lacked the Show toggles, bands per output, Confirm range, out-of-range decision, collapsed card and cell links. The dataset is treated as one automatic subscale ("Overall scale") that uses the normal code path; headers follow the subscale pattern; no migration of old projects.
+
+**F15. Answers table** (owner, 20 Oct 2026): one scale line and one answers table per card, presets detected automatically, Flip order and Start at 0 only in word mode; see RESPONSE_SCALES section 15 and prompt P2c-3.

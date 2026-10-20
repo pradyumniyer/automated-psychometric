@@ -36,6 +36,7 @@ Goal: a first-time user imports a file and reaches a scored, exportable dataset 
 ## 8. Consistency
 - Primary action bottom right, destructive actions ask for confirmation, the same word for the same thing everywhere (item, subscale score, overall score, summary rows).
 - A quiet "All changes saved on this device" indicator reassures local-first users.
+- Every fact appears in exactly one place on a card (no duplicate editors); controls appear only when they apply to the data on screen.
 
 ## 9. Fast path first
 - Defaults give a sensible result in the fewest steps: the app detects and suggests, the user confirms. A dismissible first-run checklist at the top of Configure lists the five steps.

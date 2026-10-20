@@ -35,6 +35,7 @@ Decimals present in a column → treated as continuous (slider): range from obse
 - Presets: agreement (5, 7), frequency, satisfaction, importance, likelihood, quality, plus existing app presets.
 
 ## 6. Screen layout (the whole Response Scales step)
+*(Items 3 and 4 below are superseded by section 15.)*
 - At the top: the **Apply first to all** button (copies range, labels, flip and start options from the first subscale to the others, then re-checks each one).
 - Next to it: the **Overall scale** switch (section 11). When on, the Overall card sits above the subscale cards.
 - Below: **one card per subscale**. Nothing else on the page.
@@ -85,9 +86,36 @@ Fixture A Q3/Q5 (detected 1–5; N/A and Prefer not to say as `special_missing`;
 Reverse scoring is (range minimum + range maximum) minus the answer, so widening a range changes every reversed value and every score of the subscale (Fixture A: widening Subscale 1 to 1-7 moves P01's Overall from 37 to 39). The Widen range action therefore shows a warning when the subscale has reverse items, and says that far-out stray values (more than one step beyond) usually are entry errors for which Treat as missing is right. Cell links name the respondent ID (never an internal ID) and highlight only the cell.
 
 ## 13. Out-of-range decision and waiting status (owner, 18 Oct 2026; built)
+*(The decision line and the two buttons are superseded by section 15: the choice moves into the answers table. The waiting status stays.)*
 - Both actions are real buttons; "Treat as missing" is highlighted as the recommended default until the user chooses. Choosing either removes the amber message and the card chip and leaves one grey line: "Decision: Treat as missing for Q4: P26 (Change)" or "Decision: Widen range to 1-7 (Change)". The decision is saved with the scale, keyed to the exact set of out-of-range cells (a changed set reopens the question), logged once per decision. Scoring uses Treat as missing until the user decides otherwise.
 - The reverse-scoring warning ("Q3 becomes 8 minus the answer instead of 6 minus the answer ...") is shown whenever the subscale has a reverse item and any out-of-range value exists.
 - Waiting status: "Scoring is waiting: confirm the scale range for Subscale 1 (it has reverse items)." (several: "... ranges for Subscale 1 and 1 more (they have reverse items)."), amber, with a "Go to Subscale 1" button that opens the card.
 
 ## 14. No subscales (owner, 18 Oct 2026; P2c-U)
-A dataset with no real subscales uses one automatic subscale (id auto-overall, name "Overall scale", all item columns, no reverse items). It is hidden from the Subscales step, appears as a normal card in Response scales and Bands, and uses the normal code path for scoring, export, Summary and templates. Adding a real subscale removes it after a warning.
+A dataset with no real subscales uses one automatic subscale (id auto-overall, name "Overall scale", all item columns, no reverse items). In the Subscales step it appears as one card "Overall scale (all items)" listing every item with the Rev toggles (no add, remove, rename or delete) and one plain line explaining that all items are scored together. It appears as a normal card in Response scales and Bands and uses the normal code path for scoring, export, Summary and templates. It starts not confirmed; scoring waits for confirmation only when it has reverse items. Adding a real subscale removes it after a warning. Planned redesign of this step: see FIX_LIST F6.
+
+## 15. Answers table: final card design (owner, 20 Oct 2026; supersedes section 6 items 3-4, the preset dropdown of section 5 and the decision line of section 13)
+
+An open subscale card shows, top to bottom, only what is relevant. Every answer appears in exactly one place.
+1. **Scale line:** "Scale [min] to [max]", with "detected" or "from 5-point agreement". Editable. Only subscales that have reverse items show a status chip ("Not confirmed") with a "Confirm range" button and an (i) tip; other subscales show no status. Any change to the scale setup (min or max, widen, any "Counts as" value, flip order, start at 0, a reverse tick on an item) resets a reverse-item subscale to Not confirmed; scoring then waits as before (existing status text and Go to button). Leaving an answer on its default does not reset it.
+2. **Word-scale line (word mode only):** "Detected: 5-point agreement" with a small link "Wrong scale? Change" (opens the preset list; there is no preset dropdown by default), plus the buttons Flip order and Start at 0.
+3. **Answers table** (columns Answer, Found, Counts as), one row per distinct answer that is not a plain in-range number.
+4. **Show:** Sum, Mean, Custom formula.
+
+**Modes**
+- Numeric (default): fewer than half of the non-special, non-blank answers across the subscale's items are text. Scale line and optional table only. No Flip order, no Start at 0.
+- Word mode: at least half of those answers are text. The word-scale line appears. Flip order and Start at 0 appear (and look unavailable until every scale word has a number).
+- Continuous (decimals in the column): the scale line says "continuous"; no table, no Flip order, no Start at 0.
+- More than 15 distinct text answers: the table is replaced by "This looks like a demographic or an ID, not a scale item".
+
+**Rows**
+- Scale words (word mode), in scale order. "Counts as" is pre-filled from the detected preset or empty with "Needs a number" (amber). Preset words that do not occur are listed with Found 0 (grey) so the whole scale is visible. The preset is the smallest preset that covers all scale words found; if words are missing from a preset, the unused ones are shown at 0.
+- Special answers (built-in codes: N/A, NA, n/a, Prefer not to say, -99, -999 and similar): grey; empty Counts as = Not scored; typing a number scores that answer. A special answer scored as a number is never reversed (there is no per-row reverse tick).
+- Out-of-range numbers: row "7 (outside 1 to 5)" with the respondent link ("Q4: P26", highlights the cell). Counts as is a choice: Not scored (default), Widen scale to 1-7, or a typed number. When the subscale has reverse items a one-line note under the row says what widening does to reverse scoring ("Q3 becomes 8 minus the answer instead of 6 minus the answer, and scores change for everyone"). Choosing Widen sets the range at once and the row shows the choice; choosing Not scored again restores the original range.
+- Unknown text in a numeric column (for example "abc"): amber row, Counts as empty (Not scored) with "Needs a number".
+
+**Review state:** out-of-range numbers and unknown answers are amber until the user makes a choice (choosing the default counts). The collapsed card summary shows "N answers to review" for amber rows only; built-in codes never count. The choice is saved and the cleaning log records widen and typed-number decisions (counts and values).
+
+**Range rules:** typed numbers for special answers or out-of-range numbers never change the scale range (a 0 for "Prefer not to say" on a 1-5 scale stays a valid scored 0 and the range stays 1-5). Only the numbers of scale words in word mode, and the preset, set a word scale's range. Flip order and Start at 0 act on the scale-word numbers; Rev (reverse items) still reverses the selected items after mapping. Presets are detected automatically (see section 5 for the variants and the preset list).
+
+**Tests (written first):** the five scenarios (clean numbers; numbers with special answers; one out-of-range number; words matching a preset; words with no preset), the mode rule (half of the answers), Flip order and Start at 0 only in word mode, unused preset words shown at 0, more than 15 words, continuous columns, typing 0 for "Prefer not to say" keeps the range, widen shows its choice at once and "Not scored" restores the range, amber rows and the review count, confirmation reset, template round trip, reload. Fixture A: P01 Overall 37, status line P25, P26, P29, P30. Word fixture (docs/fixtures/fixture_words.csv, no subscales so the automatic Overall scale is used): preset 5-point agreement matched; W01 Sum 13 Mean 2.6; W04 Sum 16 Mean 3.2; N/A and Prefer not to say not scored; "Maybe" amber until numbered (Maybe = 3 gives W12 Sum 11); Flip order W04 14; Start at 0 W04 11.

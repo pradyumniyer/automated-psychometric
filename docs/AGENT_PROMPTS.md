@@ -10,11 +10,10 @@ Rules: one prompt per chat unless noted; paste the agent's final report to Claud
 5. If the work is rejected: `git switch local-first-rebuild`, `git branch -D <short-name>` (this discards everything the agent did on that branch).
 6. If `git status --short` shows uncommitted changes after the agent stops, do not switch branches; show Claude the output.
 
-## Which model (Codex, checked 19 Oct 2026)
-- Small and medium, well-specified tasks: GPT-6 Luna at low or medium effort.
-- Large or risky work (subscale builder rework, Import v2, splitting ConfigScreen, clarity passes) and P2c-2 and later UI prompts: GPT-6.1 Sol at low or medium effort; raise one level only if the tests fail twice.
-- Avoid GPT-6 Astra (about five times the price of 6.1 Sol), GPT-6 Sol and every 5.6 model (superseded).
-- Whatever the model, agents sometimes report a feature as done that is not on screen: always hand-test and ask for the pasted test results.
+## Which model (Codex, updated 20 Oct 2026)
+- GPT-6.1 Sol is not available on the owner's ChatGPT Go account. Work is done with GPT-5.6 Luna at medium reasoning (GPT-6 Luna is the cheaper, newer alternative).
+- This model builds well from precise specs but misreads loose ones and sometimes reports a feature as done that is not on screen. UI prompts therefore carry a layout or point to the mockup in RESPONSE_SCALES section 15, and every result is hand-tested with pasted test output.
+- Avoid GPT-6 Astra (about five times the price of 6.1 Sol), GPT-6 Sol and the other 5.6 models.
 
 ## P1. Batch 1 (F2, F3, F4, F5)
 ```
@@ -198,6 +197,25 @@ Follow the working agreement in `.github/copilot-instructions.md`. Use search to
 Tests where logic is involved, written first: the table lists each response with the right count and kind (grey or amber); typing a number scores that response and the score changes accordingly; N/A scored 0 is not reversed on a reverse item unless ticked; preset match with an extra N/A row; non-matching words listed with empty numbers; flip and start at 0; more than 15 words suggestion; template round trip including "needs a number". The label and aria state of the Show details control for open and closed cards. Fixture A must not change: P01 Overall 37 and the status line P25, P26, P29, P30; Q3 and Q5 still show as special missing.
 
 Separate local commits for (a), (b)+(c), (d), (e); run the full npm test, typecheck and build after each. Report: visible behavior changes in plain language, the assumptions you made, the results, lint totals before and after (no new findings), `git status` and `git diff --stat`. Commit locally and stop for review.
+```
+
+## P2c-3. Answers table: rework the Response scales card (run on the branch p2c2-codex, replaces the planned P2c-2b)
+```
+Follow the working agreement in `.github/copilot-instructions.md`. Use search to find the lines you need and do not re-read large files such as `src/components/ConfigScreen.tsx`. Do NOT push. Work test-first. These UI changes are owner-approved. Do not ask me questions unless you are blocked; list your assumptions in the report. Read `docs/RESPONSE_SCALES.md` section 15 (the final design; it overrides sections 5, 6 and 13 where they differ) and `docs/UX_PRINCIPLES.md`. This reworks the card UI built in P2c-2 on this branch; keep the existing logic functions (resolveResponse, preset matching, range detection, applyOutOfRangeAction, the cleaning-log payload) and change them only where this prompt says so.
+
+Hand test of P2c-2 showed: N/A and Prefer not to say appear twice (Other responses table and word rows); the out-of-range 7 appears in the table and in a separate message; typing 0 for "Prefer not to say" turned the range into 0-0 with 145 warnings; the card stays "Confirmed" after changes; after "Widen range" the decision line does not appear until the range is set back.
+
+Build the card exactly as section 15 describes:
+(a) One scale line (editable min and max, "detected" or "from <preset>"). Only subscales with reverse items show the Not confirmed chip, the Confirm range button and the (i) tip; any change to the scale setup resets such a subscale to Not confirmed (min or max, widen, any Counts as value, flip order, start at 0, a reverse tick); leaving an answer on its default does not. Scoring still waits for an unconfirmed subscale with reverse items (existing status text and Go to button).
+(b) One answers table (Answer, Found, Counts as) that replaces the Other responses table, the word-mapping rows, the out-of-range message with its two buttons, the decision line and the preset dropdown. Rows: scale words (word mode, in scale order, pre-filled from the detected preset, preset words that do not occur shown at Found 0 in grey, empty ones amber with "Needs a number"); special answers (grey, empty = Not scored, a typed number scores it and is never reversed; remove the per-row reverse tick); out-of-range numbers (respondent link such as Q4: P26 that highlights the cell; Counts as offers Not scored (default), Widen scale to <new range>, or a typed number; when the subscale has reverse items show the one-line widening note under the row; choosing Widen sets the range at once and the row shows the choice; choosing Not scored restores the original range); unknown text in a numeric column (amber, Needs a number).
+(c) Modes: numeric when fewer than half of the non-special, non-blank answers across the subscale's items are text; word mode otherwise; continuous when the column has decimals (no table); more than 15 distinct text answers shows "This looks like a demographic or an ID, not a scale item" instead of the table. In word mode only, show the word-scale line: "Detected: <preset name>", a small link "Wrong scale? Change" that opens the preset list, and the buttons Flip order and Start at 0 (they look unavailable until every scale word has a number). Never show Flip order or Start at 0 in numeric mode.
+(d) Range rules: typed numbers for special answers or out-of-range numbers never change the range (a 0 for "Prefer not to say" on a 1-5 scale stays a valid scored 0 and the range stays 1-5, with no new warnings). Only the numbers of scale words in word mode and the preset set a word scale's range.
+(e) Review state: out-of-range numbers and unknown answers are amber until the user makes a choice (choosing the default counts); the collapsed card summary shows "N answers to review" for amber rows only (built-in codes never count). Persist the choices; log widen and typed-number decisions (counts and values) to the cleaning log once per decision, not again on reload.
+(f) Templates and reload keep everything, including typed numbers, widen choices and review state; new answers in another file appear as "Needs a number".
+
+Tests, written first: the five scenarios (clean numbers; numbers with special answers; one out-of-range number; words matching a preset; words with no preset); the mode rule; Flip order and Start at 0 only in word mode; unused preset words at 0; more than 15 words; continuous columns; typing 0 for "Prefer not to say" keeps the range 1-5; Widen shows its choice at once and Not scored restores the range; amber rows and the review count; the confirmation reset; template round trip and reload. Also use docs/fixtures/fixture_words.csv (no subscales, so it uses the automatic Overall scale): the 5-point agreement preset is matched; W01 Sum 13 and Mean 2.6; W04 Sum 16 and Mean 3.2; N/A and Prefer not to say are not scored and appear only in the table's special rows; "Maybe" is amber until numbered (Maybe = 3 gives W12 Sum 11); Flip order gives W04 Sum 14; Start at 0 gives W04 Sum 11. Fixture A must not change: P01 Overall 37 and the status line P25, P26, P29, P30; Q3 and Q5 stay special missing; Q4's 7 is the only out-of-range answer.
+
+Separate local commits: (1) the pure logic (mode rule, rows builder, review state, range rules) with its tests; (2) the card UI; (3) persistence, templates and removal of the replaced UI and code. Run the full npm test, typecheck and build after each. Report: plain-language visible changes, assumptions, results, lint totals before and after (no new findings), `git status` and `git diff --stat`, commit hashes. Commit locally and stop for review.
 ```
 
 ## P2d. Response Scales v2, part 4: Data Quality screen
