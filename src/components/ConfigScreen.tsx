@@ -43,6 +43,7 @@ import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
 import { buildAnswerTable, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
+import { commitScaleRangeDraft, escapeScaleRangeDraft } from '@/lib/responseScaleDraft';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -617,7 +618,12 @@ export function ConfigScreen({
     markDirty();
   };
   const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
-  const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s)); markDirty(); };
+  const setScaleRange = (id: string, min: number | null, max: number | null) => {
+    const current = subscaleStates.find((subscale) => subscale.id === id);
+    if (current && current.minValue === min && current.maxValue === max) return;
+    setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s));
+    markDirty();
+  };
   const confirmScaleRange = (id: string) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true } : s)); markDirty(); };
   const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s)); markDirty(); };
   const setWordOptions = (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => {
@@ -1940,6 +1946,21 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const responseScale = responseScaleFromLabels(labelMap, { min: minValue ?? 0, max: maxValue ?? 0 });
   const otherResponses = collectOtherResponses(rows, itemCols, responseScale);
   const [showWordLabels, setShowWordLabels] = useState(mode === 'word');
+  const [rangeDraft, setRangeDraft] = useState({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
+  useEffect(() => {
+    setRangeDraft({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
+  }, [minValue, maxValue]);
+  const commitRangeDraft = () => {
+    if (minValue === null || maxValue === null) return;
+    const result = commitScaleRangeDraft(rangeDraft.min, rangeDraft.max, { min: minValue, max: maxValue });
+    setRangeDraft({ min: String(result.range.min), max: String(result.range.max) });
+    if (result.changed) onSetScaleRange(result.range.min, result.range.max);
+  };
+  const revertRangeDraft = () => setRangeDraft(escapeScaleRangeDraft(rangeDraft, { min: minValue ?? 0, max: maxValue ?? 0 }));
+  const handleRangeKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') { event.preventDefault(); commitRangeDraft(); }
+    if (event.key === 'Escape') { event.preventDefault(); revertRangeDraft(); }
+  };
   const legacyUiEnabled = () => false;
   const wordsVisible = showWordLabels || mode === 'word';
   const updateLabel = (labelInput: string | number, value: number | null, kind: 'scale' | 'special' = 'scale') => {
@@ -2015,9 +2036,9 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
       {minValue !== null && maxValue !== null && (
         <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
           <span>Scale</span>
-          <input type="number" value={minValue} onChange={(event) => onSetScaleRange(event.target.value === '' ? null : Number(event.target.value), maxValue)} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
+          <input type="text" inputMode="numeric" value={rangeDraft.min} onChange={(event) => setRangeDraft((draft) => ({ ...draft, min: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
           <span>to</span>
-          <input type="number" value={maxValue} onChange={(event) => onSetScaleRange(minValue, event.target.value === '' ? null : Number(event.target.value))} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
+          <input type="text" inputMode="numeric" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
           <span>{mode === 'word' && presetMatch.preset ? `from ${presetMatch.preset.name}` : mode === 'word' ? 'set from the numbers you type below' : mode === 'continuous' ? 'continuous' : 'detected'}</span>
           {hasReverseItems && !confirmed && <><button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
         </div>
