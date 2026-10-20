@@ -10,6 +10,7 @@ export interface AnswerTableInput {
   max: number | null;
   labels: ResponseScaleLabelSetting[];
   preset?: { name: string; labels: { label: string; value: number }[] };
+  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
 }
 
 export interface AnswerTableRow {
@@ -122,6 +123,20 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
         });
       }
     }
+  }
+  if (input.outOfRangeDecision?.action === 'widen' && input.outOfRangeDecision.originalMin !== undefined && input.outOfRangeDecision.originalMax !== undefined) {
+    input.outOfRangeDecision.values.forEach((value, index) => {
+      const key = `out_of_range:${value}`;
+      if (cellsByKey.has(key)) return;
+      const cellKey = input.outOfRangeDecision!.cells[index];
+      const [column, rowText] = cellKey?.split(':') ?? [];
+      const rowIndex = Number(rowText);
+      cellsByKey.set(key, {
+        answer: displayAnswer(String(value), input.outOfRangeDecision!.originalMin!, input.outOfRangeDecision!.originalMax!, 'out_of_range'),
+        found: 1, kind: 'out_of_range', countsAs: null, review: false, grey: false, reversed: false,
+        cells: Number.isInteger(rowIndex) ? [{ column, rowIndex }] : [],
+      });
+    });
   }
 
   const ordered = [...cellsByKey.values()];

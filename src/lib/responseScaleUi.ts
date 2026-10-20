@@ -21,6 +21,8 @@ export interface OutOfRangeDecision {
   action: 'missing' | 'widen';
   cells: string[];
   values: number[];
+  originalMin?: number;
+  originalMax?: number;
 }
 
 export interface OutOfRangeDecisionCell {

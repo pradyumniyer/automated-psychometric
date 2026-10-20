@@ -23,7 +23,7 @@ export interface ScreenSubscaleState {
   labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   confirmed?: boolean;
   outOfRange?: 'missing' | 'widen';
-  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
+  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
   displayOrder: number;
 }
 

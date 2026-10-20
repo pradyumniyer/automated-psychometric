@@ -38,11 +38,11 @@ import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
-import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWideningImpact, outOfRangeDecisionMatches, outOfRangeDecisionSummary, responseScaleSummaryLine, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, waitingSubscaleTarget, type OutOfRangeDecision } from '@/lib/responseScaleUi';
+import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWideningImpact, outOfRangeDecisionMatches, outOfRangeDecisionSummary, reverseWideningExplanation, shouldOpenResponseScaleCard, waitingSubscaleStatus, waitingSubscaleTarget, type OutOfRangeDecision } from '@/lib/responseScaleUi';
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
-import { buildAnswerTable, countReviewAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
+import { buildAnswerTable, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -1307,7 +1307,7 @@ export function ConfigScreen({
                         maxValue: result.scale.max,
                         confirmed: result.scale.confirmed,
                         outOfRange: action,
-                        outOfRangeDecision: { action, cells, values: [...values] },
+                        outOfRangeDecision: { action, cells, values: [...values], ...(subscale.minValue === null ? {} : { originalMin: subscale.minValue }), ...(subscale.maxValue === null ? {} : { originalMax: subscale.maxValue }) },
                       } : candidate));
                       await logOutOfRangeAction(project.id, dataset.id, result.log);
                       setHistory(await fetchHistory(dataset.id));
@@ -1315,7 +1315,7 @@ export function ConfigScreen({
                     }}
                     onChangeOutOfRangeDecision={(id) => {
                       setSubscaleStates((previous) => previous.map((candidate) => candidate.id === id
-                        ? { ...candidate, outOfRange: 'missing', outOfRangeDecision: undefined }
+                        ? { ...candidate, minValue: candidate.outOfRangeDecision?.originalMin ?? candidate.minValue, maxValue: candidate.outOfRangeDecision?.originalMax ?? candidate.maxValue, outOfRange: 'missing', outOfRangeDecision: undefined }
                         : candidate));
                       markDirty();
                     }}
@@ -1917,7 +1917,8 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
     cellKey: `${cell.column}:${cell.rowIndex}`,
     displayId: cell.rowId,
   }));
-  const decisionApplied = outOfRangeDecisionMatches(outOfRangeDecision, decisionCells);
+  const decisionApplied = outOfRangeDecisionMatches(outOfRangeDecision, decisionCells)
+    || (outOfRangeDecision?.action === 'widen' && outOfRangeDecision.originalMin !== undefined && outOfRangeDecision.originalMax !== undefined);
   const differentScaleItems = multipleOutputs && minValue !== null && maxValue !== null
     ? hasDifferentScaleItem(Object.fromEntries(itemCols.map((column) => [column, rows.map((row) => row[column])])), minValue, maxValue)
     : [];
@@ -1930,6 +1931,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const answerTable = buildAnswerTable({
     rows, columns: itemCols, min: minValue, max: maxValue, labels: labelMap,
     preset: presetMatch.preset ? { name: presetMatch.preset.name, labels: presetMatch.preset.labels } : undefined,
+    outOfRangeDecision,
   });
   const mode: ResponseMode = answerTable.mode;
   const hasReverseItems = items.some((item) => item.reverse);
@@ -1937,8 +1939,8 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const summary = `${itemCols.length} items · ${reviewRows.length > 0 ? `${reviewRows.length} answer${reviewRows.length === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
   const responseScale = responseScaleFromLabels(labelMap, { min: minValue ?? 0, max: maxValue ?? 0 });
   const otherResponses = collectOtherResponses(rows, itemCols, responseScale);
-  const distinctWords = textAnswers.filter((value): value is string => typeof value === 'string');
   const [showWordLabels, setShowWordLabels] = useState(mode === 'word');
+  const legacyUiEnabled = () => false;
   const wordsVisible = showWordLabels || mode === 'word';
   const updateLabel = (labelInput: string | number, value: number | null, kind: 'scale' | 'special' = 'scale') => {
     const label = typeof labelInput === 'number' ? labelMap[labelInput]?.label ?? '' : labelInput;
@@ -2020,7 +2022,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {hasReverseItems && !confirmed && <><button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
         </div>
       )}
-      {false && minValue !== null && maxValue !== null && (
+      {legacyUiEnabled() && minValue !== null && maxValue !== null && (
         <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
           <Tooltip text="The lowest and highest answer the questionnaire allows. It is used to reverse-score items and to spot values that do not belong.">
             <Info className="w-3.5 h-3.5 text-secondary-400" />
@@ -2041,13 +2043,13 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
             return <tr key={`${row.kind}-${row.answer}`} className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
               <td className="py-1">{row.kind === 'out_of_range' ? <button type="button" className="underline" onClick={() => row.cells[0] && onHighlightCell?.(row.cells[0].rowIndex, row.cells[0].column)}>{row.answer} <span className="text-secondary-500">{row.cells[0] ? `${row.cells[0].column}: ${displayIds[row.cells[0].rowIndex]}` : ''}</span></button> : row.answer}</td>
               <td className="py-1">{row.found}</td>
-              <td className="py-1">{row.kind === 'out_of_range' ? <select value={decisionApplied && outOfRangeDecision?.action === 'widen' ? 'widen' : decisionApplied ? 'missing' : ''} onChange={(event) => event.target.value && onApplyOutOfRange?.(event.target.value as 'missing' | 'widen', row.cells.map(() => Number(raw)), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`))} className="w-44 px-2 py-1 border border-secondary-200 rounded"><option value="">Not scored</option><option value="widen">Widen scale to {minValue}-{Math.max(maxValue ?? Number(raw), Number(raw))}</option></select> : <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => updateLabel(raw, event.target.value === '' ? null : Number(event.target.value), row.kind === 'special' ? 'special' : 'scale')} className="w-32 px-2 py-1 border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
+              <td className="py-1">{row.kind === 'out_of_range' ? <><select value={decisionApplied && outOfRangeDecision?.action === 'widen' ? 'widen' : decisionApplied ? 'missing' : ''} onChange={(event) => event.target.value && onApplyOutOfRange?.(event.target.value as 'missing' | 'widen', row.cells.map(() => Number(raw)), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`))} className="w-44 px-2 py-1 border border-secondary-200 rounded"><option value="">Not scored</option><option value="widen">Widen scale to {minValue}-{Math.max(maxValue ?? Number(raw), Number(raw))}</option></select><input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => updateLabel(raw, event.target.value === '' ? null : Number(event.target.value))} className="ml-1 w-20 px-2 py-1 border border-secondary-200 rounded" placeholder="or number" /></> : <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => updateLabel(raw, event.target.value === '' ? null : Number(event.target.value), row.kind === 'special' ? 'special' : 'scale')} className="w-32 px-2 py-1 border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
             </tr>;
           })}
         </tbody></table></>
       )}
       {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Built-in codes are not scored. Type a number to score one.</p>}
-      {false && <div>
+      {legacyUiEnabled() && <div>
       {multipleOutputs && rangeOutliers! && rangeOutliers!.count > 0 && !decisionApplied && (
         <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
           <div className="mb-1">
@@ -2184,7 +2186,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {preview && !formulaError && <p className="text-xs text-success-600 mb-1">Preview: {preview}</p>}
         </div>
       )}
-      {false && scaleType === 'numeric' && (
+      {legacyUiEnabled() && scaleType === 'numeric' && (
         <div className="flex items-center gap-2">
           <input type="number" value={minValue ?? ''} onChange={(e) => onSetScaleRange(e.target.value ? Number(e.target.value) : null, maxValue)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Min" aria-label={`${name} minimum`} />
           <span className="text-secondary-400 text-xs">to</span>

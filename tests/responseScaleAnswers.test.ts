@@ -66,4 +66,11 @@ describe('response-scale answer table logic', () => {
     expect(resetConfirmationAfterScaleChange({ confirmed: true, hasReverseItems: true })).toBe(false);
     expect(resetConfirmationAfterScaleChange({ confirmed: true, hasReverseItems: false })).toBe(true);
   });
+
+  it('keeps a widened out-of-range row visible with its saved choice', () => {
+    const result = buildAnswerTable({ ...base, min: 1, max: 7, outOfRangeDecision: {
+      action: 'widen', cells: ['Q2:3'], values: [7], originalMin: 1, originalMax: 5,
+    } });
+    expect(result.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({ answer: '7 (outside 1 to 5)', review: false });
+  });
 });
