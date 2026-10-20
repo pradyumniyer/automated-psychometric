@@ -1,6 +1,6 @@
 # Build progress log (current state; read this to know where the build stands)
 
-Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
+Branch: `local-first-rebuild`. Updated 20 Oct 2026. Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
 
 ## Done (commits)
 | Step | What | Commit |
@@ -29,8 +29,9 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 | P2c-1b | Cell highlight, respondent IDs in links, outside-share rule for different-scale items, reverse-widening text, collapsed cards with summary line, waiting status (821 tests) | 21b1802, a526ca0, fbdbfd3, 71f6a79 |
 | P2c-1c | Persisted out-of-range decisions, reverse-widening warning always shown with reverse items, waiting status wording and Go-to button (822 tests) | a485379, 5610f2e, 6c2ab58 |
 | P2c-U | No subscales = one automatic subscale (F14): scoring, Response Scales, Bands, templates, export on the normal path (827 tests) | 3dc19a9, 9131059, 613ac09 |
-| P2c-U1 | Automatic subscale card with Rev toggles in the Subscales step; starts not confirmed (hashes: see `git log`) | |
-| P2c-2 | Other responses table, word-label presets, templates keep them, Show details control (833 tests). On branch `p2c2-codex`, not merged; hand test found duplicate mapping UI, a 0-0 range collapse, no confirmation reset, widen decision not shown; superseded by the P2c-3 design | 50784f9, 530e9a9, 8b50b2c, 2774fd4 |
+| P2c-U1 | Automatic subscale card with Rev toggles in the Subscales step; starts not confirmed | 9b544c9, 9e05570 |
+| P2c-2 | Other responses table, word-label presets, templates keep them, Show details control (833 tests). On branch `p2c2-codex`, not merged; hand test found duplicate mapping UI, a 0-0 range collapse, no confirmation reset, widen decision not shown; superseded by the P2c-3 design | 50784f9, 530e9a9, 8b50b2c, 2774fd4 (docs commit 77b5db5 on top) |
+| P2c-3 | Answers table redesign of the Response scales card (RESPONSE_SCALES section 15). Mockup approved by the owner 20 Oct 2026 (`docs/mockups/response_scale_card_five_scenarios.html`). Prompt ready; to run on `p2c2-codex`. | not started |
 
 ## Findings that changed numbers users saw in the old app
 - Shapiro–Wilk was broken (W ≈ 0.002 instead of 0.98) because of a `qnorm` sign bug; Q–Q plot theoretical quantiles were also wrong.
@@ -41,7 +42,7 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 ## Known open items (not yet done)
 - UI shows binary "normal / not normal" wording (DataQualityScreen: `status`, `mainText`, `Verdict StatBox`); needs an approved text change (spec §2.6).
 - No UI switch yet for z-score outliers, proration, Overall options, or the KS line (approved additions, step 1e).
-- Lint: 10 errors, 4 warnings in existing UI/library files; make lint blocking in CI after cleanup.
+- Lint: 3 errors, 4 warnings, all pre-existing (ConfigScreen, ImportPreviewModal, ProjectList, ui), per the 20 Oct handoff (earlier notes said 5 and 3; run `npm run lint` before each prompt to confirm). Make lint blocking in CI after cleanup (P5).
 - Dev-only audit advisories (Vitest 3 tree; fixes need Vite 6 + plugin-react upgrade): schedule as its own toolchain-upgrade step.
 - Production audit is now clean (0 vulnerabilities). Respondent data no longer goes to any server.
 - `distributions` `pchisq` `_logP` argument removed; `pnorm`/`qnorm` honour `logP`.
@@ -51,7 +52,13 @@ Branch: `local-first-rebuild`. Updated 15 Oct 2026. Rules for agents: `PROJECT_R
 - Math has been verified by tests; UI/UX was hand-checked by the owner after the storage wiring. A hand check of the Fixture A numbers through the UI is recommended (see owner checklist).
 
 ## Current work: owner fix list (`FIX_LIST.md`), prompts in `AGENT_PROMPTS.md`
-P1, P1b and P1c done and hand-tested (17 Oct 2026). P1c test found that bands leave gaps for decimal scores (F12) and a subscale-builder assignment bug (added to F6). Cache invalidation on band edits works. P1c2 and P1d done and hand-tested. P2a and P2b done and hand-tested (Fixture A: status line P25, P26, P29, P30; Q4 out of range 1; Q3 and Q5 special missing). Lesson: hand-test with a freshly uploaded dataset AND with the template-applied path. Note: scientific-spec.md also defines an Overall calculated from all items directly (Source A) and optional subscale flipping; the Overall card does not expose them yet. P2c-1, P2c-1b and P2c-1c done and hand-tested. P2c-U and P2c-U1 done and hand-tested. Next: P2c-3 (answers table redesign per RESPONSE_SCALES section 15, on branch `p2c2-codex`), then merge -> P2d (Data Quality) -> clarity passes C1 and C2 -> S1 small fix and the rest of the backlog -> P2d (Data Quality) -> then, depending on allowance, clarity pass C1 and C2 (`UX_PRINCIPLES.md`) and the small-fixes backlog; specs for Report (APA, F11) and Import can be written while the allowance renews (`RESPONSE_SCALES.md`, detection is a suggestion until confirmed) → small-fixes backlog (`FIX_LIST.md`) → P3 Batch 2 (F6 subscale popup, F7 normality panel, F8 proration) → P4 Import v2 → owner checks templates, history, rest of DQ, Export, Report → P5 cleanup (lint blocking in CI) → deploy → accounts/billing/cloud resume. Later, not specced: F11 Report rework (publication-ready APA-formatted section). Builders: Codex in VS Code (GPT-5.6 Luna at medium reasoning; 6.1 Sol is not available on the owner's Go plan; model guidance at the top of `AGENT_PROMPTS.md`) and GitHub Copilot student plan (151 of 200 AI credits used on 19 Oct 2026; renews 1 Nov). Rules for both: `.github/copilot-instructions.md`; every prompt runs on its own branch (see the top of `AGENT_PROMPTS.md`). Lint baseline: 5 errors, 3 warnings (all pre-existing).
+Done and hand-tested: P1, P1b, P1c, P1c2, P1d (to 17 Oct), P2a, P2b (Fixture A: status line P25, P26, P29, P30; Q4 out of range 1; Q3 and Q5 special missing), P2c-1, P2c-1b, P2c-1c, P2c-U, P2c-U1. Lesson: hand-test with a freshly uploaded dataset AND the template-applied path AND a reload. Note: scientific-spec.md also defines an Overall calculated from all items directly (Source A) and optional subscale flipping; the Overall card does not expose them yet.
+
+P2c-2 (branch `p2c2-codex`, not merged, exists only on the owner's computer) failed the owner's hand test: duplicate mapping UI, typing 0 for "Prefer not to say" collapsed the range to 0-0, the Confirmed state did not reset, the widen decision did not show. The planned fix P2c-2b was never run. The owner approved the new card mockup on 20 Oct 2026 (`docs/mockups/response_scale_card_five_scenarios.html`; design in `RESPONSE_SCALES.md` section 15). Next: run P2c-3 on `p2c2-codex`, hand-test with Fixture A and the word fixture, then `git merge --ff-only` into `local-first-rebuild` and push.
+
+Order after that: P2d (Data Quality) -> clarity passes C1 and C2 (`UX_PRINCIPLES.md`) -> small-fixes backlog (`FIX_LIST.md`, S1 first) -> P3 (F6 subscale builder, F7 normality panel, F8 proration) -> P4 Import v2 -> owner checks templates, history, rest of Data Quality, Export, Report -> P5 cleanup (lint blocking in CI) -> deploy -> accounts/billing/cloud resume. Later, not specced: F11 Report rework (publication-ready APA section). Specs for Report (APA, F11) and Import can be written while the builder allowance renews.
+
+Builders: Codex in VS Code (GPT-5.6 Luna at medium reasoning; 6.1 Sol is not available on the owner's Go plan; model guidance at the top of `AGENT_PROMPTS.md`) and GitHub Copilot student plan (151 of 200 AI credits used on 19 Oct 2026; renews 1 Nov). Rules for both: `.github/copilot-instructions.md`; every prompt runs on its own branch (see the top of `AGENT_PROMPTS.md`). Test suite: 833 tests at the last P2c-2 commit.
 
 ## Next (revised for credit budget)
 1. Lint cleanup + CI gates (lint and production audit blocking).

@@ -60,4 +60,4 @@ Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
 
 **F14. No subscales = one automatic subscale** (owner, 18 Oct 2026; P2c-U). The old separate "Overall Scale" path lacked the Show toggles, bands per output, Confirm range, out-of-range decision, collapsed card and cell links. The dataset is treated as one automatic subscale ("Overall scale") that uses the normal code path; headers follow the subscale pattern; no migration of old projects.
 
-**F15. Answers table** (owner, 20 Oct 2026): one scale line and one answers table per card, presets detected automatically, Flip order and Start at 0 only in word mode; see RESPONSE_SCALES section 15 and prompt P2c-3.
+**F15. Answers table** (owner, 20 Oct 2026): one scale line and one answers table per card, presets detected automatically, Flip order and Start at 0 only in word mode; see RESPONSE_SCALES section 15 and prompt P2c-3. Mockup approved 20 Oct 2026 (`docs/mockups/response_scale_card_five_scenarios.html`); P2c-3 queued.
