@@ -73,4 +73,13 @@ describe('response-scale answer table logic', () => {
     } });
     expect(result.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({ answer: '7 (outside 1 to 5)', review: false });
   });
+
+  it('restores the original range and review row after choosing Not scored', () => {
+    const widened = { action: 'widen' as const, cells: ['Q4:3'], values: [7], originalMin: 1, originalMax: 5 };
+    const restored = buildAnswerTable({ ...base, min: 1, max: 5, outOfRangeDecision: undefined });
+    expect(restored.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({
+      answer: '7 (outside 1 to 5)', review: true,
+    });
+    expect(widened.originalMax).toBe(5);
+  });
 });

@@ -59,6 +59,28 @@ describe('template score output settings', () => {
     });
   });
 
+  it('round-trips a widened range decision with its original range', () => {
+    const template = buildTemplateDefinition([{
+      name: 'Stress',
+      items: [{ column: 'Q4', order: 0, reverse: true }],
+      scoringMethod: 'sum',
+      customFormula: '',
+      scaleType: 'numeric',
+      minValue: 1,
+      maxValue: 7,
+      labelMap: [],
+      confirmed: false,
+      outOfRangeDecision: { action: 'widen', cells: ['Q4:25'], values: [7], originalMin: 1, originalMax: 5 },
+    }], {}, {});
+
+    expect(template.responseScales[0]).toMatchObject({
+      minValue: 1,
+      maxValue: 7,
+      confirmed: false,
+      outOfRangeDecision: { action: 'widen', cells: ['Q4:25'], values: [7], originalMin: 1, originalMax: 5 },
+    });
+  });
+
   it('migrates legacy template bands to its first shown output without conversion', () => {
     const settings = templateSubscaleScoreSettings({
       subscales: [{

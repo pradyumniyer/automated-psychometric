@@ -1306,7 +1306,7 @@ export function ConfigScreen({
                         min: subscale.minValue, max: subscale.maxValue, rangeSource: 'manual',
                         confirmed: subscale.confirmed === true, flipped: false, startsAtZero: false,
                         labels: [], outOfRange: action,
-                      }, values, action);
+                      }, values, action, subscale.items.some((item) => item.reverse));
                       setSubscaleStates((previous) => previous.map((candidate) => candidate.id === id ? {
                         ...candidate,
                         minValue: result.scale.min,
@@ -1321,7 +1321,7 @@ export function ConfigScreen({
                     }}
                     onChangeOutOfRangeDecision={(id) => {
                       setSubscaleStates((previous) => previous.map((candidate) => candidate.id === id
-                        ? { ...candidate, minValue: candidate.outOfRangeDecision?.originalMin ?? candidate.minValue, maxValue: candidate.outOfRangeDecision?.originalMax ?? candidate.maxValue, outOfRange: 'missing', outOfRangeDecision: undefined }
+                        ? { ...candidate, minValue: candidate.outOfRangeDecision?.originalMin ?? candidate.minValue, maxValue: candidate.outOfRangeDecision?.originalMax ?? candidate.maxValue, confirmed: candidate.items.some((item) => item.reverse) ? false : candidate.confirmed, outOfRange: 'missing', outOfRangeDecision: undefined }
                         : candidate));
                       markDirty();
                     }}

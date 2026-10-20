@@ -199,16 +199,17 @@ export function applyOutOfRangeAction(
   scale: ResponseScaleV2,
   values: number[],
   action: OutOfRangeAction,
+  hasReverseItems = false,
 ): OutOfRangeActionResult {
   const log = { action, count: values.length, values: [...values] };
-  if (action === "missing") return { scale: { ...scale }, log };
+  if (action === "missing") return { scale: { ...scale, confirmed: hasReverseItems ? false : scale.confirmed }, log };
   return {
     scale: {
       ...scale,
       min: Math.min(scale.min, ...values),
       max: Math.max(scale.max, ...values),
       rangeSource: "manual",
-      confirmed: true,
+      confirmed: hasReverseItems ? false : true,
     },
     log,
   };

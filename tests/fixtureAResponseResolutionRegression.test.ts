@@ -7,7 +7,7 @@ import { buildSubscaleConfigs } from '../src/storage/scoreHashes';
 import { scoreDataset } from '../src/scientific/scoring';
 import { buildSummaryExportContent } from '../src/lib/summaryStatistics';
 import { getUnscoredRowSummary } from '../src/lib/scoringStatus';
-import { datasetRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
+import { datasetRepository, projectRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
 import { computeDataQuality } from '../src/scientific/dataQuality';
 import { DEFAULT_ALLOWED_NON_RESPONSE, DEFAULT_THRESHOLDS } from '../src/scientific/dataQualityTypes';
 import type { SurveyConfigRecord } from '../src/storage/schema';
@@ -75,6 +75,30 @@ function scorePersisted(config: SurveyConfigRecord) {
   });
 }
 
+function fixtureSubscales(ranges: [{ min: number; max: number; confirmed: boolean }, { min: number; max: number; confirmed: boolean }]) {
+  return [
+    {
+      id: 'sub1', name: 'Subscale 1',
+      items: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].map((column, order) => ({ column, order, reverse: column === 'Q3' })),
+      scoringMethod: 'sum' as const, showOutputs: ['sum' as const],
+      responseScale: { scaleType: 'numeric' as const, minValue: ranges[0].min, maxValue: ranges[0].max, confirmed: ranges[0].confirmed },
+    },
+    {
+      id: 'sub2', name: 'Subscale 2',
+      items: ['Q6', 'Q7', 'Q8', 'Q9', 'Q10'].map((column, order) => ({ column, order, reverse: column === 'Q6' || column === 'Q9' })),
+      scoringMethod: 'sum' as const, showOutputs: ['sum' as const],
+      responseScale: { scaleType: 'numeric' as const, minValue: ranges[1].min, maxValue: ranges[1].max, confirmed: ranges[1].confirmed },
+    },
+  ];
+}
+
+function scoreFixture(ranges: [{ min: number; max: number; confirmed: boolean }, { min: number; max: number; confirmed: boolean }]) {
+  return scoreDataset(rows, headers, fixtureSubscales(ranges), {}, [], {
+    rowIds: rows.map((row) => row.ID),
+    overall: { enabled: true, source: 'subscales', method: 'sum' },
+  });
+}
+
 describe('Fixture A persisted response resolution', () => {
   beforeEach(async () => {
     await db.delete();
@@ -102,6 +126,58 @@ describe('Fixture A persisted response resolution', () => {
     expect(result.normalizedMatrix.states[25]).toMatchObject({
       Q4: 'out_of_range',
     });
+  });
+
+  it('scores the expected P01 totals for the original and widened ranges', () => {
+    const original = scoreFixture([{ min: 1, max: 5, confirmed: true }, { min: 1, max: 5, confirmed: true }]);
+    expect(original.scaleScores.sub1.P01.sum).toBe(18);
+    expect(original.scaleScores.sub2.P01.sum).toBe(19);
+    expect(original.overallScaleScore?.[0]).toBe(37);
+    expect(getUnscoredRowSummary(original, rows.map((row) => row.ID))).toContain('P25, P26, P29, P30');
+
+    const widenedOne = scoreFixture([{ min: 1, max: 7, confirmed: true }, { min: 1, max: 5, confirmed: true }]);
+    expect(widenedOne.scaleScores.sub1.P01.sum).toBe(20);
+    expect(widenedOne.scaleScores.sub2.P01.sum).toBe(19);
+    expect(widenedOne.overallScaleScore?.[0]).toBe(39);
+    expect(getUnscoredRowSummary(widenedOne, rows.map((row) => row.ID))).toContain('P25, P29, P30');
+
+    const widenedBoth = scoreFixture([{ min: 1, max: 7, confirmed: true }, { min: 1, max: 7, confirmed: true }]);
+    expect(widenedBoth.scaleScores.sub1.P01.sum).toBe(20);
+    expect(widenedBoth.scaleScores.sub2.P01.sum).toBe(23);
+    expect(widenedBoth.overallScaleScore?.[0]).toBe(43);
+  });
+
+  it('persists a widened decision through reload and template application', async () => {
+    const widened = oldConfig('fixture-a');
+    const responseScale = widened.subscales[0].response_scale!;
+    responseScale.max_value = 7;
+    responseScale.confirmed = false;
+    responseScale.out_of_range = 'widen';
+    responseScale.out_of_range_decision = {
+      action: 'widen', cells: ['Q4:25'], values: [7], originalMin: 1, originalMax: 5,
+    };
+    await surveyConfigRepository.save('fixture-a', widened);
+    const reloaded = await surveyConfigRepository.get('fixture-a');
+    expect(reloaded?.subscales[0].response_scale).toMatchObject({
+      max_value: 7,
+      confirmed: false,
+      out_of_range_decision: { originalMin: 1, originalMax: 5 },
+    });
+
+    const project = await projectRepository.create({ name: 'Widened Fixture A project', description: '' });
+    const dataset = await datasetRepository.import({
+      projectId: project.id, fileName: 'fixture-a.csv', sheetName: 'Template target', headers, rows, columnMeta: {},
+    });
+    const template = await templateRepository.save({
+      name: 'Widened Fixture A', description: '', instrument: 'Fixture A', kind: 'instrument',
+      definition: {
+        subscales: [], responseScales: [], interpretationBands: [],
+        demographicRules: { patterns: [], contentHeuristics: [] },
+      },
+    });
+    await templateRepository.applyToDataset(template.id, dataset.id, { ...widened, dataset_id: dataset.id });
+    const applied = await surveyConfigRepository.get(dataset.id);
+    expect(applied?.subscales[0].response_scale).toMatchObject({ max_value: 7, confirmed: false });
   });
 
   it('keeps the same resolution through template application and a second dataset tab', async () => {

@@ -111,6 +111,16 @@ describe("resolveResponse", () => {
         expect(resolveResponse(7, result.scale)).toEqual({ kind: "valid", value: 7 });
       });
 
+      it("leaves a reverse-item scale unconfirmed when widening", () => {
+        const result = applyOutOfRangeAction(
+          { ...fixtureScale, confirmed: true },
+          [7],
+          "widen",
+          true,
+        );
+        expect(result.scale).toMatchObject({ min: 1, max: 7, confirmed: false });
+      });
+
       it("keeps the range and confirmation unchanged when treating values as missing", () => {
         const result = applyOutOfRangeAction(
           { ...fixtureScale, confirmed: false },
