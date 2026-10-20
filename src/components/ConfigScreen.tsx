@@ -42,6 +42,7 @@ import { entryErrorGuidance, getDisplayIds, hasDifferentScaleItem, hasReverseWid
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
+import { buildAnswerTable, countReviewAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -583,7 +584,11 @@ export function ConfigScreen({
   };
 
   const toggleReverse = (subscaleId: string, column: string) => {
-    setSubscaleStates(subscaleStates.map((s) => s.id !== subscaleId ? s : { ...s, items: s.items.map((i) => i.column === column ? { ...i, reverse: !i.reverse } : i) }));
+    setSubscaleStates(subscaleStates.map((s) => s.id !== subscaleId ? s : {
+      ...s,
+      items: s.items.map((i) => i.column === column ? { ...i, reverse: !i.reverse } : i),
+      confirmed: false,
+    }));
     markDirty();
   };
 
@@ -612,11 +617,11 @@ export function ConfigScreen({
     markDirty();
   };
   const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
-  const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: true } : s)); markDirty(); };
+  const setScaleRange = (id: string, min: number | null, max: number | null) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, minValue: min, maxValue: max, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s)); markDirty(); };
   const confirmScaleRange = (id: string) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true } : s)); markDirty(); };
-  const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm } : s)); markDirty(); };
+  const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, labelMap: lm, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s)); markDirty(); };
   const setWordOptions = (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => {
-    setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, ...patch } : s));
+    setSubscaleStates((prev) => prev.map((s) => s.id === id ? { ...s, ...patch, confirmed: s.items.some((item) => item.reverse) ? false : s.confirmed } : s));
     markDirty();
   };
 
@@ -1856,24 +1861,8 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
             cardId={sub.id}
             isOpen={openCardId === sub.id}
             onToggleOpen={() => setOpenCardId((current) => current === sub.id ? null : sub.id)}
-            summaryLine={responseScaleSummaryLine({
-              name: sub.name,
-              itemCount: sub.items.length,
-              min: sub.minValue,
-              max: sub.maxValue,
-              confirmed: sub.confirmed === true,
-              outputs: shownScoreOutputs(sub.showOutputs, sub.scoringMethod).map((output) => output === 'custom' ? 'Custom' : output.charAt(0).toUpperCase() + output.slice(1)),
-            })}
-            attentionChip={sub.minValue !== null && sub.maxValue !== null && assessRangeOutliers(
-              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
-              { min: sub.minValue, max: sub.maxValue },
-            ).count > 0 ? `${assessRangeOutliers(
-              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
-              { min: sub.minValue, max: sub.maxValue },
-            ).count} value${assessRangeOutliers(
-              sub.items.flatMap((item) => rows.map((row) => row[item.column])),
-              { min: sub.minValue, max: sub.maxValue },
-            ).count === 1 ? '' : 's'} outside the scale` : undefined}
+            summaryLine={undefined}
+            attentionChip={undefined}
             onSetLabelMap={(lm) => onSetLabelMap(sub.id, lm)}
             onSetWordOptions={(patch) => onSetWordOptions(sub.id, patch)}
             onAutoDetect={() => onAutoDetect(sub.id)}
@@ -1935,26 +1924,54 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
   const reverseWarning = minValue !== null && maxValue !== null && rangeOutliers && hasReverseWideningImpact(items, rangeOutliers.count)
     ? reverseWideningExplanation(items, minValue, maxValue, Math.min(minValue, ...rangeOutliers.values), Math.max(maxValue, ...rangeOutliers.values))
     : null;
+  const textAnswers = itemCols.flatMap((column) => rows.map((row) => row[column]))
+    .filter((value) => typeof value === 'string' && value.trim() !== '' && Number.isNaN(Number(value)));
+  const presetMatch = matchResponsePreset(textAnswers);
+  const answerTable = buildAnswerTable({
+    rows, columns: itemCols, min: minValue, max: maxValue, labels: labelMap,
+    preset: presetMatch.preset ? { name: presetMatch.preset.name, labels: presetMatch.preset.labels } : undefined,
+  });
+  const mode: ResponseMode = answerTable.mode;
+  const hasReverseItems = items.some((item) => item.reverse);
+  const reviewRows = answerTable.rows.filter((row) => row.review && !(outOfRangeDecision && decisionApplied && row.kind === 'out_of_range'));
+  const summary = `${itemCols.length} items · ${reviewRows.length > 0 ? `${reviewRows.length} answer${reviewRows.length === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
   const responseScale = responseScaleFromLabels(labelMap, { min: minValue ?? 0, max: maxValue ?? 0 });
   const otherResponses = collectOtherResponses(rows, itemCols, responseScale);
-  const distinctWords = [...new Set(itemCols.flatMap((column) => rows.map((row) => row[column]))
-    .filter((value): value is string => typeof value === 'string' && value.trim() !== '' && Number.isNaN(Number(value))))];
-  const presetMatch = matchResponsePreset(distinctWords);
-  const [showWordLabels, setShowWordLabels] = useState(scaleType === 'categorical' || distinctWords.length > 0);
-  const wordsVisible = showWordLabels || scaleType === 'categorical' || distinctWords.length > 0;
-  const updateLabel = (index: number, value: number | null) => {
-    const next = labelMap.map((entry, entryIndex) => entryIndex === index ? { ...entry, value } : entry);
+  const distinctWords = textAnswers.filter((value): value is string => typeof value === 'string');
+  const [showWordLabels, setShowWordLabels] = useState(mode === 'word');
+  const wordsVisible = showWordLabels || mode === 'word';
+  const updateLabel = (labelInput: string | number, value: number | null, kind: 'scale' | 'special' = 'scale') => {
+    const label = typeof labelInput === 'number' ? labelMap[labelInput]?.label ?? '' : labelInput;
+    const normalized = label.trim().toLocaleLowerCase();
+    const existing = labelMap.findIndex((entry) => entry.label.trim().toLocaleLowerCase() === normalized);
+    const next = existing >= 0
+      ? labelMap.map((entry, index) => index === existing ? { ...entry, value, kind } : entry)
+      : [...labelMap, { label, value, kind }];
     onSetLabelMap(next);
-    const numeric = next.map((entry) => entry.value).filter((entry): entry is number => entry !== null && Number.isFinite(entry));
-    if (numeric.length) onSetScaleRange(Math.min(...numeric), Math.max(...numeric));
+    if (mode === 'word') {
+      const numeric = next.filter((entry) => entry.kind !== 'special').map((entry) => entry.value).filter((entry): entry is number => entry !== null && Number.isFinite(entry));
+      if (numeric.length > 0 && numeric.length === next.filter((entry) => entry.kind !== 'special').length) onSetScaleRange(Math.min(...numeric), Math.max(...numeric));
+    }
+  };
+  const wordControlsAvailable = mode === 'word' && answerTable.rows.filter((row) => row.kind === 'scale').every((row) => row.countsAs !== null);
+  const flipWords = () => {
+    if (!wordControlsAvailable) return;
+    const nextFlipped = !flipped;
+    if (presetMatch.preset) onSetLabelMap(buildPresetLabels(presetMatch.preset.name, { flipped: nextFlipped, startsAtZero }).map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
+    else onSetLabelMap(labelMap.slice().reverse());
+    onSetWordOptions({ flipped: nextFlipped });
+  };
+  const startAtZero = () => {
+    if (!wordControlsAvailable) return;
+    const nextStarts = !startsAtZero;
+    if (presetMatch.preset) onSetLabelMap(buildPresetLabels(presetMatch.preset.name, { flipped, startsAtZero: nextStarts }).map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
+    onSetWordOptions({ startsAtZero: nextStarts });
   };
   const applyPreset = (nameValue: string) => {
-    if (!nameValue) return;
-    const preset = matchResponsePreset(distinctWords).preset;
+    const preset = COMMON_LIKERT_SCALES.find((candidate) => candidate.name === nameValue);
     if (!preset || preset.name !== nameValue) return;
     const presetLabels = buildPresetLabels(nameValue, { flipped, startsAtZero });
-    const extras = presetMatch.extraResponses.map((text) => ({ text, value: null, kind: 'special' as const }));
-    onSetLabelMap([...presetLabels, ...extras].map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
+    onSetLabelMap(presetLabels.map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
     onSetScaleRange(Math.min(...presetLabels.map((entry) => entry.value!)), Math.max(...presetLabels.map((entry) => entry.value!)));
     onSetWordOptions({});
   };
@@ -1965,7 +1982,8 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           <button type="button" onClick={onToggleOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${name}`} aria-expanded={isOpen} aria-controls={cardId ? `${cardId}-details` : undefined} className="w-full text-left flex items-center gap-2">
             {isOpen ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
             <span className="font-semibold text-sm text-secondary-900">{name}</span>
-            {summaryLine && <span className="text-xs text-secondary-500">{summaryLine}</span>}
+            <span className="text-xs text-secondary-500">{summaryLine ?? summary}</span>
+            {items.some((item) => item.reverse) && !confirmed && <span className="px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">Not confirmed</span>}
             {attentionChip && <span className="ml-auto px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">{attentionChip}</span>}
             <span className="ml-auto text-xs text-primary-600 flex items-center gap-1">{isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{isOpen ? 'Hide details' : 'Show details'}</span>
           </button>
@@ -1992,7 +2010,17 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           ))}
         </div>
       )}
-      {multipleOutputs && scaleType === 'numeric' && minValue !== null && maxValue !== null && (
+      {minValue !== null && maxValue !== null && (
+        <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
+          <span>Scale</span>
+          <input type="number" value={minValue} onChange={(event) => onSetScaleRange(event.target.value === '' ? null : Number(event.target.value), maxValue)} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
+          <span>to</span>
+          <input type="number" value={maxValue} onChange={(event) => onSetScaleRange(minValue, event.target.value === '' ? null : Number(event.target.value))} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
+          <span>{mode === 'word' && presetMatch.preset ? `from ${presetMatch.preset.name}` : mode === 'word' ? 'set from the numbers you type below' : mode === 'continuous' ? 'continuous' : 'detected'}</span>
+          {hasReverseItems && !confirmed && <><button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
+        </div>
+      )}
+      {false && minValue !== null && maxValue !== null && (
         <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
           <Tooltip text="The lowest and highest answer the questionnaire allows. It is used to reverse-score items and to spot values that do not belong.">
             <Info className="w-3.5 h-3.5 text-secondary-400" />
@@ -2004,10 +2032,26 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {!confirmed && <button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button>}
         </div>
       )}
-      {multipleOutputs && rangeOutliers && rangeOutliers.count > 0 && !decisionApplied && (
+      {mode === 'demographic' ? <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p> : mode !== 'continuous' && (
+        <>
+        {mode === 'word' && <div className="mb-2 flex items-center gap-2 text-xs"><button type="button" disabled={!wordControlsAvailable} onClick={flipWords} className="text-primary-600 hover:underline disabled:text-secondary-400">Flip order</button><button type="button" disabled={!wordControlsAvailable} onClick={startAtZero} className="text-primary-600 hover:underline disabled:text-secondary-400">Start at 0</button>{!wordControlsAvailable && <span className="text-secondary-400">available once every word has a number</span>}{presetMatch.preset && <button type="button" className="ml-auto text-primary-600 hover:underline" onClick={() => applyPreset(presetMatch.preset!.name)}>Wrong scale? Change</button>}</div>}
+        <table className="w-full text-xs mb-2"><thead><tr className="text-left text-secondary-500"><th className="font-normal">Answer</th><th className="font-normal">Found</th><th className="font-normal">Counts as</th></tr></thead><tbody>
+          {answerTable.rows.map((row: AnswerTableRow) => {
+            const raw = row.answer.replace(/ \(outside .+\)$/, '');
+            return <tr key={`${row.kind}-${row.answer}`} className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
+              <td className="py-1">{row.kind === 'out_of_range' ? <button type="button" className="underline" onClick={() => row.cells[0] && onHighlightCell?.(row.cells[0].rowIndex, row.cells[0].column)}>{row.answer} <span className="text-secondary-500">{row.cells[0] ? `${row.cells[0].column}: ${displayIds[row.cells[0].rowIndex]}` : ''}</span></button> : row.answer}</td>
+              <td className="py-1">{row.found}</td>
+              <td className="py-1">{row.kind === 'out_of_range' ? <select value={decisionApplied && outOfRangeDecision?.action === 'widen' ? 'widen' : decisionApplied ? 'missing' : ''} onChange={(event) => event.target.value && onApplyOutOfRange?.(event.target.value as 'missing' | 'widen', row.cells.map(() => Number(raw)), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`))} className="w-44 px-2 py-1 border border-secondary-200 rounded"><option value="">Not scored</option><option value="widen">Widen scale to {minValue}-{Math.max(maxValue ?? Number(raw), Number(raw))}</option></select> : <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => updateLabel(raw, event.target.value === '' ? null : Number(event.target.value), row.kind === 'special' ? 'special' : 'scale')} className="w-32 px-2 py-1 border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
+            </tr>;
+          })}
+        </tbody></table></>
+      )}
+      {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Built-in codes are not scored. Type a number to score one.</p>}
+      {false && <div>
+      {multipleOutputs && rangeOutliers! && rangeOutliers!.count > 0 && !decisionApplied && (
         <div className="mb-2 p-2 rounded-md border border-warning-200 bg-warning-50 text-xs text-warning-800">
           <div className="mb-1">
-            {minValue}-{maxValue} detected. {rangeOutliers.count} value{rangeOutliers.count === 1 ? '' : 's'} outside (
+            {minValue}-{maxValue} detected. {rangeOutliers!.count} value{rangeOutliers!.count === 1 ? '' : 's'} outside (
             {affectedCells.map((cell, index) => (
               <React.Fragment key={`${cell.column}-${cell.rowIndex}`}>
                 {index > 0 && ', '}
@@ -2025,28 +2069,28 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'missing' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
-              onClick={() => onApplyOutOfRange?.('missing', rangeOutliers.values, decisionCells.map((cell) => cell.cellKey))}
+              className={`px-2 py-1 rounded ${rangeOutliers!.suggestedAction === 'missing' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
+              onClick={() => onApplyOutOfRange?.('missing', rangeOutliers!.values, decisionCells.map((cell) => cell.cellKey))}
             >
               Treat as missing
             </button>
             <button
               type="button"
-              className={`px-2 py-1 rounded ${rangeOutliers.suggestedAction === 'widen' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
-              onClick={() => onApplyOutOfRange?.('widen', rangeOutliers.values, decisionCells.map((cell) => cell.cellKey))}
+              className={`px-2 py-1 rounded ${rangeOutliers!.suggestedAction === 'widen' ? 'bg-warning-200 font-semibold' : 'bg-white border border-warning-200'}`}
+              onClick={() => onApplyOutOfRange?.('widen', rangeOutliers!.values, decisionCells.map((cell) => cell.cellKey))}
             >
               Widen range
             </button>
           </div>
           {reverseWarning && <p className="mt-2">{reverseWarning}</p>}
-          {entryErrorGuidance(rangeOutliers.suggestedAction) && (
-            <p className="mt-2">{entryErrorGuidance(rangeOutliers.suggestedAction)}</p>
+          {entryErrorGuidance(rangeOutliers!.suggestedAction) && (
+            <p className="mt-2">{entryErrorGuidance(rangeOutliers!.suggestedAction)}</p>
           )}
         </div>
       )}
       {multipleOutputs && decisionApplied && outOfRangeDecision && (
         <div className="mb-2 text-xs text-secondary-500">
-          {outOfRangeDecisionSummary(outOfRangeDecision, decisionCells, minValue !== null && maxValue !== null ? { min: minValue, max: maxValue } : undefined)}
+          {outOfRangeDecisionSummary(outOfRangeDecision!, decisionCells, minValue == null || maxValue == null ? undefined : { min: minValue as number, max: maxValue as number })}
           <button type="button" className="ml-1 underline hover:text-secondary-700" onClick={onChangeOutOfRangeDecision}>Change</button>
         </div>
       )}
@@ -2113,6 +2157,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           </>}
         </div>
       )}
+      </div>}
       <div className="flex items-center gap-1 mb-2">
         {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
         {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
@@ -2139,7 +2184,7 @@ function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customF
           {preview && !formulaError && <p className="text-xs text-success-600 mb-1">Preview: {preview}</p>}
         </div>
       )}
-      {scaleType === 'numeric' && (
+      {false && scaleType === 'numeric' && (
         <div className="flex items-center gap-2">
           <input type="number" value={minValue ?? ''} onChange={(e) => onSetScaleRange(e.target.value ? Number(e.target.value) : null, maxValue)} className="w-16 px-2 py-1 text-xs border border-secondary-200 rounded focus:outline-none focus:border-primary-400" placeholder="Min" aria-label={`${name} minimum`} />
           <span className="text-secondary-400 text-xs">to</span>
