@@ -267,13 +267,32 @@ export function detectConventionalRange(values: unknown[]): ConventionalRangeDet
     .filter((range) => numeric.filter((value) => value >= range.min && value <= range.max).length / numeric.length >= 0.99)
     .sort((left, right) => (left.max - left.min) - (right.max - right.min))[0];
   const range = candidate ? { min: candidate.min, max: candidate.max } : observed;
-  const inRange = numeric.filter((value) => value >= range.min && value <= range.max).length;
+  const tWeak = Math.max(1, Math.floor(0.01 * numeric.length));
+  const tOut = Math.max(2, Math.floor(0.01 * numeric.length));
+  const weakEnd = numeric.filter((value) => value === range.min).length <= tWeak
+    || numeric.filter((value) => value === range.max).length <= tWeak;
+  let selectedRange = range;
+  if (weakEnd) {
+    const replacements = CONVENTIONAL_RANGES
+      .filter((possible) => (possible.max - possible.min) < (range.max - range.min))
+      .filter((possible) => numeric.filter((value) => value === possible.min).length > tWeak
+        && numeric.filter((value) => value === possible.max).length > tWeak)
+      .map((possible) => ({
+        range: { min: possible.min, max: possible.max },
+        outside: numeric.filter((value) => value < possible.min || value > possible.max).length,
+      }))
+      .filter((possible) => possible.outside <= tOut)
+      .sort((left, right) => left.outside - right.outside
+        || (left.range.max - left.range.min) - (right.range.max - right.range.min));
+    if (replacements.length > 0) selectedRange = replacements[0].range;
+  }
+  const inRange = numeric.filter((value) => value >= selectedRange.min && value <= selectedRange.max).length;
   return {
-    range,
+    range: selectedRange,
     confirmed: false,
     coverage: inRange / numeric.length,
     isContinuous: false,
-    outOfRange: assessRangeOutliers(numeric, range),
+    outOfRange: assessRangeOutliers(numeric, selectedRange),
   };
 }
 

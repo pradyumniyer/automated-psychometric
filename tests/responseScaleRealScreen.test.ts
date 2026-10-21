@@ -8,6 +8,7 @@ import { db } from '../src/storage/db';
 import { datasetRepository, projectRepository, scoreRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
 import { fromSurveyConfigRecord, toSurveyConfigRecord } from '../src/storage/viewAdapters';
 import { buildTemplateDefinition } from '../src/lib/templates';
+import { migrateRangeState } from '../src/lib/responseScaleState';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -114,13 +115,27 @@ describe('response scale behavior on ConfigScreen', () => {
   });
 
   it('D4: leaves Fixture A untouched with its amber outlier row and review count', async () => {
-    const { project, dataset } = await setup();
+    const { project, dataset } = await setup({ overall: true });
     const { user, view } = await openNamedScale(project, dataset.id, 'Subscale 1');
     expect(user.getByText('7 (outside 1 to 5)')).toBeTruthy();
     expect(user.getByText(/1 answer to review/)).toBeTruthy();
     expect((user.getByRole('combobox') as HTMLSelectElement).value).toBe('');
     expect(Array.from((user.getByRole('combobox') as HTMLSelectElement).options)[0].textContent).toBe('Choose…');
     view.unmount();
+    for (const name of ['Subscale 1', 'Subscale 2']) {
+      const current = await openNamedScale(project, dataset.id, name);
+      fireEvent.click(current.user.getByRole('button', { name: 'Confirm range' }));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      current.view.unmount();
+    }
+    const scoring = render(React.createElement(ConfigScreen, props(project, dataset.id)));
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    await screen.findByText(/Scoring complete/);
+    expect(screen.getByText(/P25, P26, P29, P30/)).toBeTruthy();
+    const result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
+    expect(result.rows[0]).toMatchObject({ 'Subscale 1 Sum': 18, 'Subscale 2 Sum': 19, 'Overall Scale Score': 37 });
+    scoring.unmount();
   });
 
   it('D1: detects Fixture B subscales, scores the baseline, and persists both decisions through reloads', async () => {
@@ -174,6 +189,7 @@ describe('response scale behavior on ConfigScreen', () => {
     fireEvent.click(await screen.findByText('Scoring'));
     fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
     await screen.findByText(/Scoring complete/);
+    await waitFor(() => expect(screen.getByText(/R04, R07/)).toBeTruthy());
     result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
     expect(result.rows[8]).toMatchObject({ 'Subscale 3 Sum': 20, 'Overall Scale Score': 43 });
     widenedScoring.unmount();
@@ -202,6 +218,7 @@ describe('response scale behavior on ConfigScreen', () => {
     fireEvent.click(await screen.findByText('Scoring'));
     fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
     await screen.findByText(/Scoring complete/);
+    await waitFor(() => expect(screen.getByText(/R04, R07, R09/)).toBeTruthy());
     result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
     expect(result.rows[8]).toMatchObject({ 'Subscale 3 Sum': null, 'Overall Scale Score': null });
     missingScoring.unmount();
@@ -285,7 +302,7 @@ describe('response scale behavior on ConfigScreen', () => {
       overallSettings: { enabled: true, basedOn: 'sums', combineBy: 'sum', customFormula: '' }, linkedTemplateId: saved.id });
     await templateRepository.applyToDataset(saved.id, other.id, targetConfig);
     const applied = fromSurveyConfigRecord((await surveyConfigRepository.get(other.id))!);
-    expect(applied.subscales[2]).toMatchObject({ minValue: 8, maxValue: 8, baseMin: 1, baseMax: 7, rangeSource: 'detected', confirmed: false, outOfRangeDecisions: { '8': { action: 'widen', reviewed: true } } });
+    expect(applied.subscales[2]).toMatchObject({ minValue: 1, maxValue: 8, baseMin: 1, baseMax: 7, rangeSource: 'detected', confirmed: false, outOfRangeDecisions: { '8': { action: 'widen', reviewed: true } } });
     expect(applied.subscales[2].labelMap).toContainEqual({ label: 'N/A', value: 0, kind: 'special' });
     const restored = await openNamedScale(project, other.id, 'Subscale 3');
     expect((restored.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('8');
@@ -296,6 +313,7 @@ describe('response scale behavior on ConfigScreen', () => {
     const oldTemplate = await templateRepository.save({ name: 'Legacy template', description: '', instrument: '', definition: legacy });
     const legacyScale = legacy.responseScales[2];
     expect(legacyScale).toMatchObject({ outOfRangeDecision: { values: [8], originalMin: 1, originalMax: 7 } });
+    expect(migrateRangeState({ ...legacyScale, hasReverseItems: false })).toMatchObject({ minValue: 1, maxValue: 8, baseMin: 1, baseMax: 7, outOfRangeDecisions: { '8': { action: 'widen', reviewed: true } } });
     expect(oldTemplate.id).toBeTruthy();
   });
 

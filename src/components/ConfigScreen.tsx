@@ -900,7 +900,8 @@ export function ConfigScreen({
         rangeSource: scale?.rangeSource ?? (scale?.confirmed ? 'manual' : 'detected'),
         baseMin: scale?.baseMin ?? scale?.minValue ?? null,
         baseMax: scale?.baseMax ?? scale?.maxValue ?? null,
-        outOfRangeDecisions: scale?.outOfRangeDecisions ?? {},
+        outOfRangeDecisions: scale?.outOfRangeDecisions,
+        outOfRangeDecision: scale?.outOfRangeDecision,
         displayOrder: nextSubscales.length,
         hasReverseItems: matched.some((item) => item.reverse),
       }) as SubscaleState);
@@ -2041,7 +2042,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
       {mode === 'demographic' ? <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p> : mode !== 'continuous' && (
         <>
         {mode === 'word' && <div className="mb-2 flex items-center gap-2 text-xs"><button type="button" disabled={!wordControlsAvailable} onClick={flipWords} className="text-primary-600 hover:underline disabled:text-secondary-400">Flip order</button><button type="button" disabled={!wordControlsAvailable} onClick={startAtZero} className="text-primary-600 hover:underline disabled:text-secondary-400">Start at 0</button>{!wordControlsAvailable && <span className="text-secondary-400">available once every word has a number</span>}{presetMatch.preset && <button type="button" className="ml-auto text-primary-600 hover:underline" onClick={() => applyPreset(presetMatch.preset!.name)}>Wrong scale? Change</button>}</div>}
-        <table className="w-full text-xs mb-2"><thead><tr className="text-left text-secondary-500"><th className="font-normal">Answer</th><th className="font-normal">Found</th><th className="font-normal">Counts as</th></tr></thead><tbody>
+        {answerTable.rows.length > 0 && <table className="w-full text-xs mb-2"><thead><tr className="text-left text-secondary-500"><th className="font-normal">Answer</th><th className="font-normal">Found</th><th className="font-normal">Counts as</th></tr></thead><tbody>
           {answerTable.rows.map((row: AnswerTableRow) => {
             const raw = row.answer.replace(/ \(outside .+\)$/, '');
             return <tr key={`${row.kind}-${row.answer}`} className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
@@ -2052,7 +2053,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
                   const value = event.target.value as '' | 'missing' | 'widen';
                   if (value) onApplyOutOfRange?.(value, row.cells.map(() => raw), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`));
                 }} className="w-44 px-2 py-1 border border-secondary-200 rounded">
-                  <option value="">Not scored</option><option value="missing">Not scored</option>
+                  {row.review && <option value="">Choose…</option>}<option value="missing">Not scored</option>
                   {row.kind === 'out_of_range' && <option value="widen">Widen scale to {Math.min(baseMin ?? Number(raw), Number(raw))}-{Math.max(baseMax ?? Number(raw), Number(raw))}</option>}
                 </select>
                 <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
@@ -2069,7 +2070,8 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
               }} className="w-32 px-2 py-1 border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
             </tr>;
           })}
-        </tbody></table></>
+        </tbody></table>}
+        </>
       )}
       {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Built-in codes are not scored. Type a number to score one.</p>}
       <div className="flex items-center gap-1 mb-2">

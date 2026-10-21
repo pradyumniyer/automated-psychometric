@@ -24,7 +24,7 @@ export interface AnswerTableRow {
   review: boolean;
   grey: boolean;
   reversed: boolean;
-  decision?: 'missing' | 'widen';
+  decision?: '' | 'missing' | 'widen';
   cells: { column: string; rowIndex: number; displayId?: string }[];
 }
 
@@ -98,7 +98,7 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
       review: isUnreviewed,
       grey: kind === 'special',
       reversed: false,
-      decision: savedDecision?.action,
+      decision: savedDecision?.action ?? (isUnreviewed ? '' : 'missing'),
       cells: [{ column, rowIndex, displayId: input.displayIds?.[rowIndex] }],
     });
   };

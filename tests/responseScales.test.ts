@@ -219,7 +219,7 @@ describe("resolveResponse", () => {
       detect([...repeat(5, 1), ...repeat(5, 2), ...repeat(5, 3), ...repeat(5, 4), ...repeat(5, 5), ...repeat(4, 6), ...repeat(5, 7), 8, ...repeat(12, 7)], { min: 1, max: 7 }, [8]);
       detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), 7], { min: 1, max: 5 }, [7]);
       detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), 0], { min: 1, max: 5 }, [0]);
-      detect([...repeat(9, 1), ...repeat(9, 2), ...repeat(9, 3), ...repeat(9, 4), ...repeat(4, 5)], { min: 1, max: 5 }, []);
+      detect([...repeat(10, 1), ...repeat(10, 2), ...repeat(9, 3), ...repeat(9, 4), ...repeat(2, 5)], { min: 1, max: 5 }, []);
       detect([...repeat(10, 1), ...repeat(10, 2), ...repeat(10, 3), ...repeat(10, 4), 5], { min: 1, max: 4 }, [5]);
       detect([1, 2, 3, 4, 5, 3], { min: 1, max: 5 }, []);
       detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), ...repeat(6, 6), ...repeat(12, 7), ...repeat(12, 8)], { min: 1, max: 9 }, []);

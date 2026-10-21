@@ -33,7 +33,7 @@ export interface SubscaleStateLike {
   baseMin?: number | null;
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
-  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
+  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
 }
 
 export interface BandStateLike {
