@@ -73,6 +73,14 @@ describe('response-scale answer table logic', () => {
     expect(result.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({ answer: '7 (outside 1 to 5)', review: false });
   });
 
+  it('exposes a single unreviewed choice state and the saved decision for widened rows', () => {
+    const fresh = buildAnswerTable(base).rows.find((row) => row.kind === 'out_of_range');
+    expect(fresh).toMatchObject({ decision: '', review: true });
+    const widened = buildAnswerTable({ ...base, min: 1, max: 7, baseMin: 1, baseMax: 5,
+      outOfRangeDecisions: { '7': { action: 'widen', reviewed: true } } }).rows.find((row) => row.kind === 'out_of_range');
+    expect(widened).toMatchObject({ decision: 'widen', review: false });
+  });
+
   it('restores the base range and clears review after choosing Not scored', () => {
     const restored = buildAnswerTable({ ...base, min: 1, max: 5, baseMin: 1, baseMax: 5,
       outOfRangeDecisions: { '7': { action: 'missing', reviewed: true } } });

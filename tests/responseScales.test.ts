@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   assessRangeOutliers,
   applyOutOfRangeAction,
@@ -203,6 +205,67 @@ describe("resolveResponse", () => {
         count: 3,
         suggestedAction: "widen",
       });
+    });
+
+    it('keeps well-used endpoints but trims weak conventional endpoints on small samples', () => {
+      const repeat = (count: number, value: number) => Array.from({ length: count }, () => value);
+      const detect = (values: number[], expected: { min: number; max: number }, outside: number[]) => {
+        const result = detectConventionalRange(values);
+        expect(result.range).toEqual(expected);
+        expect(result.outOfRange.values).toEqual(outside);
+      };
+      detect([...repeat(5, 1), ...repeat(5, 2), ...repeat(5, 3), ...repeat(5, 4), ...repeat(5, 5), ...repeat(4, 6), ...repeat(5, 7), 8], { min: 1, max: 7 }, [8]);
+      detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(7, 5), ...repeat(6, 6), ...repeat(8, 7), 8, 8], { min: 1, max: 7 }, [8, 8]);
+      detect([...repeat(5, 1), ...repeat(5, 2), ...repeat(5, 3), ...repeat(5, 4), ...repeat(5, 5), ...repeat(4, 6), ...repeat(5, 7), 8, ...repeat(12, 7)], { min: 1, max: 7 }, [8]);
+      detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), 7], { min: 1, max: 5 }, [7]);
+      detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), 0], { min: 1, max: 5 }, [0]);
+      detect([...repeat(9, 1), ...repeat(9, 2), ...repeat(9, 3), ...repeat(9, 4), ...repeat(4, 5)], { min: 1, max: 5 }, []);
+      detect([...repeat(10, 1), ...repeat(10, 2), ...repeat(10, 3), ...repeat(10, 4), 5], { min: 1, max: 4 }, [5]);
+      detect([1, 2, 3, 4, 5, 3], { min: 1, max: 5 }, []);
+      detect([...repeat(6, 1), ...repeat(6, 2), ...repeat(6, 3), ...repeat(6, 4), ...repeat(6, 5), ...repeat(6, 6), ...repeat(12, 7), ...repeat(12, 8)], { min: 1, max: 9 }, []);
+      detect([...repeat(200, 1), ...repeat(200, 2), ...repeat(200, 3), ...repeat(200, 4), ...repeat(192, 5), ...repeat(8, 7)], { min: 1, max: 5 }, Array(8).fill(7));
+      detect([...repeat(200, 1), ...repeat(200, 2), ...repeat(200, 3), ...repeat(200, 4), ...repeat(188, 5), ...repeat(12, 7)], { min: 1, max: 7 }, []);
+    });
+
+    it('preserves the weak-end guarantees across seeded random datasets', () => {
+      let seed = 72913;
+      for (let sample = 0; sample < 250; sample += 1) {
+        seed = (seed * 48271) % 2147483647;
+        const length = 6 + (seed % 500);
+        const values = Array.from({ length }, () => {
+          seed = (seed * 48271) % 2147483647;
+          return 0 + (seed % 12);
+        });
+        const ranges = [
+          { min: 0, max: 3 }, { min: 0, max: 4 }, { min: 0, max: 5 }, { min: 0, max: 6 },
+          { min: 0, max: 7 }, { min: 0, max: 10 }, { min: 1, max: 3 }, { min: 1, max: 4 },
+          { min: 1, max: 5 }, { min: 1, max: 6 }, { min: 1, max: 7 }, { min: 1, max: 9 },
+          { min: 1, max: 10 }, { min: 0, max: 100 },
+        ];
+        const oldRange = ranges.filter((range) => values.filter((value) => value >= range.min && value <= range.max).length / length >= 0.99)
+          .sort((left, right) => (left.max - left.min) - (right.max - right.min))[0]
+          ?? { min: Math.min(...values), max: Math.max(...values) };
+        const result = detectConventionalRange(values);
+        const tWeak = Math.max(1, Math.floor(0.01 * length));
+        const tOut = Math.max(2, Math.floor(0.01 * length));
+        const usedMin = values.filter((value) => value === oldRange.min).length;
+        const usedMax = values.filter((value) => value === oldRange.max).length;
+        if (usedMin > tWeak && usedMax > tWeak) expect(result.range).toEqual(oldRange);
+        const newOutside = values.filter((value) => value < result.range.min || value > result.range.max).length;
+        expect(newOutside <= Math.max(tOut, Math.floor(0.01 * length)) || (result.range.min === oldRange.min && result.range.max === oldRange.max)).toBe(true);
+      }
+    });
+
+    it('leaves Fixture A item and whole-dataset automatic ranges at 1-5 with 7 outside', async () => {
+      const lines = readFileSync(resolve(process.cwd(), 'docs/fixtures/fixture_A.csv'), 'utf8').trim().split(/\r?\n/);
+      const headers = lines[0].split(',');
+      const rows = lines.slice(1).map((line) => Object.fromEntries(line.split(',').map((cell, index) => [headers[index], cell])));
+      const itemValues = rows.flatMap((row) => ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].map((column) => row[column]));
+      expect(detectConventionalRange(itemValues)).toMatchObject({ range: { min: 1, max: 5 }, outOfRange: { values: [7] } });
+      const { buildAutoScale } = await import('../src/scientific/scoring');
+      const auto = buildAutoScale(headers, ['ID', 'Age'], rows);
+      expect(auto.responseScale).toMatchObject({ minValue: 1, maxValue: 5 });
+      expect(detectConventionalRange(rows.flatMap((row) => headers.slice(2).map((column) => row[column]))).outOfRange.values).toContain(7);
     });
 
     it("defaults farther values such as P26's 7 to treating them as missing", () => {
