@@ -7,6 +7,10 @@ export interface ResponseScaleConfig {
   labelMap?: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   allowedNonresponse?: string[];
   confirmed?: boolean;
+  rangeSource?: 'detected' | 'manual' | 'preset';
+  baseMin?: number | null;
+  baseMax?: number | null;
+  outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
 }
 export interface SubscaleConfig {
   id: string; name: string; items: SubscaleItemConfig[];
@@ -21,6 +25,7 @@ export function isAutomaticSubscale(subscale: Pick<SubscaleConfig, 'id'>): boole
   return subscale.id === AUTOMATIC_SUBSCALE_ID;
 }
 import { evaluateFormula } from './formula';
+import { seedDetectedRange } from '../lib/responseScaleState';
 import {
   interpretationColumnKey,
   scoreColumnKey,
@@ -562,11 +567,14 @@ export function buildAutoScale(
   const numeric = numericValues.length > 0
     && numericValues.length / Math.max(observedValues.length, 1) >= 0.8;
   const conventional = numeric ? detectConventionalRange(numericValues).range : null;
+  const seeded = numeric && conventional
+    ? seedDetectedRange({ minValue: null, maxValue: null, baseMin: null, baseMax: null, rangeSource: 'detected' as const }, conventional.min, conventional.max)
+    : null;
   const detected = numeric
     ? {
         scaleType: 'numeric' as const,
-        minValue: conventional?.min ?? Math.min(...numericValues),
-        maxValue: conventional?.max ?? Math.max(...numericValues),
+        minValue: seeded?.minValue ?? Math.min(...numericValues),
+        maxValue: seeded?.maxValue ?? Math.max(...numericValues),
         uniqueValues: [] as string[],
       }
     : {

@@ -68,18 +68,16 @@ describe('response-scale answer table logic', () => {
   });
 
   it('keeps a widened out-of-range row visible with its saved choice', () => {
-    const result = buildAnswerTable({ ...base, min: 1, max: 7, outOfRangeDecision: {
-      action: 'widen', cells: ['Q2:3'], values: [7], originalMin: 1, originalMax: 5,
-    } });
+    const result = buildAnswerTable({ ...base, min: 1, max: 7, baseMin: 1, baseMax: 5,
+      outOfRangeDecisions: { '7': { action: 'widen', reviewed: true } } });
     expect(result.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({ answer: '7 (outside 1 to 5)', review: false });
   });
 
-  it('restores the original range and review row after choosing Not scored', () => {
-    const widened = { action: 'widen' as const, cells: ['Q4:3'], values: [7], originalMin: 1, originalMax: 5 };
-    const restored = buildAnswerTable({ ...base, min: 1, max: 5, outOfRangeDecision: undefined });
+  it('restores the base range and clears review after choosing Not scored', () => {
+    const restored = buildAnswerTable({ ...base, min: 1, max: 5, baseMin: 1, baseMax: 5,
+      outOfRangeDecisions: { '7': { action: 'missing', reviewed: true } } });
     expect(restored.rows.find((row) => row.kind === 'out_of_range')).toMatchObject({
-      answer: '7 (outside 1 to 5)', review: true,
+      answer: '7 (outside 1 to 5)', review: false, decision: 'missing',
     });
-    expect(widened.originalMax).toBe(5);
   });
 });

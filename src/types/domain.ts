@@ -66,6 +66,10 @@ export interface ResponseScale {
   max_value: number | null;
   label_map: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   confirmed?: boolean;
+  range_source?: 'detected' | 'manual' | 'preset';
+  base_min?: number | null;
+  base_max?: number | null;
+  out_of_range_decisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   out_of_range?: 'missing' | 'widen';
   out_of_range_decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
   created_at: string;
@@ -118,6 +122,10 @@ export interface TemplateDefinition {
     flipped?: boolean;
     startsAtZero?: boolean;
     confirmed?: boolean;
+    rangeSource?: 'detected' | 'manual' | 'preset';
+    baseMin?: number | null;
+    baseMax?: number | null;
+    outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
     outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
   }[];
   interpretationBands: {

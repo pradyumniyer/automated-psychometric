@@ -68,16 +68,22 @@ describe('template score output settings', () => {
       scaleType: 'numeric',
       minValue: 1,
       maxValue: 7,
+      baseMin: 1,
+      baseMax: 5,
+      rangeSource: 'detected',
+      outOfRangeDecisions: { '7': { action: 'widen', reviewed: true } },
       labelMap: [],
       confirmed: false,
-      outOfRangeDecision: { action: 'widen', cells: ['Q4:25'], values: [7], originalMin: 1, originalMax: 5 },
     }], {}, {});
 
     expect(template.responseScales[0]).toMatchObject({
       minValue: 1,
       maxValue: 7,
+      baseMin: 1,
+      baseMax: 5,
+      rangeSource: 'detected',
+      outOfRangeDecisions: { '7': { action: 'widen', reviewed: true } },
       confirmed: false,
-      outOfRangeDecision: { action: 'widen', cells: ['Q4:25'], values: [7], originalMin: 1, originalMax: 5 },
     });
   });
 

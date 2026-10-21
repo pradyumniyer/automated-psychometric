@@ -9,6 +9,7 @@ import type {
 import type { SurveyConfigRecord } from './schema';
 import { shownScoreOutputs } from '../lib/scoreOutputs';
 import { buildAutoScale } from '../scientific/scoring';
+import { migrateRangeState } from '../lib/responseScaleState';
 
 export interface ScreenSubscaleState {
   id: string;
@@ -22,6 +23,10 @@ export interface ScreenSubscaleState {
   maxValue: number | null;
   labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
   confirmed?: boolean;
+  rangeSource?: 'detected' | 'manual' | 'preset';
+  baseMin?: number | null;
+  baseMax?: number | null;
+  outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   outOfRange?: 'missing' | 'widen';
   outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
   displayOrder: number;
@@ -84,8 +89,12 @@ function toStoredSubscale(
     max_value: state.maxValue,
     label_map: state.labelMap,
     confirmed: state.confirmed ?? true,
+    range_source: state.rangeSource,
+    base_min: state.baseMin ?? state.minValue,
+    base_max: state.baseMax ?? state.maxValue,
+    out_of_range_decisions: state.outOfRangeDecisions,
     out_of_range: state.outOfRange ?? existing?.response_scale?.out_of_range ?? 'missing',
-    out_of_range_decision: state.outOfRangeDecision ?? existing?.response_scale?.out_of_range_decision,
+    out_of_range_decision: undefined,
     created_at: existing?.response_scale?.created_at ?? now,
   };
   const outputs = shownScoreOutputs(state.showOutputs, state.scoringMethod);
@@ -184,8 +193,17 @@ export function toSurveyConfigRecord(
 }
 
 export function migrateSurveyConfigRecord(config: SurveyConfigRecord): SurveyConfigRecord {
-  const migrateScale = (scale: ResponseScale | undefined): ResponseScale | undefined =>
-    scale ? { ...scale, confirmed: scale.confirmed ?? true } : undefined;
+  const migrateScale = (scale: ResponseScale | undefined): ResponseScale | undefined => {
+    if (!scale) return undefined;
+    const confirmed = scale.confirmed ?? true;
+    const migrated = migrateRangeState({ minValue: scale.min_value, maxValue: scale.max_value, confirmed,
+      rangeSource: scale.range_source, baseMin: scale.base_min, baseMax: scale.base_max,
+      outOfRangeDecisions: scale.out_of_range_decisions, outOfRangeDecision: scale.out_of_range_decision,
+      outOfRange: scale.out_of_range });
+    return { ...scale, confirmed, range_source: migrated.rangeSource,
+      base_min: migrated.baseMin, base_max: migrated.baseMax, out_of_range_decisions: migrated.outOfRangeDecisions,
+      min_value: migrated.minValue, max_value: migrated.maxValue };
+  };
   return {
     ...config,
     response_scale: { ...config.response_scale, confirmed: config.response_scale.confirmed ?? true },
@@ -225,8 +243,11 @@ export function fromSurveyConfigRecord(
     maxValue: subscale.response_scale?.max_value ?? null,
     labelMap: subscale.response_scale?.label_map ?? [],
     confirmed: subscale.response_scale?.confirmed ?? true,
+    rangeSource: subscale.response_scale?.range_source,
+    baseMin: subscale.response_scale?.base_min,
+    baseMax: subscale.response_scale?.base_max,
+    outOfRangeDecisions: subscale.response_scale?.out_of_range_decisions,
     outOfRange: subscale.response_scale?.out_of_range ?? 'missing',
-    outOfRangeDecision: subscale.response_scale?.out_of_range_decision,
     displayOrder: subscale.display_order,
   });
   const bands: ScreenSurveyConfig['bands'] = {};
@@ -287,6 +308,9 @@ export function fromSurveyConfigRecord(
           max_value: automatic.responseScale.maxValue ?? null,
           label_map: automatic.responseScale.labelMap ?? [],
           confirmed: false,
+          range_source: 'detected',
+          base_min: automatic.responseScale.minValue ?? null,
+          base_max: automatic.responseScale.maxValue ?? null,
           created_at: new Date(0).toISOString(),
         },
         bands: [],

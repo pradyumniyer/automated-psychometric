@@ -29,6 +29,10 @@ export interface SubscaleStateLike {
   flipped?: boolean;
   startsAtZero?: boolean;
   confirmed?: boolean;
+  rangeSource?: 'detected' | 'manual' | 'preset';
+  baseMin?: number | null;
+  baseMax?: number | null;
+  outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[] };
 }
 
@@ -120,9 +124,12 @@ export function buildTemplateDefinition(
       maxValue: s.maxValue,
       labelMap: s.labelMap,
       confirmed: s.confirmed === true,
+      rangeSource: s.rangeSource,
+      baseMin: s.baseMin,
+      baseMax: s.baseMax,
+      outOfRangeDecisions: s.outOfRangeDecisions,
       flipped: s.flipped ?? false,
       startsAtZero: s.startsAtZero ?? false,
-      outOfRangeDecision: s.outOfRangeDecision,
     })),
     interpretationBands: subscaleStates.flatMap((subscale) => {
       const outputs = bandsByOutput[subscale.name];

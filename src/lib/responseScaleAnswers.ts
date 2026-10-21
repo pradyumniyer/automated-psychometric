@@ -9,8 +9,11 @@ export interface AnswerTableInput {
   min: number | null;
   max: number | null;
   labels: ResponseScaleLabelSetting[];
+  baseMin?: number | null;
+  baseMax?: number | null;
+  outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
+  displayIds?: string[];
   preset?: { name: string; labels: { label: string; value: number }[] };
-  outOfRangeDecision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
 }
 
 export interface AnswerTableRow {
@@ -21,6 +24,7 @@ export interface AnswerTableRow {
   review: boolean;
   grey: boolean;
   reversed: boolean;
+  decision?: 'missing' | 'widen';
   cells: { column: string; rowIndex: number; displayId?: string }[];
 }
 
@@ -78,20 +82,24 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     const existing = cellsByKey.get(key);
     if (existing) {
       existing.found += 1;
-      existing.cells.push({ column, rowIndex });
+      existing.cells.push({ column, rowIndex, displayId: input.displayIds?.[rowIndex] });
       return;
     }
     const countsAs = label?.value ?? presetValueByKey.get(normalizeResponseText(rawAnswer)) ?? null;
-    const isUnreviewed = (kind === 'unknown' || kind === 'out_of_range') && countsAs === null;
+    const savedDecision = input.outOfRangeDecisions?.[rawAnswer];
+    const isUnreviewed = (kind === 'unknown' || kind === 'out_of_range') && countsAs === null
+      && savedDecision?.action !== 'widen' && savedDecision?.reviewed !== true;
     cellsByKey.set(key, {
-      answer: displayAnswer(rawAnswer, input.min, input.max, kind),
+      answer: displayAnswer(rawAnswer, kind === 'out_of_range' ? (input.baseMin ?? input.min) : input.min,
+        kind === 'out_of_range' ? (input.baseMax ?? input.max) : input.max, kind),
       found: 1,
       kind,
       countsAs,
       review: isUnreviewed,
       grey: kind === 'special',
       reversed: false,
-      cells: [{ column, rowIndex }],
+      decision: savedDecision?.action,
+      cells: [{ column, rowIndex, displayId: input.displayIds?.[rowIndex] }],
     });
   };
 
@@ -102,7 +110,9 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     if (isSpecial(raw)) return add(answer, 'special', column, rowIndex);
     const number = numberValue(raw);
     if (number !== null) {
-      if (input.min !== null && input.max !== null && (number < input.min || number > input.max)) {
+      const baseMin = input.baseMin ?? input.min;
+      const baseMax = input.baseMax ?? input.max;
+      if (baseMin !== null && baseMax !== null && (number < baseMin || number > baseMax)) {
         return add(String(number), 'out_of_range', column, rowIndex);
       }
       return;
@@ -124,21 +134,6 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
       }
     }
   }
-  if (input.outOfRangeDecision?.action === 'widen' && input.outOfRangeDecision.originalMin !== undefined && input.outOfRangeDecision.originalMax !== undefined) {
-    input.outOfRangeDecision.values.forEach((value, index) => {
-      const key = `out_of_range:${value}`;
-      if (cellsByKey.has(key)) return;
-      const cellKey = input.outOfRangeDecision!.cells[index];
-      const [column, rowText] = cellKey?.split(':') ?? [];
-      const rowIndex = Number(rowText);
-      cellsByKey.set(key, {
-        answer: displayAnswer(String(value), input.outOfRangeDecision!.originalMin!, input.outOfRangeDecision!.originalMax!, 'out_of_range'),
-        found: 1, kind: 'out_of_range', countsAs: null, review: false, grey: false, reversed: false,
-        cells: Number.isInteger(rowIndex) ? [{ column, rowIndex }] : [],
-      });
-    });
-  }
-
   const ordered = [...cellsByKey.values()];
   if (mode === 'word' && input.preset) {
     const order = new Map(input.preset.labels.map((label, index) => [normalizeResponseText(label.label), index]));

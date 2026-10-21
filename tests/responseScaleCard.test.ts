@@ -67,25 +67,22 @@ function CardHarness({ fixture, initial, displayIds = true }: { fixture: Fixture
   const handleApply = async (id: string, action: 'missing' | 'widen', values: number[], cells: string[]) => {
     const current = subscales.find((subscale) => subscale.id === id);
     if (!current) return;
+    const originalMin = current.decision?.originalMin ?? current.min;
+    const originalMax = current.decision?.originalMax ?? current.max;
+    if (action === 'missing' && current.decision?.action === 'widen') {
+      update(id, { min: originalMin, max: originalMax, confirmed: current.items.some((item) => item.reverse) ? false : current.confirmed,
+        decision: { action, cells, values: [...values], originalMin, originalMax } });
+      return;
+    }
     const applied = applyOutOfRangeAction({
-      min: current.min, max: current.max, rangeSource: 'manual', confirmed: current.confirmed,
+      min: originalMin, max: originalMax, rangeSource: 'manual', confirmed: current.confirmed,
       flipped: false, startsAtZero: false, labels: [], outOfRange: action,
     }, values, action, current.items.some((item) => item.reverse));
     update(id, {
       min: applied.scale.min,
       max: applied.scale.max,
       confirmed: applied.scale.confirmed,
-      decision: { action, cells, values: [...values], originalMin: current.min, originalMax: current.max },
-    });
-  };
-  const handleChangeDecision = (id: string) => {
-    const current = subscales.find((subscale) => subscale.id === id);
-    if (!current) return;
-    update(id, {
-      min: current.decision?.originalMin ?? current.min,
-      max: current.decision?.originalMax ?? current.max,
-      confirmed: current.items.some((item) => item.reverse) ? false : current.confirmed,
-      decision: undefined,
+      decision: { action, cells, values: [...values], originalMin, originalMax },
     });
   };
   return React.createElement(
@@ -111,8 +108,9 @@ function CardHarness({ fixture, initial, displayIds = true }: { fixture: Fixture
       isOpen: true,
       onToggleOpen: () => undefined,
       confirmed: subscale.confirmed,
-      outOfRangeDecision: subscale.decision,
-      onChangeOutOfRangeDecision: () => handleChangeDecision(subscale.id),
+      baseMin: subscale.decision?.originalMin ?? subscale.min,
+      baseMax: subscale.decision?.originalMax ?? subscale.max,
+      outOfRangeDecisions: subscale.decision ? Object.fromEntries(subscale.decision.values.map((value) => [String(value), { action: subscale.decision!.action, reviewed: true }])) : {},
       onApplyOutOfRange: (action, values, cells) => handleApply(subscale.id, action, values, cells),
       onHighlightCell: () => undefined,
       onSetScoringMethod: () => undefined,
@@ -156,19 +154,22 @@ describe('rendered response scale cards', () => {
       initial: [makeSubscale('s1', 'Subscale 1', ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], ['Q3'], 1, 5, false)],
     }));
     const scale = card('s1');
-    const choice = within(scale).getByRole('combobox');
+    let choice = within(scale).getByRole('combobox');
     await user.selectOptions(choice, 'widen');
     expect((choice as HTMLSelectElement).value).toBe('widen');
     expectValue(within(scale).getByLabelText('Subscale 1 maximum'), '7');
     expect(within(scale).getByRole('button', { name: 'Confirm range' })).toBeTruthy();
-    await user.selectOptions(choice, '');
-    expect((choice as HTMLSelectElement).value).toBe('');
+    choice = within(scale).getByRole('combobox');
+    await user.selectOptions(choice, 'missing');
+    expect((choice as HTMLSelectElement).value).toBe('missing');
     expectValue(within(scale).getByLabelText('Subscale 1 maximum'), '5');
     expect(within(scale).getByText('7 (outside 1 to 5)')).toBeTruthy();
     expect(within(scale).getByRole('button', { name: 'Confirm range' })).toBeTruthy();
+    choice = within(scale).getByRole('combobox');
     await user.selectOptions(choice, 'widen');
-    await user.selectOptions(choice, '');
-    expect((choice as HTMLSelectElement).value).toBe('');
+    choice = within(scale).getByRole('combobox');
+    await user.selectOptions(choice, 'missing');
+    expect((choice as HTMLSelectElement).value).toBe('missing');
     expectValue(within(scale).getByLabelText('Subscale 1 maximum'), '5');
   });
 
@@ -181,11 +182,12 @@ describe('rendered response scale cards', () => {
     const scale = card('s3');
     expect(within(scale).queryByRole('button', { name: 'Confirm range' })).toBeNull();
     expect(within(scale).queryByText('Scoring is waiting')).toBeNull();
-    const choice = within(scale).getByRole('combobox');
+    let choice = within(scale).getByRole('combobox');
     await user.selectOptions(choice, 'widen');
     expectValue(within(scale).getByLabelText('S3 maximum'), '8');
     expectText(screen.getByTestId('score-s3-R09'), '20');
-    await user.selectOptions(choice, '');
+    choice = within(scale).getByRole('combobox');
+    await user.selectOptions(choice, 'missing');
     expectValue(within(scale).getByLabelText('S3 maximum'), '7');
     expectText(screen.getByTestId('score-s3-R09'), 'blank');
   });
