@@ -1961,6 +1961,10 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
     if (event.key === 'Enter') { event.preventDefault(); commitRangeDraft(); }
     if (event.key === 'Escape') { event.preventDefault(); revertRangeDraft(); }
   };
+  const confirmRange = () => {
+    commitRangeDraft();
+    onConfirmRange?.();
+  };
   const legacyUiEnabled = () => false;
   const wordsVisible = showWordLabels || mode === 'word';
   const updateLabel = (labelInput: string | number, value: number | null, kind: 'scale' | 'special' = 'scale') => {
@@ -2040,7 +2044,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           <span>to</span>
           <input type="text" inputMode="numeric" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
           <span>{mode === 'word' && presetMatch.preset ? `from ${presetMatch.preset.name}` : mode === 'word' ? 'set from the numbers you type below' : mode === 'continuous' ? 'continuous' : 'detected'}</span>
-          {hasReverseItems && !confirmed && <><button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
+          {hasReverseItems && confirmed !== true && <><button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
         </div>
       )}
       {legacyUiEnabled() && minValue !== null && maxValue !== null && (
@@ -2052,7 +2056,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
             {confirmed ? 'confirmed' : 'not confirmed'}
           </span>
           {!confirmed && <span> — suggestions can be changed before confirming.</span>}
-          {!confirmed && <button type="button" onClick={onConfirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button>}
+          {!confirmed && <button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button>}
         </div>
       )}
       {mode === 'demographic' ? <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p> : mode !== 'continuous' && (

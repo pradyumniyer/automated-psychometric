@@ -20,7 +20,9 @@ type TestSubscale = {
   decision?: { action: 'missing' | 'widen'; cells: string[]; values: number[]; originalMin?: number; originalMax?: number };
 };
 
-type Fixture = { headers: string[]; rows: Record<string, unknown>[]; expected?: Record<string, any> };
+type ExpectedScoreRow = { S1: number | null; S2: number | null; S3: number | null; Overall: number | null };
+type FixtureExpected = { base: Record<string, ExpectedScoreRow> };
+type Fixture = { headers: string[]; rows: Record<string, unknown>[]; expected?: FixtureExpected };
 
 function loadFixture(fileName: string, expectedFileName?: string): Fixture {
   const csv = readFileSync(resolve(process.cwd(), 'docs', 'fixtures', fileName), 'utf8').trim();
@@ -28,7 +30,7 @@ function loadFixture(fileName: string, expectedFileName?: string): Fixture {
   const headers = headerLine.split(',');
   const rows = dataLines.map((line) => Object.fromEntries(line.split(',').map((value, index) => [headers[index], value])));
   const expected = expectedFileName
-    ? JSON.parse(readFileSync(resolve(process.cwd(), 'docs', 'fixtures', expectedFileName), 'utf8'))
+    ? JSON.parse(readFileSync(resolve(process.cwd(), 'docs', 'fixtures', expectedFileName), 'utf8')) as FixtureExpected
     : undefined;
   return { headers, rows, expected };
 }
