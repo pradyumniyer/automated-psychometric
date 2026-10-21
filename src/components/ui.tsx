@@ -92,10 +92,16 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 }
 
 export function Tooltip({ text, children }: { text: string; children: React.ReactNode }) {
+  const anchor = React.useRef<HTMLSpanElement>(null);
+  const [opensLeft, setOpensLeft] = React.useState(false);
+  const updateDirection = () => {
+    const bounds = anchor.current?.getBoundingClientRect();
+    if (bounds) setOpensLeft(bounds.left + bounds.width / 2 > window.innerWidth / 2);
+  };
   return (
-    <span className="relative group inline-flex">
+    <span ref={anchor} className="relative group inline-flex" onMouseEnter={updateDirection} onFocus={updateDirection}>
       {children}
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-secondary-800 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+      <span className={`absolute bottom-full ${opensLeft ? 'right-0' : 'left-0'} mb-2 w-max max-w-64 px-2 py-1 text-xs text-left text-white bg-secondary-800 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-normal pointer-events-none z-50`}>
         {text}
       </span>
     </span>

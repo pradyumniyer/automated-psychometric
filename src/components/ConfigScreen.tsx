@@ -2002,7 +2002,6 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
             {isOpen ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
             <span className="font-semibold text-sm text-secondary-900">{name}</span>
             <span className="text-xs text-secondary-500">{summaryLine ?? summary}</span>
-            {items.some((item) => item.reverse) && !confirmed && <span className="px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">Not confirmed</span>}
             {attentionChip && <span className="ml-auto px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-800">{attentionChip}</span>}
             <span className="ml-auto text-xs text-primary-600 flex items-center gap-1">{isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{isOpen ? 'Hide details' : 'Show details'}</span>
           </button>
@@ -2037,37 +2036,38 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           <input type="text" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
           <span>{rangeSource === 'manual' ? 'set by you' : mode === 'word' && presetMatch.preset ? `from ${presetMatch.preset.name}` : mode === 'word' ? 'set from the numbers you type below' : mode === 'continuous' ? 'continuous' : 'detected'}</span>
           {hasReverseItems && confirmed !== true && <><button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
+          {hasReverseItems && confirmed === true && <span className="inline-flex items-center gap-1 text-[11px] text-success-700"><Check className="w-3 h-3" />Confirmed</span>}
         </div>
       )}
       {mode === 'demographic' ? <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p> : mode !== 'continuous' && (
         <>
         {mode === 'word' && <div className="mb-2 flex items-center gap-2 text-xs"><button type="button" disabled={!wordControlsAvailable} onClick={flipWords} className="text-primary-600 hover:underline disabled:text-secondary-400">Flip order</button><button type="button" disabled={!wordControlsAvailable} onClick={startAtZero} className="text-primary-600 hover:underline disabled:text-secondary-400">Start at 0</button>{!wordControlsAvailable && <span className="text-secondary-400">available once every word has a number</span>}{presetMatch.preset && <button type="button" className="ml-auto text-primary-600 hover:underline" onClick={() => applyPreset(presetMatch.preset!.name)}>Wrong scale? Change</button>}</div>}
-        {answerTable.rows.length > 0 && <table className="w-full text-xs mb-2"><thead><tr className="text-left text-secondary-500"><th className="font-normal">Answer</th><th className="font-normal">Found</th><th className="font-normal">Counts as</th></tr></thead><tbody>
+        {answerTable.rows.length > 0 && <table className="w-full table-fixed text-xs mb-2"><colgroup><col className="w-[54%]" /><col className="w-[14%]" /><col className="w-[32%]" /></colgroup><thead><tr className="text-left text-secondary-500"><th className="py-1 px-2 align-middle font-normal">Answer</th><th className="py-1 px-2 align-middle font-normal">Found</th><th className="py-1 px-2 align-middle font-normal">Counts as</th></tr></thead><tbody>
           {answerTable.rows.map((row: AnswerTableRow) => {
             const raw = row.answer.replace(/ \(outside .+\)$/, '');
             return <tr key={`${row.kind}-${row.answer}`} className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
-              <td className="py-1">{row.kind === 'out_of_range' ? <><button type="button" className="underline" onClick={() => row.cells[0] && onHighlightCell?.(row.cells[0].rowIndex, row.cells[0].column)}>{row.answer}</button><span className="text-secondary-500">{row.cells.slice(0, 3).map((cell, index) => <React.Fragment key={`${cell.column}-${cell.rowIndex}`}>{index > 0 ? ', ' : ' '}{cell.column}: {cell.displayId ?? displayIds[cell.rowIndex]}</React.Fragment>)}{row.cells.length > 3 ? ` and ${row.cells.length - 3} more` : ''}</span></> : row.answer}</td>
-              <td className="py-1">{row.found}</td>
-              <td className="py-1">{row.kind === 'out_of_range' || row.kind === 'unknown' ? <>
+              <td className="py-1 px-2 align-middle">{row.kind === 'out_of_range' ? <><button type="button" className="underline" onClick={() => row.cells[0] && onHighlightCell?.(row.cells[0].rowIndex, row.cells[0].column)}>{row.answer}</button><span className="text-secondary-500">{row.cells.slice(0, 3).map((cell, index) => <React.Fragment key={`${cell.column}-${cell.rowIndex}`}>{index > 0 ? ', ' : ' '}{cell.column}: {cell.displayId ?? displayIds[cell.rowIndex]}</React.Fragment>)}{row.cells.length > 3 ? ` and ${row.cells.length - 3} more` : ''}</span></> : row.answer}</td>
+              <td className="py-1 px-2 align-middle">{row.found}</td>
+              <td className="py-1 px-2 align-middle">{row.kind === 'out_of_range' || row.kind === 'unknown' ? <>
                 <select value={row.decision === 'widen' ? 'widen' : row.decision === 'missing' ? 'missing' : ''} onChange={(event) => {
                   const value = event.target.value as '' | 'missing' | 'widen';
                   if (value) onApplyOutOfRange?.(value, row.cells.map(() => raw), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`));
-                }} className="w-44 px-2 py-1 border border-secondary-200 rounded">
+                }} className="w-44 px-2 py-1 text-sm border border-secondary-200 rounded">
                   {row.review && <option value="">Choose…</option>}<option value="missing">Not scored</option>
                   {row.kind === 'out_of_range' && <option value="widen">Widen scale to {Math.min(baseMin ?? Number(raw), Number(raw))}-{Math.max(baseMax ?? Number(raw), Number(raw))}</option>}
                 </select>
-                <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
+                <input type="text" inputMode="decimal" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
                   const cells = row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`);
                   const number = event.target.value === '' ? null : Number(event.target.value);
                   onApplyOutOfRange?.(number === null ? 'missing' : 'typed', row.cells.map(() => raw), cells, number ?? undefined, 'scale');
-                }} className="ml-1 w-20 px-2 py-1 border border-secondary-200 rounded" placeholder="or number" />
-              </> : <input type="number" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
+                }} className="ml-1 w-32 px-2 py-1 text-sm border border-secondary-200 rounded" placeholder="or number" />
+              </> : <input type="text" inputMode="decimal" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
                 if (row.kind === 'special') {
                   const cells = row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`);
                   const number = event.target.value === '' ? null : Number(event.target.value);
                   onApplyOutOfRange?.(number === null ? 'missing' : 'typed', row.cells.map(() => raw), cells, number ?? undefined, 'special');
                 } else updateLabel(raw, event.target.value === '' ? null : Number(event.target.value), 'scale');
-              }} className="w-32 px-2 py-1 border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
+              }} className="w-32 px-2 py-1 text-sm border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
             </tr>;
           })}
         </tbody></table>}

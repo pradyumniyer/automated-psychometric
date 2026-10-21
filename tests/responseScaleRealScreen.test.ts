@@ -119,7 +119,22 @@ describe('response scale behavior on ConfigScreen', () => {
     const { user, view } = await openNamedScale(project, dataset.id, 'Subscale 1');
     expect(user.getByText('7 (outside 1 to 5)')).toBeTruthy();
     expect(user.getByText(/1 answer to review/)).toBeTruthy();
+    expect(screen.queryByText('Not confirmed')).toBeNull();
     expect((user.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+    expect(user.getByRole('combobox').className).toContain('text-sm');
+    const numberBox = user.getByLabelText('7 (outside 1 to 5) score') as HTMLInputElement;
+    expect(numberBox.type).toBe('text');
+    expect(numberBox.className).toContain('w-32');
+    expect(numberBox.className).toContain('text-sm');
+    expect(user.getByRole('table').className).toContain('table-fixed');
+    const tooltip = user.getByText('Confirm the range before reverse-scoring items.');
+    expect(tooltip.className).toContain('max-w-64');
+    expect(tooltip.className).toContain('whitespace-normal');
+    expect(tooltip.className).toContain('text-left');
+    const tooltipAnchor = tooltip.parentElement as HTMLElement;
+    Object.defineProperty(tooltipAnchor, 'getBoundingClientRect', { value: () => ({ left: 600, width: 20, top: 10, right: 620, bottom: 30, height: 20, x: 600, y: 10, toJSON: () => ({}) }) });
+    fireEvent.mouseEnter(tooltipAnchor);
+    expect(tooltip.className).toContain('right-0');
     expect(Array.from((user.getByRole('combobox') as HTMLSelectElement).options)[0].textContent).toBe('Choose…');
     view.unmount();
     for (const name of ['Subscale 1', 'Subscale 2']) {
@@ -161,6 +176,7 @@ describe('response scale behavior on ConfigScreen', () => {
       const current = await openNamedScale(project, dataset.id, name);
       expect(current.user.getByRole('button', { name: 'Confirm range' })).toBeTruthy();
       fireEvent.click(current.user.getByRole('button', { name: 'Confirm range' }));
+      expect(current.user.getByText('Confirmed')).toBeTruthy();
       await new Promise((resolve) => setTimeout(resolve, 1500));
       current.view.unmount();
     }
@@ -273,7 +289,7 @@ describe('response scale behavior on ConfigScreen', () => {
     current.view.unmount();
   }, 90000);
 
-  it('D3: applies current and legacy templates through ConfigScreen and preserves range decisions', async () => {
+  it('D3: round-trips current template state through storage and checks legacy range migration', async () => {
     const { project, dataset } = await setup({ fileName: 'fixture_B.csv', overall: true, scales: [
       { id: 's1', name: 'Subscale 1', columns: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], reversed: ['Q2', 'Q4'], min: 1, max: 5 },
       { id: 's2', name: 'Subscale 2', columns: ['Q6', 'Q7', 'Q8', 'Q9'], reversed: ['Q8'], min: 0, max: 4 },

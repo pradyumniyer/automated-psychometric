@@ -11,6 +11,9 @@ import {
 import { buildTemplateDefinition } from '../src/lib/templates';
 import { fromSurveyConfigRecord, migrateSurveyConfigRecord, toSurveyConfigRecord } from '../src/storage/viewAdapters';
 import { buildAnswerTable, countReviewAnswers } from '../src/lib/responseScaleAnswers';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { scoreDataset } from '../src/scientific/scoring';
 
 const base = { minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const,
   confirmed: false, hasReverseItems: true, labelMap: [], outOfRangeDecisions: {} };
@@ -126,4 +129,26 @@ describe('response scale state transitions', () => {
       }
     }
   }, 60000);
+
+  it('matches an independent raw-CSV scorer for confirmed ranges and reverse scoring', () => {
+    const reference = (raw: unknown, min: number, max: number, reverse: boolean) => {
+      const value = raw == null || String(raw).trim() === '' ? null : Number(raw);
+      if (value === null || !Number.isFinite(value) || value < min || value > max) return null;
+      return reverse ? min + max - value : value;
+    };
+    for (const [fileName, column, min, max, reverse] of [
+      ['fixture_A.csv', 'Q3', 1, 5, true],
+      ['fixture_B.csv', 'Q10', 1, 7, false],
+    ] as const) {
+      const lines = readFileSync(resolve(process.cwd(), 'docs/fixtures', fileName), 'utf8').trim().split(/\r?\n/);
+      const headers = lines[0].split(',');
+      const rows = lines.slice(1).map((line) => Object.fromEntries(line.split(',').map((cell, index) => [headers[index], cell])));
+      const expected = rows.map((row) => reference(row[column], min, max, reverse));
+      const scored = scoreDataset(rows, headers, [{
+        id: 'reference-check', name: 'Reference check', items: [{ column, reverse, order: 0 }], scoringMethod: 'sum',
+        responseScale: { scaleType: 'numeric', minValue: min, maxValue: max, confirmed: true, labelMap: [] },
+      }], {});
+      expect(scored.rows.map((row) => row['Reference check Sum'])).toEqual(expected);
+    }
+  });
 });
