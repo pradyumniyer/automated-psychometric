@@ -115,6 +115,20 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T4b: changing the detected preset keeps a hand-numbered answer', async () => {
+    const { project, dataset } = await setupWordsA();
+    const current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    fireEvent.change(within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe'), { target: { value: '2' } });
+    fireEvent.click(current.user.getByRole('button', { name: 'Wrong scale? Change' }));
+    const preset = current.user.getByRole('combobox', { name: 'Choose response scale preset' });
+    fireEvent.change(preset, { target: { value: '7-pt Agreement' } });
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('2');
+    fireEvent.click(current.user.getByRole('button', { name: 'Wrong scale? Change' }));
+    fireEvent.change(current.user.getByRole('combobox', { name: 'Choose response scale preset' }), { target: { value: '5-pt Agreement' } });
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('2');
+    current.view.unmount();
+  });
+
   it('T5: recognizes aliases and numbered labels on the real screen', async () => {
     const rows = [
       'Totally agree', 'Neither agree or disagree', 'Strongly-agree', "Don't know", 'Prefer not to answer',
