@@ -79,6 +79,8 @@ interface SheetInfo { name: string; rows: number; cols: number; }
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
+const pendingSurveyConfigWrites = new Map<string, Promise<unknown>>();
+
 export function ConfigScreen({
   project, highlightRowIndex, onClearHighlight,
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
@@ -166,29 +168,40 @@ export function ConfigScreen({
     linkedTemplateId?: string | null;
   } = {}) => {
     if (!dataset) throw new Error('No active dataset to save.');
-    const existing = await surveyConfigRepository.get(dataset.id);
-    const configuredSubscales = overrides.subscales ?? subscaleStates;
-    const automaticScale = configuredSubscales.find(isAutomaticSubscale);
-    const shouldPersistOverallScale = !!automaticScale
-      || configuredSubscales.filter((subscale) => !isAutomaticSubscale(subscale)).length >= 2;
-    const requestedOverallScale = overrides.overallScale === undefined
-      ? automaticScale ?? overallScale
-      : overrides.overallScale;
-    const config = toSurveyConfigRecord({
-      datasetId: dataset.id,
-      projectId: project.id,
-      headers: dataset.headers,
-      demographicColumns: overrides.demographicColumns ?? demoCols,
-      subscales: overrides.subscales ?? subscaleStates,
-      bands: overrides.bands ?? bandStates,
-      bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
-      overallScale: requestedOverallScale && shouldPersistOverallScale
-        ? requestedOverallScale
-        : null,
-      overallSettings: overrides.overallSettings ?? overallSettings,
-      linkedTemplateId: overrides.linkedTemplateId,
-    }, existing);
-    return surveyConfigRepository.save(dataset.id, config);
+    const datasetId = dataset.id;
+    const save = async () => {
+      const existing = await surveyConfigRepository.get(datasetId);
+      const configuredSubscales = overrides.subscales ?? subscaleStates;
+      const automaticScale = configuredSubscales.find(isAutomaticSubscale);
+      const shouldPersistOverallScale = !!automaticScale
+        || configuredSubscales.filter((subscale) => !isAutomaticSubscale(subscale)).length >= 2;
+      const requestedOverallScale = overrides.overallScale === undefined
+        ? automaticScale ?? overallScale
+        : overrides.overallScale;
+      const config = toSurveyConfigRecord({
+        datasetId,
+        projectId: project.id,
+        headers: dataset.headers,
+        demographicColumns: overrides.demographicColumns ?? demoCols,
+        subscales: overrides.subscales ?? subscaleStates,
+        bands: overrides.bands ?? bandStates,
+        bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
+        overallScale: requestedOverallScale && shouldPersistOverallScale
+          ? requestedOverallScale
+          : null,
+        overallSettings: overrides.overallSettings ?? overallSettings,
+        linkedTemplateId: overrides.linkedTemplateId,
+      }, existing);
+      return surveyConfigRepository.save(datasetId, config);
+    };
+    const previous = pendingSurveyConfigWrites.get(datasetId);
+    const write = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(save);
+    pendingSurveyConfigWrites.set(datasetId, write);
+    try {
+      return await write;
+    } finally {
+      if (pendingSurveyConfigWrites.get(datasetId) === write) pendingSurveyConfigWrites.delete(datasetId);
+    }
   };
 
   // ── Import preview state ──
@@ -239,6 +252,7 @@ export function ConfigScreen({
     setShowUpdateTemplate(false);
 
     try {
+      await pendingSurveyConfigWrites.get(activeDatasetId)?.catch(() => undefined);
       const config = await surveyConfigRepository.get(activeDatasetId);
       if (!config) throw new Error('Dataset configuration is missing.');
       const adapted = fromSurveyConfigRecord(config, {
