@@ -281,6 +281,23 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T10b: immediate unmount flushes a typed word number and Counts as alias', async () => {
+    const { project, dataset } = await setupWordsA();
+    let current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    fireEvent.change(within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe'), { target: { value: '3' } });
+    current.view.unmount();
+    current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('3');
+    fireEvent.change(within(answerRow(current.card, 'Maybe')).getByRole('combobox', { name: 'Maybe action' }), { target: { value: 'alias' } });
+    fireEvent.change(within(answerRow(current.card, 'Maybe')).getByRole('combobox', { name: 'Maybe counts-as target' }), { target: { value: 'Neither agree nor disagree' } });
+    current.view.unmount();
+    current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    const saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 2')?.response_scale?.label_map?.find((label) => label.label === 'Maybe')).toMatchObject({ aliasOf: 'Neither agree nor disagree' });
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('3');
+    current.view.unmount();
+  });
+
   it('T15: two unknown numeric answers block scoring and can be treated as not scored together', async () => {
     const { project, dataset } = await setupRealScreen({
       mutateRows: (rows) => { rows[0].Q1 = 'unexpected one'; rows[1].Q2 = 'unexpected two'; },
