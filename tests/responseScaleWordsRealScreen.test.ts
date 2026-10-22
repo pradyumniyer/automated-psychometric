@@ -177,6 +177,28 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T9: waiting links navigate to the answer cell and scoring reports unresolved respondents', async () => {
+    const { project, dataset } = await setupWordsA();
+    const current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    expect(await screen.findByText(/Scoring is waiting: Subscale 2 has 1 answer to decide/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Go to Subscale 2/ }));
+    const answerLinks = await screen.findAllByRole('button', { name: 'Q4: W12' });
+    fireEvent.click(answerLinks[0]);
+    const respondentRow = screen.getByText('W12', { exact: true }).closest('tr');
+    expect(Array.from(respondentRow?.querySelectorAll('td') ?? []).some((cell) => cell.textContent?.trim() === 'Maybe' && cell.className.includes('bg-accent-200'))).toBe(true);
+    const activeCard = document.querySelector('[data-response-scale-id="s2"]') as HTMLElement;
+    const maybe = answerRow(activeCard, 'Maybe');
+    fireEvent.change(within(maybe).getByRole('combobox', { name: 'Maybe action' }), { target: { value: 'not-scored' } });
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    await screen.findByText(/Scoring complete \(v/);
+    const missingRows = screen.getByText(/rows have at least one score missing/).textContent ?? '';
+    for (const respondent of ['W03', 'W05', 'W09', 'W12']) expect(missingRows).toContain(respondent);
+    current.view.unmount();
+  });
+
   it('T10: an immediate unmount flushes a range edit', async () => {
     const { project, dataset } = await setupRealScreen();
     let current = await openResponseScaleCard(project, dataset.id, 'Subscale 1');
