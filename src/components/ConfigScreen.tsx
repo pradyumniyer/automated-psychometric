@@ -331,7 +331,12 @@ export function ConfigScreen({
         outOfRangeDecisions: {},
       };
       if (Object.keys(patch).every((key) => JSON.stringify((subscale as unknown as Record<string, unknown>)[key]) === JSON.stringify((patch as unknown as Record<string, unknown>)[key]))) return subscale;
-      return afterScaleChange({ ...subscale, hasReverseItems: subscale.items.some((item) => item.reverse) }, patch) as SubscaleState;
+      const hasReverseItems = subscale.items.some((item) => item.reverse);
+      const rangeChanged = ['minValue', 'maxValue', 'baseMin', 'baseMax'].some((key) =>
+        JSON.stringify((subscale as unknown as Record<string, unknown>)[key]) !== JSON.stringify((patch as unknown as Record<string, unknown>)[key]));
+      const seeded = afterScaleChange({ ...subscale, hasReverseItems }, patch) as SubscaleState;
+      if (hasReverseItems && !rangeChanged) seeded.confirmed = subscale.confirmed;
+      return seeded;
     });
     if (next.some((subscale, index) => subscale !== previous[index])) {
       subscaleStatesRef.current = next;
