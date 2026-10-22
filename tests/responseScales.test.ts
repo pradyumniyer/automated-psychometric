@@ -156,6 +156,7 @@ describe("resolveResponse", () => {
           "strongly agree",
           " Strongly   Agree ",
           "Agree",
+          "Disagree",
           "N/A",
         ]);
         expect(result.preset?.name).toBe("5-pt Agreement");
@@ -168,9 +169,16 @@ describe("resolveResponse", () => {
           "ＳＴＲＯＮＧＬＹ　ＡＧＲＥＥ",
           "Strongly\u00a0Agree",
           "  sTrOnGlY   aGrEe  ",
+          "Agree",
+          "Disagree",
         ]);
         expect(result.preset?.name).toBe("5-pt Agreement");
         expect(result.labels.find((label) => label.text === "Strongly Agree")?.value).toBe(5);
+      });
+
+      it("does not match a preset from only two matching labels", () => {
+        const result = matchResponsePreset(["Strongly agree", "Agree"]);
+        expect(result.preset).toBeNull();
       });
 
       it("leaves non-matching words unmapped", () => {

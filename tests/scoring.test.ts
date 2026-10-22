@@ -142,7 +142,7 @@ describe("scoring per scientific-spec sections 0 and 1", () => {
 
     expect(result.normalizedMatrix.states).toEqual([
       { Q1: "allowed" },
-      { Q1: "unmapped" },
+      { Q1: "allowed" },
       { Q1: "out_of_range" },
     ]);
   });

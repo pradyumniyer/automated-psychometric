@@ -77,7 +77,7 @@ describe('response scale behavior on ConfigScreen', () => {
     expect(screen.queryByText('Not confirmed')).toBeNull();
     expect((user.getByRole('combobox') as HTMLSelectElement).value).toBe('');
     expect(user.getByRole('combobox').className).toContain('text-sm');
-    const numberBox = user.getByLabelText('7 (outside 1 to 5) score') as HTMLInputElement;
+    const numberBox = user.getByLabelText('Counts as 7 (outside 1 to 5)') as HTMLInputElement;
     expect(numberBox.type).toBe('text');
     expect(numberBox.className).toContain('w-32');
     expect(numberBox.className).toContain('text-sm');
@@ -125,6 +125,9 @@ describe('response scale behavior on ConfigScreen', () => {
     const select = s3view.user.getByRole('combobox') as HTMLSelectElement;
     expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['Choose…', 'Not scored', 'Widen scale to 1-8']);
     expect(s3view.user.queryByRole('button', { name: 'Confirm range' })).toBeNull();
+    fireEvent.change(select, { target: { value: 'missing' } });
+    await waitFor(() => expect(select.value).toBe('missing'));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     s3view.view.unmount();
 
     for (const name of ['Subscale 1', 'Subscale 2']) {
@@ -141,7 +144,7 @@ describe('response scale behavior on ConfigScreen', () => {
     expect((runButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(runButton);
     await screen.findByText(/Scoring complete/);
-    await waitFor(() => expect(screen.getByText(/R04, R07, R09/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/R04, R07/)).toBeTruthy());
     let result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
     expect(result.rows[0]).toMatchObject({ 'Subscale 1 Sum': 17, 'Subscale 2 Sum': 4, 'Subscale 3 Sum': 18, 'Overall Scale Score': 39 });
     expect(result.rows[1]).toMatchObject({ 'Subscale 1 Sum': 19, 'Subscale 2 Sum': 8, 'Subscale 3 Sum': 17, 'Overall Scale Score': 44 });

@@ -24,7 +24,7 @@ describe('response-scale answer table logic', () => {
   it('uses one table for special answers, out-of-range numbers, and unknown text', () => {
     const result = buildAnswerTable(base);
     expect(result.rows.map((row) => row.answer)).toEqual([
-      'N/A', 'Prefer not to say', '7 (outside 1 to 5)', 'abc',
+      '7 (outside 1 to 5)', 'abc', 'N/A', 'Prefer not to say',
     ]);
     expect(result.rows.find((row) => row.answer === 'N/A')).toMatchObject({ kind: 'special', countsAs: null, review: false });
     expect(result.rows.find((row) => row.answer === '7 (outside 1 to 5)')).toMatchObject({ kind: 'out_of_range', review: true });

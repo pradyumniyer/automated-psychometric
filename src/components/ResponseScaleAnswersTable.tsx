@@ -117,7 +117,7 @@ export function ResponseScaleAnswersTable({ rows, labels, widenRange, allowAdd =
                     else if (validNumber && Number.isFinite(Number(draft))) onSetNumber(row, Number(draft));
                   }} onBlur={() => commitNumber(row, key)} onKeyDown={(event) => {
                     if (event.key === 'Enter') { event.preventDefault(); commitNumber(row, key); }
-                  }} className={`w-20 px-1 py-1 text-sm border rounded ${row.review ? 'border-warning-400 bg-warning-50' : 'border-secondary-200'}`} placeholder={row.notScored ? 'Not scored' : row.kind === 'special' ? 'Not scored' : 'Choose…'} />
+                  }} className={`w-32 px-1 py-1 text-sm border rounded ${row.review ? 'border-warning-400 bg-warning-50' : 'border-secondary-200'}`} placeholder={row.notScored ? 'Not scored' : row.kind === 'special' ? 'Not scored' : 'Choose…'} />
                   {row.kind === 'out_of_range' || row.kind === 'unknown' ? <select aria-label={`${displayName} action`} value={row.decision === 'widen' ? 'widen' : row.notScored || row.decision === 'missing' ? 'missing' : ''} onChange={(event) => {
                     const choice = event.target.value;
                     if (choice === 'missing' || choice === 'widen') onChoose(row, choice);
