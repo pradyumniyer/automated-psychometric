@@ -4,6 +4,7 @@ import React from 'react';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import userEvent from '@testing-library/user-event';
 import { ConfigScreen } from '../src/components/ConfigScreen';
 import { db } from '../src/storage/db';
 import { datasetRepository, scoreRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
@@ -286,6 +287,105 @@ describe('response scale behavior on ConfigScreen', () => {
     expect(migrateRangeState({ ...legacyScale, hasReverseItems: false })).toMatchObject({ minValue: 1, maxValue: 8, baseMin: 1, baseMax: 7, outOfRangeDecisions: { '8': { action: 'widen', reviewed: true } } });
     expect(oldTemplate.id).toBeTruthy();
   });
+
+  it('D3b: preserves a widened range on fresh, reload, and real template paths', async () => {
+    const { project, dataset } = await setup({ fileName: 'fixture_B.csv', scales: [
+      { id: 's3', name: 'Subscale 3', columns: ['Q10', 'Q11', 'Q12'], reversed: [], min: 1, max: 7 },
+    ] });
+    let current = await openNamedScale(project, dataset.id, 'Subscale 3');
+    const interaction = userEvent.setup();
+    await interaction.selectOptions(current.user.getByRole('combobox'), 'widen');
+    await waitFor(() => expect((current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('8'));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    let saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 3')?.response_scale).toMatchObject({
+      min_value: 1, max_value: 8, base_min: 1, base_max: 7,
+      out_of_range_decisions: { '8': { action: 'widen', reviewed: true } },
+    });
+    current.view.unmount();
+
+    current = await openNamedScale(project, dataset.id, 'Subscale 3');
+    expect((current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('8');
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 3')?.response_scale).toMatchObject({ min_value: 1, max_value: 8, base_min: 1, base_max: 7 });
+    current.view.unmount();
+
+    const source = fromSurveyConfigRecord((await surveyConfigRepository.get(dataset.id))!);
+    const sourceScale = source.subscales.find((subscale) => subscale.name === 'Subscale 3')!;
+    const definition = buildTemplateDefinition([{
+      ...sourceScale,
+      minValue: 1,
+      maxValue: 8,
+      baseMin: 1,
+      baseMax: 7,
+      rangeSource: 'detected',
+      labelSource: 'detected',
+      outOfRangeDecisions: { '8': { action: 'widen' as const, reviewed: true } },
+    }], {}, {});
+    const template = await templateRepository.save({ name: 'Widened screen template', description: '', instrument: '', definition });
+    const copied = fixtureData('fixture_B.csv');
+    const target = await datasetRepository.import({ projectId: project.id, fileName: 'widened-template.csv', sheetName: 'Sheet 1', headers: copied.headers, rows: copied.rows, columnMeta: {}, demographicColumns: [] });
+    await surveyConfigRepository.save(target.id, toSurveyConfigRecord({ datasetId: target.id, projectId: project.id, headers: copied.headers, demographicColumns: [], subscales: [], bands: {}, overallSettings: { enabled: false, basedOn: 'sums', combineBy: 'sum', customFormula: '' } }));
+    const templateView = render(React.createElement(ConfigScreen, props(project, target.id)));
+    await interaction.click(await screen.findByText('Templates'));
+    await interaction.click(await screen.findByRole('button', { name: 'Apply' }));
+    await interaction.click(await screen.findByRole('button', { name: 'Apply Template' }));
+    await waitFor(async () => expect((await surveyConfigRepository.get(target.id))?.subscales[0]?.response_scale?.max_value).toBe(8));
+    templateView.unmount();
+    current = await openNamedScale(project, target.id, 'Subscale 3');
+    expect((current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('8');
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    saved = await surveyConfigRepository.get(target.id);
+    expect(saved?.subscales[0]?.response_scale).toMatchObject({ min_value: 1, max_value: 8, base_min: 1, base_max: 7 });
+    expect(template.id).toBeTruthy();
+    current.view.unmount();
+  }, 90000);
+
+  it('D3c: preserves a typed manual range on fresh, reload, and real template paths', async () => {
+    const { project, dataset } = await setup({ fileName: 'fixture_B.csv', scales: [
+      { id: 's3', name: 'Subscale 3', columns: ['Q10', 'Q11', 'Q12'], reversed: [], min: 1, max: 7 },
+    ] });
+    let current = await openNamedScale(project, dataset.id, 'Subscale 3');
+    const interaction = userEvent.setup();
+    const maximum = current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement;
+    await interaction.clear(maximum);
+    await interaction.type(maximum, '6');
+    await interaction.tab();
+    await waitFor(() => expect(maximum.value).toBe('6'));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    let saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 3')?.response_scale).toMatchObject({ min_value: 1, max_value: 6, base_min: 1, base_max: 6, range_source: 'manual' });
+    current.view.unmount();
+
+    current = await openNamedScale(project, dataset.id, 'Subscale 3');
+    expect((current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('6');
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 3')?.response_scale).toMatchObject({ min_value: 1, max_value: 6, base_min: 1, base_max: 6, range_source: 'manual' });
+    current.view.unmount();
+
+    const source = fromSurveyConfigRecord((await surveyConfigRepository.get(dataset.id))!);
+    const sourceScale = source.subscales.find((subscale) => subscale.name === 'Subscale 3')!;
+    const definition = buildTemplateDefinition([{ ...sourceScale, minValue: 1, maxValue: 6, baseMin: 1, baseMax: 6, rangeSource: 'manual', labelSource: 'manual', outOfRangeDecisions: {} }], {}, {});
+    const template = await templateRepository.save({ name: 'Manual range screen template', description: '', instrument: '', definition });
+    const copied = fixtureData('fixture_B.csv');
+    const target = await datasetRepository.import({ projectId: project.id, fileName: 'manual-template.csv', sheetName: 'Sheet 1', headers: copied.headers, rows: copied.rows, columnMeta: {}, demographicColumns: [] });
+    await surveyConfigRepository.save(target.id, toSurveyConfigRecord({ datasetId: target.id, projectId: project.id, headers: copied.headers, demographicColumns: [], subscales: [], bands: {}, overallSettings: { enabled: false, basedOn: 'sums', combineBy: 'sum', customFormula: '' } }));
+    const templateView = render(React.createElement(ConfigScreen, props(project, target.id)));
+    await interaction.click(await screen.findByText('Templates'));
+    await interaction.click(await screen.findByRole('button', { name: 'Apply' }));
+    await interaction.click(await screen.findByRole('button', { name: 'Apply Template' }));
+    await waitFor(async () => expect((await surveyConfigRepository.get(target.id))?.subscales[0]?.response_scale?.max_value).toBe(6));
+    templateView.unmount();
+    current = await openNamedScale(project, target.id, 'Subscale 3');
+    expect((current.user.getByLabelText('Subscale 3 maximum') as HTMLInputElement).value).toBe('6');
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    saved = await surveyConfigRepository.get(target.id);
+    expect(saved?.subscales[0]?.response_scale).toMatchObject({ min_value: 1, max_value: 6, base_min: 1, base_max: 6, range_source: 'manual' });
+    expect(template.id).toBeTruthy();
+    current.view.unmount();
+  }, 90000);
 
   it('d: Not scored restores the base range after Confirm, Widen, Confirm', async () => {
     const { project, dataset } = await setup();

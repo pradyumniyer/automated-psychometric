@@ -314,7 +314,12 @@ export function ConfigScreen({
     if (!currentDataset) return;
     const previous = subscaleStatesRef.current;
     const next = previous.map((subscale) => {
-      if ((subscale.labelSource && subscale.labelSource !== 'detected') || subscale.items.length === 0) return subscale;
+      const hasPersistedAnswerDecisions = Object.keys(subscale.outOfRangeDecisions ?? {}).length > 0
+        || Boolean(subscale.outOfRangeDecision);
+      if ((subscale.labelSource && subscale.labelSource !== 'detected')
+        || (subscale.rangeSource && subscale.rangeSource !== 'detected')
+        || hasPersistedAnswerDecisions
+        || subscale.items.length === 0) return subscale;
       const seed = seedResponseScale(currentDataset.rows, subscale.items.map((item) => item.column));
       const patch = {
         scaleType: seed.scaleType,
