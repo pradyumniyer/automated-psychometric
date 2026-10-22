@@ -131,6 +131,7 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
   const labelsByKey = new Map(input.labels.map((label) => [normalizeResponseText(label.label), label]));
   const cellsByKey = new Map<string, AnswerTableRow>();
   const includedFound = new Map<string, number>();
+  const observedNumericKeys = new Set<string>();
   const add = (rawAnswer: string, kind: AnswerRowKind, column: string, rowIndex: number) => {
     const key = `${kind}:${normalizeResponseText(rawAnswer)}`;
     const label = labelsByKey.get(normalizeResponseText(rawAnswer));
@@ -176,6 +177,7 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     if (isBuiltInMissingCode(raw)) return add(answer, 'special', column, rowIndex);
     const number = numberValue(raw);
     if (number !== null) {
+      observedNumericKeys.add(String(number));
       const baseMin = input.baseMin ?? input.min;
       const baseMax = input.baseMax ?? input.max;
       if (baseMin !== null && baseMax !== null && (number < baseMin || number > baseMax)) return add(String(number), 'out_of_range', column, rowIndex);
@@ -188,7 +190,12 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
   for (const label of input.labels) {
     const kind = label.kind ?? (label.value === null ? 'special' : 'scale');
     if (kind !== 'scale') continue;
-    const key = `scale:${normalizeResponseText(label.label)}`;
+    const normalizedLabel = normalizeResponseText(label.label);
+    const numericLabel = numberValue(label.label);
+    if ((numericLabel !== null && observedNumericKeys.has(String(numericLabel)))
+      || cellsByKey.has(`unknown:${normalizedLabel}`)
+      || cellsByKey.has(`out_of_range:${normalizedLabel}`)) continue;
+    const key = `scale:${normalizedLabel}`;
     if (cellsByKey.has(key)) continue;
     cellsByKey.set(key, {
       answer: label.label, found: 0, kind: 'scale', countsAs: resolveLabelValue(label, input.labels),

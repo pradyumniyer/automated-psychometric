@@ -367,7 +367,12 @@ describe('word response scales on the real ConfigScreen', () => {
 
   it('T15: two unknown numeric answers block scoring and can be treated as not scored together', async () => {
     const { project, dataset } = await setupRealScreen({
-      mutateRows: (rows) => { rows[0].Q1 = 'unexpected one'; rows[1].Q2 = 'unexpected two'; },
+      mutateRows: (rows) => {
+        rows[0].Q1 = 'unexpected one';
+        rows[1].Q2 = 'unexpected two';
+        const fixtureOutlier = rows.find((row) => row.Q4 === '7');
+        if (fixtureOutlier) fixtureOutlier.Q4 = '5';
+      },
       scales: [{ id: 'numeric', name: 'Numeric scale', columns: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], reversed: [] }],
     });
     const current = await openResponseScaleCard(project, dataset.id, 'Numeric scale');
@@ -377,6 +382,7 @@ describe('word response scales on the real ConfigScreen', () => {
     const resolveAll = screen.getByRole('button', { name: 'Treat all 2 as not scored' });
     fireEvent.click(resolveAll);
     await waitFor(() => expect(screen.queryByText(/Scoring is waiting/)).toBeNull());
+    fireEvent.click(await screen.findByText('Scoring'));
     fireEvent.click(screen.getByRole('button', { name: 'Run Scoring' }));
     await screen.findByText(/Scoring complete/);
     current.view.unmount();

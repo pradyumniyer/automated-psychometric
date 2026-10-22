@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import React from 'react';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ConfigScreen } from '../src/components/ConfigScreen';
 import { db } from '../src/storage/db';
 import { datasetRepository, scoreRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
@@ -303,6 +304,24 @@ describe('response scale behavior on ConfigScreen', () => {
     const restored = await openScales(project, dataset.id);
     expect((restored.user.getByLabelText('Subscale 1 maximum') as HTMLInputElement).value).toBe('5');
     expect((restored.user.getByRole('combobox') as HTMLSelectElement).value).toBe('missing');
+  });
+
+  it('DUPLICATE ROW: a typed numeric outlier remains one actionable answer row', async () => {
+    const { project, dataset } = await setup({ overall: true });
+    const current = await openNamedScale(project, dataset.id, 'Subscale 1');
+    const user = userEvent.setup();
+    const before = Array.from(current.card.querySelectorAll('tbody tr')).filter((row) =>
+      row.cells[0]?.textContent?.trim().startsWith('7 (outside 1 to 5)'));
+    expect(before).toHaveLength(1);
+    await user.type(within(before[0]).getByLabelText('Counts as 7 (outside 1 to 5)'), '7');
+    await user.tab();
+    await waitFor(() => {
+      const answerRows = Array.from(current.card.querySelectorAll('tbody tr')).filter((row) =>
+        row.cells[0]?.textContent?.trim().startsWith('7'));
+      expect(answerRows).toHaveLength(1);
+      expect(within(answerRows[0]).getByRole('combobox')).toBeTruthy();
+    });
+    current.view.unmount();
   });
 
   it('c: runs twelve seeded six-action sequences on ConfigScreen and reloads each result', async () => {
