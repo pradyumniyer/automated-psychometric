@@ -116,6 +116,7 @@ export function ConfigScreen({
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const subscaleStatesRef = useRef<SubscaleState[]>([]);
   subscaleStatesRef.current = subscaleStates;
+  const configRevisionRef = useRef(0);
   const [bandStates, setBandStates] = useState<Record<string, BandState[]>>({});
   const [bandStatesByOutput, setBandStatesByOutput] = useState<Record<string, Partial<Record<ScoreOutput, BandState[]>>>>({});
   const [selectedBandOutputs, setSelectedBandOutputs] = useState<Record<string, ScoreOutput>>({});
@@ -249,6 +250,7 @@ export function ConfigScreen({
     setDataset(ds);
     setConfigDirty(false);
     configDirtyRef.current = false;
+    configRevisionRef.current = 0;
     setShowUpdateTemplate(false);
 
     try {
@@ -333,6 +335,7 @@ export function ConfigScreen({
     });
     if (next.some((subscale, index) => subscale !== previous[index])) {
       subscaleStatesRef.current = next;
+      configRevisionRef.current += 1;
       configDirtyRef.current = true;
       setConfigDirty(true);
       setSubscaleStates(next);
@@ -351,11 +354,17 @@ export function ConfigScreen({
   // ── Auto-save (debounced) ──
   const performAutoSave = useCallback(async () => {
     if (!dataset || (!configDirty && !configDirtyRef.current)) return;
+    const revision = configRevisionRef.current;
     setSaveState('saving');
     try {
       await persistSurveyConfig({ subscales: subscaleStatesRef.current });
-      configDirtyRef.current = false;
-      setConfigDirty(false);
+      if (configRevisionRef.current === revision) {
+        configDirtyRef.current = false;
+        setConfigDirty(false);
+      } else {
+        configDirtyRef.current = true;
+        setConfigDirty(true);
+      }
       setShowUpdateTemplate(!!linkedTemplate);
       setSaveState('saved');
       if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
@@ -404,6 +413,7 @@ export function ConfigScreen({
   }, []);
 
   const markDirty = useCallback(() => {
+    configRevisionRef.current += 1;
     configDirtyRef.current = true;
     setConfigDirty(true);
   }, []);
