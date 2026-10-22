@@ -298,6 +298,26 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T16: Reset to detected restores a numeric card range', async () => {
+    const { project, dataset } = await setupRealScreen({
+      data: { headers: ['Respondent', 'Item'], rows: [{ Respondent: 'r1', Item: 1 }, { Respondent: 'r2', Item: 2 }, { Respondent: 'r3', Item: 3 }] },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'numeric-reset', name: 'Numeric reset', columns: ['Item'], reversed: [] }],
+    });
+    const current = await openResponseScaleCard(project, dataset.id, 'Numeric reset');
+    const maximum = current.user.getByLabelText('Numeric reset maximum') as HTMLInputElement;
+    fireEvent.change(maximum, { target: { value: '6' } });
+    fireEvent.blur(maximum);
+    expect(await screen.findByRole('button', { name: 'Reset to detected' })).toBeTruthy();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to detected' }));
+    await waitFor(() => expect((current.user.getByLabelText('Numeric reset maximum') as HTMLInputElement).value).toBe('3'));
+    expect(current.user.queryByRole('button', { name: 'Reset to detected' })).toBeNull();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+    current.view.unmount();
+  });
+
   it('T15: two unknown numeric answers block scoring and can be treated as not scored together', async () => {
     const { project, dataset } = await setupRealScreen({
       mutateRows: (rows) => { rows[0].Q1 = 'unexpected one'; rows[1].Q2 = 'unexpected two'; },
