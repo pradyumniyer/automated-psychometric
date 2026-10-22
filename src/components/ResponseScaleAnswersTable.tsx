@@ -5,6 +5,7 @@ import type { AnswerTableRow } from '@/lib/responseScaleAnswers';
 interface Props {
   rows: AnswerTableRow[];
   labels: ResponseScaleLabelSetting[];
+  widenRange?: { min: number; max: number } | null;
   allowAdd?: boolean;
   onSetNumber: (row: AnswerTableRow, value: number | null) => void;
   onChoose: (row: AnswerTableRow, choice: 'missing' | 'widen') => void;
@@ -19,7 +20,7 @@ function cellLocation(cell: AnswerTableRow['cells'][number]): string {
   return `${cell.column}: ${cell.displayId ?? `row ${cell.rowIndex + 1}`}`;
 }
 
-export function ResponseScaleAnswersTable({ rows, labels, allowAdd = true, onSetNumber, onChoose, onCountsAs, onRemove, onEditLabel, onAddLabel, onHighlightCell }: Props) {
+export function ResponseScaleAnswersTable({ rows, labels, widenRange, allowAdd = true, onSetNumber, onChoose, onCountsAs, onRemove, onEditLabel, onAddLabel, onHighlightCell }: Props) {
   const [aliasFor, setAliasFor] = useState<string | null>(null);
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({});
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
@@ -88,6 +89,11 @@ export function ResponseScaleAnswersTable({ rows, labels, allowAdd = true, onSet
             const displayName = row.answer;
             const targets = rows.filter((candidate) => candidate.kind === 'scale' && rowKey(candidate) !== key);
             const numberValue = numberDrafts[key] ?? (row.countsAs == null ? '' : String(row.countsAs));
+            const rawAnswer = row.answer.replace(/ \(outside .+\)$/, '');
+            const numericAnswer = Number(rawAnswer);
+            const widenTarget = row.kind === 'out_of_range' && widenRange && Number.isFinite(numericAnswer)
+              ? `${Math.min(widenRange.min, numericAnswer)}-${Math.max(widenRange.max, numericAnswer)}`
+              : null;
             return <React.Fragment key={key}>
               <tr className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
                 <td className="py-1 px-2 align-middle">
@@ -118,7 +124,7 @@ export function ResponseScaleAnswersTable({ rows, labels, allowAdd = true, onSet
                   }} className="ml-1 w-32 max-w-full px-1 py-1 text-sm border border-secondary-200 rounded">
                     {row.review && <option value="">Choose…</option>}
                     <option value="missing">Not scored</option>
-                    {row.kind === 'out_of_range' && <option value="widen">Widen scale</option>}
+                    {row.kind === 'out_of_range' && <option value="widen">{widenTarget ? `Widen scale to ${widenTarget}` : 'Widen scale'}</option>}
                   </select> : row.kind === 'scale' && <select aria-label={`${displayName} action`} value={row.notScored ? 'not-scored' : row.aliasOf ? 'alias' : ''} onChange={(event) => {
                     const choice = event.target.value;
                     if (choice === 'not-scored') onChoose(row, 'missing');

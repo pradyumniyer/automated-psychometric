@@ -387,6 +387,24 @@ describe('response scale behavior on ConfigScreen', () => {
     current.view.unmount();
   }, 90000);
 
+  it('WIDEN WORDING: names the effective range in the out-of-range action', async () => {
+    const { project, dataset } = await setup({
+      fileName: 'fixture_B.csv',
+      mutateRows: (rows) => { rows[0].Q12 = '0'; },
+      scales: [{ id: 's3', name: 'Subscale 3', columns: ['Q10', 'Q11', 'Q12'], reversed: [], min: 1, max: 7 }],
+    });
+    const current = await openNamedScale(project, dataset.id, 'Subscale 3');
+    const interaction = userEvent.setup();
+    const row = current.user.getByText('0 (outside 1 to 7)').closest('tr') as HTMLTableRowElement;
+    const choice = within(row).getByRole('combobox');
+    expect(Array.from((choice as HTMLSelectElement).options).map((option) => option.textContent)).toEqual([
+      'Choose…', 'Not scored', 'Widen scale to 0-7',
+    ]);
+    await interaction.selectOptions(choice, 'widen');
+    await waitFor(() => expect((choice as HTMLSelectElement).value).toBe('widen'));
+    current.view.unmount();
+  });
+
   it('d: Not scored restores the base range after Confirm, Widen, Confirm', async () => {
     const { project, dataset } = await setup();
     const { user, view } = await openScales(project, dataset.id);

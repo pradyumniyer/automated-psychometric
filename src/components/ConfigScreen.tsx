@@ -2217,7 +2217,8 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
       </div>}
       {detectDifferentPresetsAcrossColumns(rows, itemCols) && <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>}
       {mode === 'demographic' && <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p>}
-      {mode !== 'demographic' && <ResponseScaleAnswersTable rows={answerTable.rows} labels={labelMap} allowAdd={mode === 'word'}
+      {mode !== 'demographic' && <ResponseScaleAnswersTable rows={answerTable.rows} labels={labelMap}
+        widenRange={baseMin !== null && baseMax !== null ? { min: baseMin, max: baseMax } : null} allowAdd={mode === 'word'}
         onSetNumber={setAnswerNumber} onChoose={chooseAnswer} onCountsAs={setAnswerAlias} onRemove={removeAnswerLabel}
         onEditLabel={editAnswerLabel} onAddLabel={addAnswerLabel}
         onHighlightCell={(rowIndex, column) => onHighlightCell?.(rowIndex, column)} />}
