@@ -5,62 +5,15 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigScreen } from '../src/components/ConfigScreen';
 import { db } from '../src/storage/db';
-import { datasetRepository, projectRepository, scoreRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
+import { datasetRepository, scoreRepository, surveyConfigRepository, templateRepository } from '../src/storage/repositories';
 import { fromSurveyConfigRecord, toSurveyConfigRecord } from '../src/storage/viewAdapters';
 import { buildTemplateDefinition } from '../src/lib/templates';
 import { migrateRangeState } from '../src/lib/responseScaleState';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-function fixtureData(fileName = 'fixture_A.csv') {
-  const lines = readFileSync(resolve(process.cwd(), 'docs/fixtures', fileName), 'utf8').trim().split(/\r?\n/);
-  const headers = lines[0].split(',');
-  const rows = lines.slice(1).map((line) => Object.fromEntries(line.split(',').map((value, index) => [headers[index], value])));
-  return { headers, rows };
-}
-const props = (project: Awaited<ReturnType<typeof projectRepository.create>>, datasetId: string) => ({
-  project, highlightRowIndex: null, onClearHighlight: () => {}, excludedRows: new Set<number>(),
-  onToggleRowExclusion: async () => {}, onSetExcludedRows: async () => {}, onGoToQuality: () => {},
-  sharedDatasetId: datasetId, onDatasetChange: () => {}, showSummarySum: false, showSummaryMean: false,
-  onToggleSummarySum: () => {}, onToggleSummaryMean: () => {},
-});
+import { fixtureData, openResponseScaleCard as openNamedScale, openScales, screenProps as props, setupRealScreen as setup } from './helpers/realScreen';
 
 describe('response scale behavior on ConfigScreen', () => {
   beforeEach(async () => { cleanup(); await db.delete(); await db.open(); Element.prototype.scrollIntoView = () => {}; });
   afterAll(() => db.close());
-
-  async function setup(options: { fileName?: string; scales?: { id: string; name: string; columns: string[]; reversed: string[]; min?: number; max?: number }[]; overall?: boolean; mutateRows?: (rows: Record<string, string>[]) => void } = {}) {
-    const { headers, rows } = fixtureData(options.fileName);
-    options.mutateRows?.(rows);
-    const project = await projectRepository.create({ name: 'Screen test', description: '' });
-    const dataset = await datasetRepository.import({ projectId: project.id, fileName: 'fixture.csv', sheetName: 'Sheet 1', headers, rows, columnMeta: {}, demographicColumns: headers.slice(0, 2).map((column_name) => ({ column_name, detected_by: 'test', confidence: 1, confirmed: true })) });
-    const makeScale = (scale: NonNullable<typeof options.scales>[number], displayOrder: number) => ({ id: scale.id, name: scale.name, items: scale.columns.map((column, order) => ({ column, order, reverse: scale.reversed.includes(column) })), scoringMethod: 'sum' as const, showOutputs: ['sum' as const], customFormula: '', scaleType: 'numeric' as const, minValue: scale.min ?? 1, maxValue: scale.max ?? 5, baseMin: scale.min ?? 1, baseMax: scale.max ?? 5, rangeSource: 'detected' as const, labelMap: [], confirmed: false, outOfRangeDecisions: {}, displayOrder });
-    const scales = options.scales ?? [
-      { id: 's1', name: 'Subscale 1', columns: headers.slice(2, 7), reversed: ['Q3'] },
-      { id: 's2', name: 'Subscale 2', columns: headers.slice(7), reversed: ['Q6', 'Q9'] },
-    ];
-    await surveyConfigRepository.save(dataset.id, toSurveyConfigRecord({ datasetId: dataset.id, projectId: project.id, headers, demographicColumns: headers.slice(0, 2).map((column_name, index) => ({ column_name, detected_by: index === 0 ? 'ID column' : 'Age column', confidence: 1, confirmed: true })), subscales: scales.map(makeScale), bands: {}, overallSettings: { enabled: options.overall ?? false, basedOn: 'sums', combineBy: 'sum', customFormula: '' } }));
-    return { project, dataset };
-  }
-
-  async function openScales(project: Awaited<ReturnType<typeof projectRepository.create>>, datasetId: string) {
-    const view = render(React.createElement(ConfigScreen, props(project, datasetId)));
-    fireEvent.click(await screen.findByText('Response scales'));
-    if (!screen.queryByLabelText('Subscale 1 maximum')) {
-      fireEvent.click(await screen.findByLabelText('Show details for Subscale 1'));
-    }
-    const card = await screen.findByLabelText('Subscale 1 maximum').then((input) => input.closest('[data-response-scale-id]') as HTMLElement);
-    return { view, card, user: within(card) };
-  }
-
-  async function openNamedScale(project: Awaited<ReturnType<typeof projectRepository.create>>, datasetId: string, name: string) {
-    const view = render(React.createElement(ConfigScreen, props(project, datasetId)));
-    fireEvent.click(await screen.findByText('Response scales'));
-    if (!screen.queryByLabelText(`${name} maximum`)) fireEvent.click(await screen.findByLabelText(`Show details for ${name}`));
-    const input = await screen.findByLabelText(`${name} maximum`);
-    const card = input.closest('[data-response-scale-id]') as HTMLElement;
-    return { view, card, user: within(card) };
-  }
 
   it('a: Confirm then Widen to 1-7, then reload keeps the widened range', async () => {
     const { project, dataset } = await setup();
