@@ -144,7 +144,7 @@ describe('response scale behavior on ConfigScreen', () => {
     expect((runButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(runButton);
     await screen.findByText(/Scoring complete/);
-    await waitFor(() => expect(screen.getByText(/R04, R07/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/R04, R07, R09/)).toBeTruthy());
     let result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
     expect(result.rows[0]).toMatchObject({ 'Subscale 1 Sum': 17, 'Subscale 2 Sum': 4, 'Subscale 3 Sum': 18, 'Overall Scale Score': 39 });
     expect(result.rows[1]).toMatchObject({ 'Subscale 1 Sum': 19, 'Subscale 2 Sum': 8, 'Subscale 3 Sum': 17, 'Overall Scale Score': 44 });
