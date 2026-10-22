@@ -31,8 +31,8 @@ import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
-import { detectDemographics, detectScale, COMMON_LIKERT_SCALES } from '@/scientific/detection';
-import { applyOutOfRangeAction, buildPresetLabels, detectConventionalRange, matchResponsePreset, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
+import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection';
+import { applyOutOfRangeAction, detectDifferentPresets, matchResponsePreset, seedResponseScale, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -42,9 +42,10 @@ import { getDisplayIds, hasDifferentScaleItem, shouldOpenResponseScaleCard, wait
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
-import { buildAnswerTable, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
-import { commitScaleRangeDraft, escapeScaleRangeDraft } from '@/lib/responseScaleDraft';
-import { afterScaleChange, chooseDecision, confirmRange as confirmRangeState, migrateRangeState, seedDetectedRange, setPresetRange, setTypedRange } from '@/lib/responseScaleState';
+import { buildAnswerTable, collectPendingResponseAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
+import { commitScaleRangeDraft } from '@/lib/responseScaleDraft';
+import { addResponseLabel, afterScaleChange, aliasResponseLabel, chooseDecision, chooseResponsePreset, confirmRange as confirmRangeState, editManualResponseLabel, markResponseLabelNotScored, migrateRangeState, normalizedLabelKey, removeResponseLabel, resetResponseScaleToDetected, responseScaleMatchesSeed, setTypedRange, setWordLabelNumber, togglePresetFlip, togglePresetStartAtZero } from '@/lib/responseScaleState';
+import { ResponseScaleAnswersTable } from './ResponseScaleAnswersTable';
 
 interface SubscaleState {
   id: string; name: string; items: SubscaleItem[];
@@ -58,11 +59,14 @@ interface SubscaleState {
   startsAtZero?: boolean;
   confirmed?: boolean;
   rangeSource?: 'detected' | 'manual' | 'preset';
+  labelSource?: 'detected' | 'preset' | 'manual';
+  presetName?: string;
   baseMin?: number | null;
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   outOfRange?: 'missing' | 'widen';
   displayOrder: number;
+  hasReverseItems?: boolean;
 }
 interface BandState { name: string; minScore: number; maxScore: number; color: string; }
 interface OverallSettings {
@@ -99,10 +103,7 @@ export function ConfigScreen({
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
   const activeDatasetId = sharedDatasetId ?? activeDatasetIdState;
   const setActiveDatasetId = (id: string | null) => {
-    if (id !== activeDatasetId && configDirty) {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      performAutoSaveRef.current();
-    }
+    if (id !== activeDatasetId) flushPendingSave();
     setActiveDatasetIdState(id);
     onDatasetChange(id);
   };
@@ -111,6 +112,8 @@ export function ConfigScreen({
   datasetRef.current = dataset;
   const [demoCols, setDemoCols] = useState<DemographicColumn[]>([]);
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
+  const subscaleStatesRef = useRef<SubscaleState[]>([]);
+  subscaleStatesRef.current = subscaleStates;
   const [bandStates, setBandStates] = useState<Record<string, BandState[]>>({});
   const [bandStatesByOutput, setBandStatesByOutput] = useState<Record<string, Partial<Record<ScoreOutput, BandState[]>>>>({});
   const [selectedBandOutputs, setSelectedBandOutputs] = useState<Record<string, ScoreOutput>>({});
@@ -130,7 +133,7 @@ export function ConfigScreen({
   const [showExcludedOnly, setShowExcludedOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [scoring, setScoring] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string; targetId?: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string; targetId?: string; pendingCount?: number } | null>(null);
   const [scaleFocusId, setScaleFocusId] = useState<string | null>(null);
   const [sheetInfos, setSheetInfos] = useState<SheetInfo[] | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -145,6 +148,7 @@ export function ConfigScreen({
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [collapsedWidth, setCollapsedWidth] = useState(280);
   const [configDirty, setConfigDirty] = useState(false);
+  const configDirtyRef = useRef(false);
   const [showUpdateTemplate, setShowUpdateTemplate] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const highlightRef = useRef<HTMLTableRowElement>(null);
@@ -163,6 +167,13 @@ export function ConfigScreen({
   } = {}) => {
     if (!dataset) throw new Error('No active dataset to save.');
     const existing = await surveyConfigRepository.get(dataset.id);
+    const configuredSubscales = overrides.subscales ?? subscaleStates;
+    const automaticScale = configuredSubscales.find(isAutomaticSubscale);
+    const shouldPersistOverallScale = !!automaticScale
+      || configuredSubscales.filter((subscale) => !isAutomaticSubscale(subscale)).length >= 2;
+    const requestedOverallScale = overrides.overallScale === undefined
+      ? automaticScale ?? overallScale
+      : overrides.overallScale;
     const config = toSurveyConfigRecord({
       datasetId: dataset.id,
       projectId: project.id,
@@ -171,11 +182,8 @@ export function ConfigScreen({
       subscales: overrides.subscales ?? subscaleStates,
       bands: overrides.bands ?? bandStates,
       bandsByOutput: overrides.bandsByOutput ?? bandStatesByOutput,
-      overallScale: (overrides.overallScale === undefined
-        ? overallScale
-        : overrides.overallScale)
-        && (overrides.subscales ?? subscaleStates).some((subscale) => !isAutomaticSubscale(subscale))
-        ? (overrides.overallScale === undefined ? overallScale : overrides.overallScale)
+      overallScale: requestedOverallScale && shouldPersistOverallScale
+        ? requestedOverallScale
         : null,
       overallSettings: overrides.overallSettings ?? overallSettings,
       linkedTemplateId: overrides.linkedTemplateId,
@@ -227,6 +235,7 @@ export function ConfigScreen({
     if (!ds) { setDataset(null); return; }
     setDataset(ds);
     setConfigDirty(false);
+    configDirtyRef.current = false;
     setShowUpdateTemplate(false);
 
     try {
@@ -287,15 +296,33 @@ export function ConfigScreen({
   useEffect(() => {
     const currentDataset = datasetRef.current;
     if (!currentDataset) return;
-    setSubscaleStates((previous) => previous.map((subscale) => {
-      if (subscale.rangeSource !== 'detected' || subscale.scaleType !== 'numeric' || subscale.items.length === 0) return subscale;
-      const values = subscale.items.flatMap((item) => currentDataset.rows.map((row) => row[item.column]));
-      try {
-        const detected = detectConventionalRange(values).range;
-        const seeded = seedDetectedRange({ ...subscale, hasReverseItems: subscale.items.some((item) => item.reverse) }, detected.min, detected.max);
-        return seeded as SubscaleState;
-      } catch { return subscale; }
-    }));
+    const previous = subscaleStatesRef.current;
+    const next = previous.map((subscale) => {
+      if ((subscale.labelSource && subscale.labelSource !== 'detected') || subscale.items.length === 0) return subscale;
+      const seed = seedResponseScale(currentDataset.rows, subscale.items.map((item) => item.column));
+      const patch = {
+        scaleType: seed.scaleType,
+        minValue: seed.minValue,
+        maxValue: seed.maxValue,
+        baseMin: seed.baseMin,
+        baseMax: seed.baseMax,
+        rangeSource: seed.rangeSource,
+        labelSource: subscale.labelSource ?? seed.labelSource,
+        presetName: seed.presetName,
+        labelMap: seed.labelMap,
+        flipped: seed.flipped,
+        startsAtZero: seed.startsAtZero,
+        outOfRangeDecisions: {},
+      };
+      if (Object.keys(patch).every((key) => JSON.stringify((subscale as unknown as Record<string, unknown>)[key]) === JSON.stringify((patch as unknown as Record<string, unknown>)[key]))) return subscale;
+      return afterScaleChange({ ...subscale, hasReverseItems: subscale.items.some((item) => item.reverse) }, patch) as SubscaleState;
+    });
+    if (next.some((subscale, index) => subscale !== previous[index])) {
+      subscaleStatesRef.current = next;
+      configDirtyRef.current = true;
+      setConfigDirty(true);
+      setSubscaleStates(next);
+    }
   }, [dataset?.id, detectionKey]);
 
   // ── Derived state ──
@@ -309,10 +336,11 @@ export function ConfigScreen({
 
   // ── Auto-save (debounced) ──
   const performAutoSave = useCallback(async () => {
-    if (!dataset || !configDirty) return;
+    if (!dataset || (!configDirty && !configDirtyRef.current)) return;
     setSaveState('saving');
     try {
-      await persistSurveyConfig();
+      await persistSurveyConfig({ subscales: subscaleStatesRef.current });
+      configDirtyRef.current = false;
       setConfigDirty(false);
       setShowUpdateTemplate(!!linkedTemplate);
       setSaveState('saved');
@@ -334,7 +362,35 @@ export function ConfigScreen({
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [configDirty, performAutoSave]);
 
+  function flushPendingSave() {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    void performAutoSaveRef.current();
+  }
+
+  const changeActiveStep = (step: typeof activeStep) => {
+    if (step !== activeStep) flushPendingSave();
+    setActiveStep(step);
+  };
+
+  useEffect(() => {
+    const handlePageHide = () => flushPendingSave();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingSave();
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushPendingSave();
+    };
+  }, []);
+
   const markDirty = useCallback(() => {
+    configDirtyRef.current = true;
     setConfigDirty(true);
   }, []);
 
@@ -496,14 +552,14 @@ export function ConfigScreen({
       const nextBandsByOutput = { ...bandStatesByOutput };
       delete nextBandsByOutput[automatic.name];
       const name = 'Subscale 1';
-      const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: 0 };
+      const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, labelSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: 0 };
       try {
         await persistSurveyConfig({ subscales: [...withoutAutomatic, newSub], bands: nextBands, bandsByOutput: nextBandsByOutput, overallScale: null });
         setSubscaleStates([...withoutAutomatic, newSub]);
         setBandStates(nextBands);
         setBandStatesByOutput(nextBandsByOutput);
         setActiveSubscaleId(newSub.id);
-        setActiveStep('subscales');
+        changeActiveStep('subscales');
         markDirty();
       } catch (error) {
         setStatusMsg({ type: 'error', text: `Failed to create subscale: ${(error as Error).message}` });
@@ -512,12 +568,12 @@ export function ConfigScreen({
     }
     const name = `Subscale ${realSubscales.length + 1}`;
     const order = realSubscales.length;
-    const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: order };
+    const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, labelSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: order };
     try {
       await persistSurveyConfig({ subscales: [...subscaleStates, newSub] });
       setSubscaleStates([...subscaleStates, newSub]);
       setActiveSubscaleId(newSub.id);
-      setActiveStep('subscales');
+      changeActiveStep('subscales');
       await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
       const hist = await fetchHistory(dataset.id); setHistory(hist);
       setTimeout(() => {
@@ -562,15 +618,6 @@ export function ConfigScreen({
       next[name] = next[oldName]; delete next[oldName];
       setBandStatesByOutput(next);
     }
-    markDirty();
-  };
-
-  const addItemToSubscale = (subscaleId: string, column: string) => {
-    setSubscaleStates(subscaleStates.map((s) => {
-      if (s.id !== subscaleId) return s;
-      if (s.items.some((i) => i.column === column)) return s;
-      return { ...s, items: [...s.items, { column, order: s.items.length, reverse: false }] };
-    }));
     markDirty();
   };
 
@@ -621,51 +668,53 @@ export function ConfigScreen({
     }));
     markDirty();
   };
-  const setCustomFormula = (id: string, f: string) => { setSubscaleStates(subscaleStates.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
+  const setCustomFormula = (id: string, f: string) => { setSubscaleStates((previous) => previous.map((s) => s.id === id ? { ...s, customFormula: f } : s)); markDirty(); };
+  const updateResponseScale = (id: string, update: (current: SubscaleState) => SubscaleState) => {
+    subscaleStatesRef.current = subscaleStatesRef.current.map((subscale) => subscale.id === id
+      ? update({ ...subscale, hasReverseItems: subscale.items.some((item) => item.reverse) })
+      : subscale);
+    setSubscaleStates((previous) => previous.map((subscale) => subscale.id === id
+      ? update({ ...subscale, hasReverseItems: subscale.items.some((item) => item.reverse) })
+      : subscale));
+    markDirty();
+  };
   const setScaleRange = (id: string, min: number | null, max: number | null) => {
-    const current = subscaleStates.find((subscale) => subscale.id === id);
-    if (current && current.minValue === min && current.maxValue === max) return;
-    if (min == null || max == null || !current) return;
-    const next = setTypedRange({ ...current, hasReverseItems: current.items.some((item) => item.reverse) }, min, max);
-    setSubscaleStates((prev) => prev.map((s) => s.id === id ? next as SubscaleState : s));
-    markDirty();
+    if (min == null || max == null) return;
+    updateResponseScale(id, (current) => setTypedRange(current, min, max));
   };
-  const confirmScaleRange = (id: string) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? confirmRangeState({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }) as SubscaleState : s)); markDirty(); };
-  const setPresetScaleRange = (id: string, min: number, max: number) => {
-    setSubscaleStates((prev) => prev.map((s) => s.id === id ? setPresetRange({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }, min, max) as SubscaleState : s));
-    markDirty();
-  };
-  const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => { setSubscaleStates((prev) => prev.map((s) => s.id === id ? afterScaleChange({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }, { labelMap: lm }) as SubscaleState : s)); markDirty(); };
+  const confirmScaleRange = (id: string) => updateResponseScale(id, (current) => confirmRangeState(current));
+  const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => updateResponseScale(id, (current) => afterScaleChange(current, { labelMap: lm, labelSource: 'manual' }) as SubscaleState);
   const setWordOptions = (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => {
-    setSubscaleStates((prev) => prev.map((s) => s.id === id ? afterScaleChange({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }, patch) as SubscaleState : s));
-    markDirty();
+    updateResponseScale(id, (current) => afterScaleChange(current, patch) as SubscaleState);
   };
 
   const autoDetectScale = (subscaleId: string) => {
-    const sub = subscaleStates.find((s) => s.id === subscaleId);
-    if (!sub || !dataset) return;
-    const det = detectScale(dataset.headers, dataset.rows as Record<string, unknown>[], sub.items.map((i) => i.column));
-    setSubscaleStates((prev) => prev.map((s) => {
-      if (s.id !== subscaleId) return s;
-      const detectedState = afterScaleChange({ ...s, hasReverseItems: s.items.some((item) => item.reverse), rangeSource: 'detected' as const }, {
-        scaleType: det.scaleType, labelMap: det.scaleType === 'categorical' ? det.uniqueValues.map((label, i) => ({ label, value: i + 1 })) : [],
-      });
-      if (det.scaleType !== 'numeric' || det.minValue == null || det.maxValue == null) return detectedState as SubscaleState;
-      return seedDetectedRange(detectedState, det.minValue, det.maxValue) as SubscaleState;
-    }));
-    setStatusMsg({ type: 'success', text: det.suggestion });
-    markDirty();
+    const current = subscaleStatesRef.current.find((subscale) => subscale.id === subscaleId);
+    if (!current || !dataset || current.labelSource === 'manual') return;
+    const seed = seedResponseScale(dataset.rows, current.items.map((item) => item.column));
+    updateResponseScale(subscaleId, (state) => afterScaleChange(state, {
+      ...seed,
+      labelSource: 'detected',
+      outOfRangeDecisions: {},
+    }) as SubscaleState);
+    setStatusMsg({ type: 'success', text: seed.presetName ? `${seed.presetName} detected.` : 'Response scale detected from the data.' });
   };
 
   const applyScaleToAll = () => {
-    if (realSubscales.length === 0) return;
-    const first = realSubscales[0];
-    setSubscaleStates((prev) => prev.map((s) => afterScaleChange({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }, {
-      minValue: first.minValue, maxValue: first.maxValue, baseMin: first.baseMin ?? first.minValue, baseMax: first.baseMax ?? first.maxValue,
-      rangeSource: first.rangeSource ?? 'manual', outOfRangeDecisions: { ...(first.outOfRangeDecisions ?? {}) }, labelMap: first.labelMap,
-      flipped: first.flipped, startsAtZero: first.startsAtZero, confirmed: first.confirmed, scaleType: first.scaleType,
-    }) as SubscaleState));
-    setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${realSubscales.length} subscales.` });
+    const currentScales = subscaleStatesRef.current.filter((scale) => !isAutomaticSubscale(scale));
+    if (currentScales.length === 0) return;
+    const first = currentScales[0];
+    setSubscaleStates((previous) => {
+      const firstScale = previous.find((scale) => scale.id === first.id);
+      if (!firstScale) return previous;
+      return previous.map((scale) => afterScaleChange({ ...scale, hasReverseItems: scale.items.some((item) => item.reverse) }, {
+        minValue: firstScale.minValue, maxValue: firstScale.maxValue, baseMin: firstScale.baseMin ?? firstScale.minValue, baseMax: firstScale.baseMax ?? firstScale.maxValue,
+        rangeSource: firstScale.rangeSource ?? 'manual', labelSource: firstScale.labelSource, presetName: firstScale.presetName,
+        outOfRangeDecisions: { ...(firstScale.outOfRangeDecisions ?? {}) }, labelMap: firstScale.labelMap.map((label) => ({ ...label })),
+        flipped: firstScale.flipped, startsAtZero: firstScale.startsAtZero, confirmed: firstScale.confirmed, scaleType: firstScale.scaleType,
+      }) as SubscaleState);
+    });
+    setStatusMsg({ type: 'success', text: `Applied "${first.name}" scale config to all ${currentScales.length} subscales.` });
     markDirty();
   };
 
@@ -725,15 +774,55 @@ export function ConfigScreen({
   };
 
   // ── Scoring ──
+  const pendingResponseAnswers = () => dataset
+    ? collectPendingResponseAnswers(subscaleStatesRef.current, dataset.rows, getDisplayIds(dataset.rows, demoCols), sharedExcludedRows)
+    : [];
+
+  const treatAllPendingAsNotScored = () => {
+    const pending = pendingResponseAnswers();
+    if (pending.length < 2) return;
+    setSubscaleStates((previous) => previous.map((subscale) => pending.filter((item) => item.subscaleId === subscale.id)
+      .reduce((current, item) => {
+        const rawAnswer = item.answer.answer.replace(/ \(outside .+\)$/, '');
+        return item.answer.kind === 'scale'
+          ? markResponseLabelNotScored(current, rawAnswer) as SubscaleState
+          : chooseDecision(current, rawAnswer, { type: 'missing' }) as SubscaleState;
+      }, subscale)));
+    markDirty();
+    setStatusMsg({ type: 'info', text: `${pending.length} answers were set to Not scored.` });
+  };
+
   const runScoring = async () => {
     if (!dataset) return;
+    const pending = pendingResponseAnswers();
+    if (pending.length > 0) {
+      const groups = new Map<string, typeof pending>();
+      for (const answer of pending) groups.set(answer.subscaleId, [...(groups.get(answer.subscaleId) ?? []), answer]);
+      const entries = [...groups.values()];
+      const formatAnswer = (answer: AnswerTableRow) => {
+        const cell = answer.cells[0];
+        const location = cell ? `${cell.column}: ${cell.displayId ?? `row ${cell.rowIndex + 1}`}` : '';
+        return `'${answer.answer.replace(/ \(outside .+\)$/, '')}'${location ? `, ${location}` : ''}`;
+      };
+      const details = entries.slice(0, 3).map((group) => {
+        const first = group[0];
+        const itemDetails = group.slice(0, 3).map(({ answer }) => formatAnswer(answer)).join('; ');
+        const moreItems = group.length > 3 ? `; and ${group.length - 3} more` : '';
+        return `${first.subscaleName} has ${group.length} answer${group.length === 1 ? '' : 's'} to decide (${itemDetails}${moreItems})`;
+      });
+      if (entries.length > 3) details.push(`and ${entries.length - 3} more subscales`);
+      setStatusMsg({ type: 'waiting', text: `Scoring is waiting: ${details.join('; ')}.`, targetId: entries[0][0].subscaleId, pendingCount: pending.length });
+      setScaleFocusId(entries[0][0].subscaleId);
+      changeActiveStep('scales');
+      return;
+    }
     const waiting = subscaleStates.filter((subscale) =>
       subscale.items.some((item) => item.reverse) && subscale.confirmed !== true,
     );
     if (waiting.length > 0) {
       setStatusMsg({ type: 'waiting', text: waitingSubscaleStatus(waiting.map((subscale) => subscale.name))!, targetId: waiting[0].id });
       setScaleFocusId(waiting[0].id);
-      setActiveStep('scales');
+      changeActiveStep('scales');
       return;
     }
     setScoring(true); setStatusMsg(null);
@@ -788,7 +877,7 @@ export function ConfigScreen({
         {
           rowIds: dataset.row_ids,
           bandsByOutput: bandConfigsByOutput,
-          overall: realSubscales.length >= 2 ? {
+          overall: realSubscales.length >= 2 || realSubscales.length === 0 ? {
             enabled: overallSettings.enabled,
             basedOn: overallSettings.basedOn,
             combineBy: overallSettings.combineBy,
@@ -898,6 +987,8 @@ export function ConfigScreen({
         startsAtZero: scale?.startsAtZero ?? false,
         confirmed: scale?.confirmed === true,
         rangeSource: scale?.rangeSource ?? (scale?.confirmed ? 'manual' : 'detected'),
+        labelSource: scale?.labelSource ?? (scale?.confirmed ? 'manual' : 'detected'),
+        presetName: scale?.presetName,
         baseMin: scale?.baseMin ?? scale?.minValue ?? null,
         baseMax: scale?.baseMax ?? scale?.maxValue ?? null,
         outOfRangeDecisions: scale?.outOfRangeDecisions,
@@ -1240,6 +1331,11 @@ export function ConfigScreen({
         <div className={`px-5 py-2 text-sm flex items-center gap-2 ${statusMsg.type === 'success' ? 'bg-success-50 text-success-700' : statusMsg.type === 'error' ? 'bg-error-50 text-error-700' : statusMsg.type === 'waiting' ? 'bg-warning-50 text-warning-800' : 'bg-info-50 text-info-700'}`}>
           {statusMsg.type === 'success' ? <Check className="w-4 h-4" /> : statusMsg.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <Info className="w-4 h-4" />}
           {statusMsg.text}
+          {statusMsg.type === 'waiting' && (statusMsg.pendingCount ?? 0) >= 2 && (
+            <button type="button" className="underline font-medium" onClick={treatAllPendingAsNotScored}>
+              Treat all {statusMsg.pendingCount} as not scored
+            </button>
+          )}
           {statusMsg.type === 'waiting' && (
             <button
               type="button"
@@ -1250,7 +1346,7 @@ export function ConfigScreen({
                   statusMsg.targetId ? [statusMsg.targetId] : [],
                 );
                 if (!waiting) return;
-                setActiveStep('scales');
+                changeActiveStep('scales');
                 setScaleFocusId(waiting.id);
               }}
             >
@@ -1273,7 +1369,7 @@ export function ConfigScreen({
         ) : dataset ? (
           <>
             {/* Step rail */}
-            <StepRail activeStep={activeStep} onStepClick={setActiveStep} stepStatuses={{
+            <StepRail activeStep={activeStep} onStepClick={changeActiveStep} stepStatuses={{
               demographics: demoCols.length > 0 ? 'done' : 'pending',
               subscales: realSubscales.length > 0 ? (realSubscales.every((s) => s.items.length > 0) ? 'done' : 'active') : 'pending',
               scales: subscaleStates.length > 0 ? (subscaleStates.some((s) => s.scaleType === 'categorical' && s.labelMap.length > 0) ? 'done' : 'active') : 'pending',
@@ -1311,12 +1407,11 @@ export function ConfigScreen({
                 )}
                 {activeStep === 'scales' && (
                   <ScalesPanel
-                    subscales={subscaleStates} rows={dataset?.rows ?? []}
+                    subscales={subscaleStates} rows={dataset?.rows ?? []} excludedRows={sharedExcludedRows}
                     displayIds={getDisplayIds(dataset?.rows ?? [], demoCols)}
                     focusSubscaleId={scaleFocusId}
                     onFocusHandled={() => setScaleFocusId(null)}
                     onSetScaleRange={setScaleRange}
-                    onSetPresetRange={setPresetScaleRange}
                     onConfirmRange={confirmScaleRange}
                     onApplyOutOfRange={async (id, action, values, cells, typedNumber, typedKind) => {
                       if (!dataset) return;
@@ -1338,6 +1433,7 @@ export function ConfigScreen({
                     onHighlightCell={(rowIndex, columnKey) => setHighlightCell({ rowIndex, columnKey })}
                     onSetLabelMap={setLabelMap} onSetWordOptions={setWordOptions} onToggleOutput={toggleScoreOutput}
                     onSetCustomFormula={setCustomFormula} onAutoDetect={autoDetectScale}
+                    onUpdateScale={(id, update) => updateResponseScale(id, (current) => update(current))}
                     onApplyToAll={applyScaleToAll}
                     overallSettings={overallSettings}
                     onSetOverallSettings={(patch) => { setOverallSettings((prev) => ({ ...prev, ...patch })); markDirty(); }}
@@ -1733,14 +1829,14 @@ function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSub
 }
 
 // ── Scales Panel — with custom formula support ──
-function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleRange, onSetPresetRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onSetWordOptions, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
+function ScalesPanel({ subscales, rows, excludedRows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onSetWordOptions, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, onUpdateScale, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
+  excludedRows: Set<number>;
   displayIds: string[];
   focusSubscaleId: string | null;
   onFocusHandled: () => void;
   onSetScaleRange: (id: string, min: number | null, max: number | null) => void;
-  onSetPresetRange: (id: string, min: number, max: number) => void;
   onConfirmRange: (id: string) => void;
   onApplyOutOfRange: (id: string, action: 'missing' | 'widen' | 'typed', values: (number | string)[], cells: string[], typedNumber?: number, typedKind?: 'scale' | 'special') => Promise<void>;
   onHighlightCell: (rowIndex: number, columnKey: string) => void;
@@ -1749,6 +1845,7 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   onToggleOutput: (id: string, output: ScoreOutput) => void;
   onSetCustomFormula: (id: string, f: string) => void;
   onAutoDetect: (id: string) => void;
+  onUpdateScale: (id: string, update: (current: SubscaleState) => SubscaleState) => void;
   onApplyToAll: () => void;
   overallSettings: OverallSettings;
   onSetOverallSettings: (patch: Partial<OverallSettings>) => void;
@@ -1858,18 +1955,19 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
         {subscales.map((sub) => (
           <ScaleCardCompact key={sub.id} name={sub.name} scaleType={sub.scaleType} scoringMethod={sub.scoringMethod} customFormula={sub.customFormula}
             showOutputs={shownScoreOutputs(sub.showOutputs, sub.scoringMethod)}
-            minValue={sub.minValue} maxValue={sub.maxValue} baseMin={sub.baseMin} baseMax={sub.baseMax} rangeSource={sub.rangeSource} outOfRangeDecisions={sub.outOfRangeDecisions} labelMap={sub.labelMap} confirmed={sub.confirmed} flipped={sub.flipped} startsAtZero={sub.startsAtZero}
+            minValue={sub.minValue} maxValue={sub.maxValue} baseMin={sub.baseMin} baseMax={sub.baseMax} rangeSource={sub.rangeSource} labelSource={sub.labelSource} presetName={sub.presetName} outOfRangeDecisions={sub.outOfRangeDecisions} labelMap={sub.labelMap} confirmed={sub.confirmed} flipped={sub.flipped} startsAtZero={sub.startsAtZero}
             items={sub.items}
             itemCols={sub.items.map((i) => i.column)}
             onSetScoringMethod={() => {}}
             onToggleOutput={(output) => onToggleOutput(sub.id, output)}
             multipleOutputs
             onSetCustomFormula={(f) => onSetCustomFormula(sub.id, f)}
+            onUpdateScale={(update) => onUpdateScale(sub.id, update)}
             onSetScaleRange={(min, max) => onSetScaleRange(sub.id, min, max)}
-            onSetPresetRange={(min, max) => onSetPresetRange(sub.id, min, max)}
             onConfirmRange={() => onConfirmRange(sub.id)}
             rows={rows}
             displayIds={displayIds}
+            excludedRows={excludedRows}
             onApplyOutOfRange={(action, values, cells, typedNumber, typedKind) => onApplyOutOfRange(sub.id, action, values, cells, typedNumber, typedKind)}
             onHighlightCell={onHighlightCell}
             collapsible
@@ -1889,17 +1987,19 @@ function ScalesPanel({ subscales, rows, displayIds, focusSubscaleId, onFocusHand
   );
 }
 
-export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, baseMin = minValue, baseMax = maxValue, rangeSource = 'detected', outOfRangeDecisions = {}, labelMap, confirmed, flipped = false, startsAtZero = false, items = [], itemCols, rows = [], displayIds = [], cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onSetScaleRange, onSetPresetRange, onConfirmRange, onSetLabelMap, onSetWordOptions, onAutoDetect, formulaPreviewFn }: {
+export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, customFormula, minValue, maxValue, baseMin = minValue, baseMax = maxValue, rangeSource = 'detected', labelSource = 'detected', presetName, outOfRangeDecisions = {}, labelMap, confirmed, flipped = false, startsAtZero = false, items = [], itemCols, rows = [], displayIds = [], excludedRows = new Set<number>(), cardId, collapsible = false, isOpen = true, onToggleOpen, summaryLine, attentionChip, onApplyOutOfRange, onHighlightCell, onSetScoringMethod, onToggleOutput, multipleOutputs, onSetCustomFormula, onUpdateScale, onSetScaleRange, onConfirmRange, onSetLabelMap, onSetWordOptions, onAutoDetect, formulaPreviewFn }: {
   name: string; scaleType: 'numeric' | 'categorical'; scoringMethod: 'sum' | 'mean' | 'custom'; showOutputs: ScoreOutput[]; customFormula: string;
   multipleOutputs: boolean;
   minValue: number | null; maxValue: number | null; labelMap: ResponseScaleLabelSetting[]; itemCols: string[];
   baseMin?: number | null; baseMax?: number | null; rangeSource?: 'detected' | 'manual' | 'preset';
+  labelSource?: 'detected' | 'preset' | 'manual'; presetName?: string;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   flipped?: boolean; startsAtZero?: boolean;
   confirmed?: boolean;
   items?: { column: string; reverse: boolean }[];
   rows?: Record<string, unknown>[];
   displayIds?: string[];
+  excludedRows?: Set<number>;
   cardId?: string;
   collapsible?: boolean;
   isOpen?: boolean;
@@ -1911,8 +2011,8 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
   onSetScoringMethod: (m: 'sum' | 'mean' | 'custom') => void;
   onToggleOutput: (output: ScoreOutput) => void;
   onSetCustomFormula: (f: string) => void;
+  onUpdateScale?: (update: (current: SubscaleState) => SubscaleState) => void;
   onSetScaleRange: (min: number | null, max: number | null) => void;
-  onSetPresetRange?: (min: number, max: number) => void;
   onConfirmRange?: () => void;
   onSetLabelMap: (lm: ResponseScaleLabelSetting[]) => void;
   onSetWordOptions: (patch: { flipped?: boolean; startsAtZero?: boolean }) => void;
@@ -1928,71 +2028,97 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
   const textAnswers = itemCols.flatMap((column) => rows.map((row) => row[column]))
     .filter((value) => typeof value === 'string' && value.trim() !== '' && Number.isNaN(Number(value)));
   const presetMatch = matchResponsePreset(textAnswers);
+  const activePreset = COMMON_LIKERT_SCALES.find((preset) => preset.name === presetName) ?? presetMatch.preset;
   const answerTable = buildAnswerTable({
-    rows, columns: itemCols, min: minValue, max: maxValue, baseMin, baseMax, labels: labelMap, outOfRangeDecisions, displayIds,
-    preset: presetMatch.preset ? { name: presetMatch.preset.name, labels: presetMatch.preset.labels } : undefined,
+    rows, columns: itemCols, min: minValue, max: maxValue, baseMin, baseMax, labels: labelMap, outOfRangeDecisions, displayIds, excludedRows,
+    preset: activePreset ? { name: activePreset.name, labels: activePreset.labels } : undefined,
   });
   const mode: ResponseMode = answerTable.mode;
   const hasReverseItems = items.some((item) => item.reverse);
   const reviewRows = answerTable.rows.filter((row) => row.review);
   const summary = `${itemCols.length} items · ${reviewRows.length > 0 ? `${reviewRows.length} answer${reviewRows.length === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
   const [rangeDraft, setRangeDraft] = useState({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
+  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const updateScaleState = (update: (current: SubscaleState) => SubscaleState) => {
+    if (onUpdateScale) { onUpdateScale(update); return; }
+    const current = { id: cardId ?? name, name, items, scoringMethod, customFormula, scaleType,
+      minValue, maxValue, baseMin, baseMax, rangeSource, labelSource, presetName, labelMap,
+      confirmed, flipped, startsAtZero, outOfRangeDecisions, displayOrder: 0, hasReverseItems } as SubscaleState;
+    const next = update(current);
+    if (next.minValue !== current.minValue || next.maxValue !== current.maxValue) onSetScaleRange(next.minValue, next.maxValue);
+    if (JSON.stringify(next.labelMap) !== JSON.stringify(current.labelMap)) onSetLabelMap(next.labelMap);
+    if (next.flipped !== current.flipped || next.startsAtZero !== current.startsAtZero) onSetWordOptions({ flipped: next.flipped, startsAtZero: next.startsAtZero });
+    if (next.confirmed === true && current.confirmed !== true) onConfirmRange?.();
+  };
   useEffect(() => {
     setRangeDraft({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
   }, [minValue, maxValue]);
+  const rangeFallback = { min: minValue ?? 0, max: maxValue ?? 5 };
+  const validRangeDraft = rangeDraft.min.trim() !== '' && rangeDraft.max.trim() !== ''
+    && Number.isFinite(Number(rangeDraft.min)) && Number.isFinite(Number(rangeDraft.max)) && Number(rangeDraft.min) < Number(rangeDraft.max);
   const commitRangeDraft = () => {
-    if (minValue === null || maxValue === null) return;
-    const result = commitScaleRangeDraft(rangeDraft.min, rangeDraft.max, { min: minValue, max: maxValue });
+    if (!validRangeDraft) {
+      setRangeDraft({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
+      return;
+    }
+    const result = commitScaleRangeDraft(rangeDraft.min, rangeDraft.max, { min: minValue ?? rangeFallback.min, max: maxValue ?? rangeFallback.max });
     setRangeDraft({ min: String(result.range.min), max: String(result.range.max) });
-    if (result.changed) onSetScaleRange(result.range.min, result.range.max);
+    if (result.range.min !== minValue || result.range.max !== maxValue) updateScaleState((current) => setTypedRange(current, result.range.min, result.range.max));
   };
-  const revertRangeDraft = () => setRangeDraft(escapeScaleRangeDraft(rangeDraft, { min: minValue ?? 0, max: maxValue ?? 0 }));
+  const revertRangeDraft = () => setRangeDraft({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
   const handleRangeKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); commitRangeDraft(); }
     if (event.key === 'Escape') { event.preventDefault(); revertRangeDraft(); }
   };
   const confirmRange = () => {
-    commitRangeDraft();
-    onConfirmRange?.();
+    const range = validRangeDraft ? commitScaleRangeDraft(rangeDraft.min, rangeDraft.max, { min: minValue ?? rangeFallback.min, max: maxValue ?? rangeFallback.max }).range : null;
+    if (!range) { revertRangeDraft(); return; }
+    updateScaleState((current) => confirmRangeState(range.min !== minValue || range.max !== maxValue
+      ? setTypedRange(current, range.min, range.max)
+      : current));
+    setRangeDraft({ min: String(range.min), max: String(range.max) });
   };
-  const updateLabel = (labelInput: string | number, value: number | null, kind: 'scale' | 'special' = 'scale') => {
-    const label = typeof labelInput === 'number' ? labelMap[labelInput]?.label ?? '' : labelInput;
-    const normalized = label.trim().toLocaleLowerCase();
-    const existing = labelMap.findIndex((entry) => entry.label.trim().toLocaleLowerCase() === normalized);
-    const next = existing >= 0
-      ? labelMap.map((entry, index) => index === existing ? { ...entry, value, kind } : entry)
-      : [...labelMap, { label, value, kind }];
-    onSetLabelMap(next);
-    if (mode === 'word') {
-      const numeric = next.filter((entry) => entry.kind !== 'special').map((entry) => entry.value).filter((entry): entry is number => entry !== null && Number.isFinite(entry));
-      if (numeric.length > 0 && numeric.length === next.filter((entry) => entry.kind !== 'special').length) onSetScaleRange(Math.min(...numeric), Math.max(...numeric));
-    }
-  };
-  const wordControlsAvailable = mode === 'word' && answerTable.rows.filter((row) => row.kind === 'scale').every((row) => row.countsAs !== null);
-  const flipWords = () => {
-    if (!wordControlsAvailable) return;
-    const nextFlipped = !flipped;
-    if (presetMatch.preset) onSetLabelMap(buildPresetLabels(presetMatch.preset.name, { flipped: nextFlipped, startsAtZero }).map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
-    else onSetLabelMap(labelMap.slice().reverse());
-    onSetWordOptions({ flipped: nextFlipped });
-  };
-  const startAtZero = () => {
-    if (!wordControlsAvailable) return;
-    const nextStarts = !startsAtZero;
-    if (presetMatch.preset) {
-      const mapped = buildPresetLabels(presetMatch.preset.name, { flipped, startsAtZero: nextStarts });
-      onSetLabelMap(mapped.map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
-      (onSetPresetRange ?? onSetScaleRange)(Math.min(...mapped.map((entry) => entry.value!)), Math.max(...mapped.map((entry) => entry.value!)));
-    }
-    onSetWordOptions({ startsAtZero: nextStarts });
-  };
+  const seed = { ...seedResponseScale(rows, itemCols), confirmed: false, outOfRangeDecisions: {} } as Partial<SubscaleState>;
+  const resetDiffState = { scaleType, minValue, maxValue, baseMin, baseMax, rangeSource, labelMap, labelSource, presetName, flipped, startsAtZero, confirmed, outOfRangeDecisions } as SubscaleState;
+  const resetAvailable = !responseScaleMatchesSeed(resetDiffState, seed);
   const applyPreset = (nameValue: string) => {
-    const preset = COMMON_LIKERT_SCALES.find((candidate) => candidate.name === nameValue);
-    if (!preset || preset.name !== nameValue) return;
-    const presetLabels = buildPresetLabels(nameValue, { flipped, startsAtZero });
-    onSetLabelMap(presetLabels.map((entry) => ({ label: entry.text, value: entry.value, kind: entry.kind })));
-    (onSetPresetRange ?? onSetScaleRange)(Math.min(...presetLabels.map((entry) => entry.value!)), Math.max(...presetLabels.map((entry) => entry.value!)));
-    onSetWordOptions({});
+    updateScaleState((current) => chooseResponsePreset(current, nameValue) as SubscaleState);
+    setShowPresetPicker(false);
+  };
+  const setAnswerNumber = (row: AnswerTableRow, value: number | null) => {
+    const label = row.answer.replace(/ \(outside .+\)$/, '');
+    updateScaleState((current) => {
+      if (value === null) return row.kind === 'scale' ? setWordLabelNumber(current, label, null) : chooseDecision(current, label, { type: 'missing' }) as SubscaleState;
+      if (row.kind === 'scale' || row.kind === 'special') return setWordLabelNumber(current, label, value);
+      return chooseDecision(current, label, { type: 'typed', number: value, kind: 'scale' }) as SubscaleState;
+    });
+  };
+  const chooseAnswer = (row: AnswerTableRow, choice: 'missing' | 'widen') => {
+    const label = row.answer.replace(/ \(outside .+\)$/, '');
+    if (!onUpdateScale && row.kind === 'out_of_range' && onApplyOutOfRange) {
+      onApplyOutOfRange(choice, row.cells.map(() => Number(label)), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`));
+      return;
+    }
+    updateScaleState((current) => chooseDecision(current, label, choice === 'widen'
+      ? { type: 'widen', value: Number(label) } : { type: 'missing' }) as SubscaleState);
+  };
+  const setAnswerAlias = (row: AnswerTableRow, target: string) => {
+    const label = row.answer.replace(/ \(outside .+\)$/, '');
+    updateScaleState((current) => aliasResponseLabel(current, label, target) as SubscaleState);
+  };
+  const removeAnswerLabel = (row: AnswerTableRow) => {
+    updateScaleState((current) => removeResponseLabel(current, row.answer) as SubscaleState);
+  };
+  const editAnswerLabel = (row: AnswerTableRow, label: string) => {
+    if (!label.trim() || labelMap.some((entry) => normalizedLabelKey(entry.label) === normalizedLabelKey(label)
+      && normalizedLabelKey(entry.label) !== normalizedLabelKey(row.answer))) return false;
+    updateScaleState((current) => editManualResponseLabel(current, row.answer, label) as SubscaleState);
+    return true;
+  };
+  const addAnswerLabel = (label: string, value: number | null) => {
+    if (!label.trim() || labelMap.some((entry) => normalizedLabelKey(entry.label) === normalizedLabelKey(label))) return false;
+    updateScaleState((current) => addResponseLabel(current, label, value) as SubscaleState);
+    return true;
   };
   return (
     <Card className="p-3" data-response-scale-id={collapsible ? cardId : undefined}>
@@ -2028,53 +2154,38 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           ))}
         </div>
       )}
-      {minValue !== null && maxValue !== null && (
-        <div className="flex items-center gap-2 text-xs text-secondary-500 mb-2">
-          <span>Scale</span>
-          <input type="text" value={rangeDraft.min} onChange={(event) => setRangeDraft((draft) => ({ ...draft, min: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
-          <span>to</span>
-          <input type="text" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
-          <span>{rangeSource === 'manual' ? 'set by you' : mode === 'word' && presetMatch.preset ? `from ${presetMatch.preset.name}` : mode === 'word' ? 'set from the numbers you type below' : mode === 'continuous' ? 'continuous' : 'detected'}</span>
-          {hasReverseItems && confirmed !== true && <><button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
-          {hasReverseItems && confirmed === true && <span className="inline-flex items-center gap-1 text-[11px] text-success-700"><Check className="w-3 h-3" />Confirmed</span>}
-        </div>
-      )}
-      {mode === 'demographic' ? <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p> : mode !== 'continuous' && (
-        <>
-        {mode === 'word' && <div className="mb-2 flex items-center gap-2 text-xs"><button type="button" disabled={!wordControlsAvailable} onClick={flipWords} className="text-primary-600 hover:underline disabled:text-secondary-400">Flip order</button><button type="button" disabled={!wordControlsAvailable} onClick={startAtZero} className="text-primary-600 hover:underline disabled:text-secondary-400">Start at 0</button>{!wordControlsAvailable && <span className="text-secondary-400">available once every word has a number</span>}{presetMatch.preset && <button type="button" className="ml-auto text-primary-600 hover:underline" onClick={() => applyPreset(presetMatch.preset!.name)}>Wrong scale? Change</button>}</div>}
-        {answerTable.rows.length > 0 && <table className="w-full table-fixed text-xs mb-2"><colgroup><col className="w-[54%]" /><col className="w-[14%]" /><col className="w-[32%]" /></colgroup><thead><tr className="text-left text-secondary-500"><th className="py-1 px-2 align-middle font-normal">Answer</th><th className="py-1 px-2 align-middle font-normal">Found</th><th className="py-1 px-2 align-middle font-normal">Counts as</th></tr></thead><tbody>
-          {answerTable.rows.map((row: AnswerTableRow) => {
-            const raw = row.answer.replace(/ \(outside .+\)$/, '');
-            return <tr key={`${row.kind}-${row.answer}`} className={row.review ? 'bg-warning-50 text-warning-800' : row.grey ? 'text-secondary-400' : 'text-secondary-700'}>
-              <td className="py-1 px-2 align-middle">{row.kind === 'out_of_range' ? <><button type="button" className="underline" onClick={() => row.cells[0] && onHighlightCell?.(row.cells[0].rowIndex, row.cells[0].column)}>{row.answer}</button><span className="text-secondary-500">{row.cells.slice(0, 3).map((cell, index) => <React.Fragment key={`${cell.column}-${cell.rowIndex}`}>{index > 0 ? ', ' : ' '}{cell.column}: {cell.displayId ?? displayIds[cell.rowIndex]}</React.Fragment>)}{row.cells.length > 3 ? ` and ${row.cells.length - 3} more` : ''}</span></> : row.answer}</td>
-              <td className="py-1 px-2 align-middle">{row.found}</td>
-              <td className="py-1 px-2 align-middle">{row.kind === 'out_of_range' || row.kind === 'unknown' ? <>
-                <select value={row.decision === 'widen' ? 'widen' : row.decision === 'missing' ? 'missing' : ''} onChange={(event) => {
-                  const value = event.target.value as '' | 'missing' | 'widen';
-                  if (value) onApplyOutOfRange?.(value, row.cells.map(() => raw), row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`));
-                }} className="w-44 px-2 py-1 text-sm border border-secondary-200 rounded">
-                  {row.review && <option value="">Choose…</option>}<option value="missing">Not scored</option>
-                  {row.kind === 'out_of_range' && <option value="widen">Widen scale to {Math.min(baseMin ?? Number(raw), Number(raw))}-{Math.max(baseMax ?? Number(raw), Number(raw))}</option>}
-                </select>
-                <input type="text" inputMode="decimal" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
-                  const cells = row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`);
-                  const number = event.target.value === '' ? null : Number(event.target.value);
-                  onApplyOutOfRange?.(number === null ? 'missing' : 'typed', row.cells.map(() => raw), cells, number ?? undefined, 'scale');
-                }} className="ml-1 w-32 px-2 py-1 text-sm border border-secondary-200 rounded" placeholder="or number" />
-              </> : <input type="text" inputMode="decimal" value={row.countsAs ?? ''} aria-label={`${row.answer} score`} onChange={(event) => {
-                if (row.kind === 'special') {
-                  const cells = row.cells.map((cell) => `${cell.column}:${cell.rowIndex}`);
-                  const number = event.target.value === '' ? null : Number(event.target.value);
-                  onApplyOutOfRange?.(number === null ? 'missing' : 'typed', row.cells.map(() => raw), cells, number ?? undefined, 'special');
-                } else updateLabel(raw, event.target.value === '' ? null : Number(event.target.value), 'scale');
-              }} className="w-32 px-2 py-1 text-sm border border-secondary-200 rounded" placeholder={row.kind === 'special' ? 'Not scored' : 'Needs a number'} />}</td>
-            </tr>;
-          })}
-        </tbody></table>}
-        </>
-      )}
-      {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Built-in codes are not scored. Type a number to score one.</p>}
-      <div className="flex items-center gap-1 mb-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-500 mb-2">
+        <span>Scale:</span>
+        <input type="text" value={rangeDraft.min} onChange={(event) => setRangeDraft((draft) => ({ ...draft, min: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
+        <span>to</span>
+        <input type="text" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
+        <span>{activePreset ? `${activePreset.name} (${labelSource === 'detected' ? 'detected' : 'selected'})` : rangeSource === 'manual' ? 'set by you' : mode === 'continuous' ? 'continuous' : minValue === null ? 'choose a range' : 'detected'}</span>
+        <Tooltip text="The raw data is never changed. Counts as tells scoring, Data Quality, reliability, and export how to read this answer."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip>
+        {hasReverseItems && confirmed !== true && <><button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
+        {hasReverseItems && confirmed === true && <span className="inline-flex items-center gap-1 text-[11px] text-success-700"><Check className="w-3 h-3" />Confirmed</span>}
+        {activePreset && <button type="button" className="text-primary-600 hover:underline" onClick={() => setShowPresetPicker((shown) => !shown)}>Wrong scale? Change</button>}
+        {resetAvailable && <button type="button" className="text-primary-600 hover:underline" onClick={() => {
+          if (!window.confirm('Reset this card to the detected response scale?')) return;
+          updateScaleState((current) => resetResponseScaleToDetected(current, seed) as SubscaleState);
+        }}>Reset to detected</button>}
+        {mode === 'word' && activePreset && reviewRows.length === 0 && <>
+          <button type="button" className="text-primary-600 hover:underline" onClick={() => updateScaleState((current) => togglePresetFlip(current) as SubscaleState)}>Flip order</button>
+          <button type="button" className="text-primary-600 hover:underline" onClick={() => updateScaleState((current) => togglePresetStartAtZero(current) as SubscaleState)}>Start at 0</button>
+        </>}
+      </div>
+      {showPresetPicker && activePreset && <div className="mb-2 flex items-center gap-2 text-xs">
+        <label htmlFor={`${cardId ?? name}-preset`}>Choose scale</label>
+        <select id={`${cardId ?? name}-preset`} aria-label="Choose response scale preset" value={presetName ?? activePreset.name} onChange={(event) => applyPreset(event.target.value)} className="px-2 py-1 border border-secondary-200 rounded">
+          {COMMON_LIKERT_SCALES.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+        </select>
+      </div>}
+      {detectDifferentPresets(textAnswers) && <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>}
+      {mode === 'demographic' && <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p>}
+      {mode !== 'demographic' && <ResponseScaleAnswersTable rows={answerTable.rows} labels={labelMap} allowAdd={mode === 'word'}
+        onSetNumber={setAnswerNumber} onChoose={chooseAnswer} onCountsAs={setAnswerAlias} onRemove={removeAnswerLabel}
+        onEditLabel={editAnswerLabel} onAddLabel={addAnswerLabel}
+        onHighlightCell={(rowIndex, column) => onHighlightCell?.(rowIndex, column)} />}
+      {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Special answers are not scored by default. Type a number to score one; they are never reversed.</p>}      <div className="flex items-center gap-1 mb-2">
         {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
         {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
           <button

@@ -13,6 +13,7 @@ import { exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { buildScoredColumnData, scoreOnlyColumnKeys, type ScoredColumn } from '@/lib/scoredColumns';
 import { buildSummaryExportContent } from '@/lib/summaryStatistics';
+import { collectPendingResponseAnswers } from '@/lib/responseScaleAnswers';
 import { shownScoreOutputs } from '@/lib/scoreOutputs';
 import type { SurveyConfigRecord } from '@/storage/schema';
 import { Button, Card } from './ui';
@@ -176,18 +177,34 @@ export function ExportScreen({
           scaleType: scale?.scale_type || 'numeric',
           minValue: scale?.min_value ?? undefined,
           maxValue: scale?.max_value ?? undefined,
-          labelMap: scale?.label_map,
+          baseMin: scale?.base_min,
+          baseMax: scale?.base_max,
+          labelMap: scale?.label_map ?? [],
+          confirmed: scale?.confirmed,
+          outOfRangeDecisions: scale?.out_of_range_decisions,
         },
       };
     });
   }, [subscaleGroups, responseScales]);
 
+  const scoringBlocked = useMemo(() => {
+    if (!dataset) return false;
+    const scales = subConfigs.map((subscale) => ({
+      id: subscale.id, name: subscale.name, items: subscale.items,
+      minValue: subscale.responseScale.minValue ?? null, maxValue: subscale.responseScale.maxValue ?? null,
+      baseMin: subscale.responseScale.baseMin, baseMax: subscale.responseScale.baseMax,
+      labelMap: subscale.responseScale.labelMap ?? [], outOfRangeDecisions: subscale.responseScale.outOfRangeDecisions,
+    }));
+    const pending = collectPendingResponseAnswers(scales, dataset.rows as Record<string, unknown>[], [], excludedRows);
+    return pending.length > 0 || subConfigs.some((subscale) => subscale.items.some((item) => item.reverse) && subscale.responseScale.confirmed !== true);
+  }, [dataset, subConfigs, excludedRows]);
+
   const [bandConfigs, setBandConfigs] = useState<Record<string, Partial<Record<ScoreOutput, BandConfig[]>>>>({});
 
   // ── Compute scored result (use saved or recompute) ──
-  const scoringAvailable = !!savedScoringResult || (!scoreCacheStale && hasSubscaleConfig);
+  const scoringAvailable = !scoringBlocked && (!!savedScoringResult || (!scoreCacheStale && hasSubscaleConfig));
   const scoredResult = useMemo(() => {
-    if (!dataset) return null;
+    if (!dataset || scoringBlocked) return null;
     if (savedScoringResult) return savedScoringResult;
     if (scoreCacheStale) return null;
     if (hasSubscaleConfig && subConfigs.length > 0) {
@@ -215,7 +232,7 @@ export function ExportScreen({
       }
     }
     return null;
-  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, overallSettings, excludedRows]);
+  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, overallSettings, excludedRows, scoringBlocked]);
   const scoredColumnData = useMemo(() => {
     if (!dataset || !scoredResult) return null;
     return buildScoredColumnData({

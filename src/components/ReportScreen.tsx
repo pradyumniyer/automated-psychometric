@@ -11,6 +11,7 @@ import { datasetRepository, scoreRepository, surveyConfigRepository } from '@/st
 import { buildSubscaleConfigs, createScoreHashes } from '@/storage/scoreHashes';
 import { ensureAutomaticSubscale } from '@/storage/viewAdapters';
 import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
+import { collectPendingResponseAnswers } from '@/lib/responseScaleAnswers';
 import { mean, sd } from '@/scientific/descriptives';
 import { Button, Card } from './ui';
 import {
@@ -133,17 +134,33 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
           scaleType: scale?.scale_type || 'numeric',
           minValue: scale?.min_value ?? undefined,
           maxValue: scale?.max_value ?? undefined,
-          labelMap: scale?.label_map,
+          baseMin: scale?.base_min,
+          baseMax: scale?.base_max,
+          labelMap: scale?.label_map ?? [],
+          confirmed: scale?.confirmed,
+          outOfRangeDecisions: scale?.out_of_range_decisions,
         },
       };
     });
   }, [subscaleGroups, responseScales]);
 
+  const scoringBlocked = useMemo(() => {
+    if (!dataset) return false;
+    const scales = subConfigs.map((subscale) => ({
+      id: subscale.id, name: subscale.name, items: subscale.items,
+      minValue: subscale.responseScale.minValue ?? null, maxValue: subscale.responseScale.maxValue ?? null,
+      baseMin: subscale.responseScale.baseMin, baseMax: subscale.responseScale.baseMax,
+      labelMap: subscale.responseScale.labelMap ?? [], outOfRangeDecisions: subscale.responseScale.outOfRangeDecisions,
+    }));
+    const pending = collectPendingResponseAnswers(scales, dataset.rows as Record<string, unknown>[], [], excludedRows);
+    return pending.length > 0 || subConfigs.some((subscale) => subscale.items.some((item) => item.reverse) && subscale.responseScale.confirmed !== true);
+  }, [dataset, subConfigs, excludedRows]);
+
   const hasSubscaleConfig = subscaleGroups.length > 0 && subscaleGroups.some((s) => s.items && s.items.length > 0);
 
   // ── Compute scored result ──
   const scoredResult = useMemo(() => {
-    if (!dataset) return null;
+    if (!dataset || scoringBlocked) return null;
     if (savedScoringResult) {
       return {
         headers: savedScoringResult.headers,
@@ -166,7 +183,7 @@ export function ReportScreen({ project, excludedRows, sharedDatasetId, onDataset
       }
     }
     return null;
-  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows]);
+  }, [dataset, savedScoringResult, scoreCacheStale, hasSubscaleConfig, subConfigs, bandConfigs, excludedRows, scoringBlocked]);
 
   // ── Derived values ──
   const totalRows = dataset?.rows.length ?? 0;
