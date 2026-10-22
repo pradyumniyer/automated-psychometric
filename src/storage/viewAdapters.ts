@@ -21,9 +21,11 @@ export interface ScreenSubscaleState {
   scaleType: 'numeric' | 'categorical';
   minValue: number | null;
   maxValue: number | null;
-  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean; notScored?: boolean; aliasOf?: string; manual?: boolean; manualLabel?: boolean }[];
   confirmed?: boolean;
   rangeSource?: 'detected' | 'manual' | 'preset';
+  labelSource?: 'detected' | 'preset' | 'manual';
+  presetName?: string;
   baseMin?: number | null;
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
@@ -88,6 +90,8 @@ function toStoredSubscale(
     min_value: state.minValue,
     max_value: state.maxValue,
     label_map: state.labelMap,
+    label_source: state.labelSource,
+    preset_name: state.presetName,
     confirmed: state.confirmed ?? true,
     range_source: state.rangeSource,
     base_min: state.baseMin ?? state.minValue,
@@ -197,10 +201,11 @@ export function migrateSurveyConfigRecord(config: SurveyConfigRecord): SurveyCon
     if (!scale) return undefined;
     const confirmed = scale.confirmed ?? true;
     const migrated = migrateRangeState({ minValue: scale.min_value, maxValue: scale.max_value, confirmed,
-      rangeSource: scale.range_source, baseMin: scale.base_min, baseMax: scale.base_max,
+      rangeSource: scale.range_source, labelSource: scale.label_source, presetName: scale.preset_name, baseMin: scale.base_min, baseMax: scale.base_max,
       outOfRangeDecisions: scale.out_of_range_decisions, outOfRangeDecision: scale.out_of_range_decision,
       outOfRange: scale.out_of_range });
-    return { ...scale, confirmed, range_source: migrated.rangeSource,
+    const labelSource = scale.label_source ?? (scale.scale_type === 'categorical' ? (scale.confirmed === true ? 'manual' : 'detected') : (scale.confirmed === true ? 'manual' : 'detected'));
+    return { ...scale, confirmed, label_source: labelSource, range_source: migrated.rangeSource,
       base_min: migrated.baseMin, base_max: migrated.baseMax, out_of_range_decisions: migrated.outOfRangeDecisions,
       min_value: migrated.minValue, max_value: migrated.maxValue };
   };
@@ -242,6 +247,8 @@ export function fromSurveyConfigRecord(
     minValue: subscale.response_scale?.min_value ?? null,
     maxValue: subscale.response_scale?.max_value ?? null,
     labelMap: subscale.response_scale?.label_map ?? [],
+    labelSource: subscale.response_scale?.label_source,
+    presetName: subscale.response_scale?.preset_name,
     confirmed: subscale.response_scale?.confirmed ?? true,
     rangeSource: subscale.response_scale?.range_source,
     baseMin: subscale.response_scale?.base_min,
@@ -286,7 +293,7 @@ export function fromSurveyConfigRecord(
       )
     : null;
   const configuredSubscales = automatic
-    ? [{
+    ? [config.overall_scale ?? {
         id: automatic.id,
         project_id: config.demographic_columns[0]?.project_id ?? '',
         dataset_id: config.dataset_id,
@@ -307,6 +314,8 @@ export function fromSurveyConfigRecord(
           min_value: automatic.responseScale.minValue ?? null,
           max_value: automatic.responseScale.maxValue ?? null,
           label_map: automatic.responseScale.labelMap ?? [],
+          label_source: automatic.responseScale.labelSource ?? 'detected',
+          preset_name: automatic.responseScale.presetName,
           confirmed: false,
           range_source: 'detected',
           base_min: automatic.responseScale.minValue ?? null,

@@ -8,6 +8,10 @@ export interface ResponseScaleLabel {
   value: number | null;
   kind: ResponseScaleLabelKind;
   reverse?: boolean;
+  notScored?: boolean;
+  aliasOf?: string;
+  manual?: boolean;
+  manualLabel?: boolean;
 }
 
 export interface ResponseScaleLabelSetting {
@@ -15,6 +19,10 @@ export interface ResponseScaleLabelSetting {
   value: number | null;
   kind?: ResponseScaleLabelKind;
   reverse?: boolean;
+  notScored?: boolean;
+  aliasOf?: string;
+  manual?: boolean;
+  manualLabel?: boolean;
 }
 
 export interface ResponseScaleV2 {
@@ -63,7 +71,10 @@ export type ResolvedResponse =
   | { kind: "unmapped"; value: null; raw: unknown };
 
 const BUILT_IN_NUMERIC_MISSING_CODES = new Set(["-99", "-999"]);
-export const BUILT_IN_MISSING_CODES = ["N/A", "NA", "Prefer not to say", "-99", "-999"];
+export const BUILT_IN_MISSING_CODES = [
+  "N/A", "NA", "Not applicable", "Prefer not to say", "Prefer not to answer", "Don't know", "Dont know", "DK",
+  "Refused", "No answer", "No response", "Skipped", "Missing", "Unknown", "-99", "-999",
+];
 const CONVENTIONAL_RANGES = [
   { min: 0, max: 3 },
   { min: 0, max: 4 },
@@ -82,7 +93,15 @@ const CONVENTIONAL_RANGES = [
 ] as const;
 
 export function normalizeResponseText(value: string): string {
-  return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  return value.normalize("NFKC").trim().replace(/[-_]/g, " ").replace(/\s+/g, " ").replace(/[\p{P}\p{S}]+$/gu, "").toLocaleLowerCase();
+}
+
+const BUILT_IN_SPECIAL_WORDS = new Set(BUILT_IN_MISSING_CODES.filter((value) => !BUILT_IN_NUMERIC_MISSING_CODES.has(value)).map(normalizeResponseText));
+
+export function isBuiltInMissingCode(value: unknown): boolean {
+  if (typeof value !== "string" && typeof value !== "number") return false;
+  const text = String(value).normalize("NFKC").trim();
+  return BUILT_IN_NUMERIC_MISSING_CODES.has(text) || BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(text));
 }
 
 export function responseScaleFromLabels(labels: ResponseScaleLabelSetting[], range: NumericRange): ResponseScaleV2 {
@@ -90,7 +109,8 @@ export function responseScaleFromLabels(labels: ResponseScaleLabelSetting[], ran
     min: range.min, max: range.max, rangeSource: "manual", confirmed: true,
     flipped: false, startsAtZero: false, outOfRange: "missing",
     labels: labels.map((label) => ({ text: label.label, value: label.value,
-      kind: label.kind ?? (label.value === null ? "special" : "scale"), reverse: label.reverse })),
+      kind: label.kind ?? (label.value === null ? "special" : "scale"), reverse: label.reverse,
+      aliasOf: label.aliasOf, notScored: label.notScored, manual: label.manual, manualLabel: label.manualLabel })),
   };
 }
 
@@ -318,8 +338,6 @@ export interface PresetMatch {
   suggestDemographicOrId: boolean;
 }
 
-const BUILT_IN_SPECIAL_WORDS = new Set(["n/a", "na", "prefer not to say"]);
-
 function distinctResponses(values: unknown[]): string[] {
   const responses = new Map<string, string>();
   for (const value of values) {
@@ -328,6 +346,22 @@ function distinctResponses(values: unknown[]): string[] {
     if (!responses.has(normalized)) responses.set(normalized, value.trim());
   }
   return Array.from(responses.values());
+}
+
+export function presetLabelForText(preset: LikertPreset, value: string): LikertPreset['labels'][number] | undefined {
+  const normalized = normalizeResponseText(value);
+  return preset.labels.find(({ label, aliases = [] }) =>
+    [label, ...aliases].some((candidate) => normalizeResponseText(candidate) === normalized),
+  );
+}
+
+export function matchingResponsePresets(values: unknown[]): { preset: LikertPreset; matched: number }[] {
+  const words = distinctResponses(values).filter((response) => !isBuiltInMissingCode(response));
+  return COMMON_LIKERT_SCALES.map((preset) => ({
+    preset,
+    matched: words.filter((word) => !!presetLabelForText(preset, word)).length,
+  })).filter(({ matched }) => matched >= 3 && matched > words.length / 2)
+    .sort((a, b) => b.matched - a.matched || a.preset.points - b.preset.points || COMMON_LIKERT_SCALES.indexOf(a.preset) - COMMON_LIKERT_SCALES.indexOf(b.preset));
 }
 
 function presetLabels(preset: LikertPreset, flipped: boolean, startsAtZero: boolean): ResponseScaleLabel[] {
@@ -351,35 +385,157 @@ export function buildPresetLabels(
 
 export function matchResponsePreset(values: unknown[]): PresetMatch {
   const responses = distinctResponses(values);
-  const words = responses.filter((response) => !BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(response)));
+  const words = responses.filter((response) => !isBuiltInMissingCode(response));
   const suggestDemographicOrId = words.length > 15;
-  let best: { preset: LikertPreset; matched: number } | null = null;
-  for (const preset of COMMON_LIKERT_SCALES) {
-    const presetWords = new Set(preset.labels.map(({ label }) => normalizeResponseText(label)));
-    const matched = words.filter((word) => presetWords.has(normalizeResponseText(word))).length;
-    if (matched > words.length / 2 && (!best || matched > best.matched)) {
-      best = { preset, matched };
-    }
-  }
-
-  const matchedPreset = best?.preset ?? null;
+  const matchedPreset = matchingResponsePresets(words)[0]?.preset ?? null;
   const labels = matchedPreset ? presetLabels(matchedPreset, false, false) : responses.map((text) => ({
     text,
     value: null,
-    kind: BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(text)) ? "special" as const : "scale" as const,
+    kind: isBuiltInMissingCode(text) ? "special" as const : "scale" as const,
   }));
-  const presetWords = matchedPreset
-    ? new Set(matchedPreset.labels.map(({ label }) => normalizeResponseText(label)))
-    : new Set<string>();
-  const extraResponses = responses.filter((response) => !presetWords.has(normalizeResponseText(response)));
+  const extraResponses = responses.filter((response) => !matchedPreset || !presetLabelForText(matchedPreset, response));
   if (matchedPreset) {
     labels.push(...extraResponses.map((text) => ({
       text,
       value: null,
-      kind: BUILT_IN_SPECIAL_WORDS.has(normalizeResponseText(text)) ? "special" as const : "scale" as const,
+      kind: isBuiltInMissingCode(text) ? "special" as const : "scale" as const,
     })));
   }
   return { preset: matchedPreset, labels, extraResponses, suggestDemographicOrId };
+}
+
+export interface SeededResponseScale {
+  scaleType: "numeric" | "categorical";
+  labelMap: ResponseScaleLabelSetting[];
+  labelSource: "detected";
+  minValue: number | null;
+  maxValue: number | null;
+  baseMin: number | null;
+  baseMax: number | null;
+  rangeSource: "detected" | "preset";
+  flipped: boolean;
+  startsAtZero: boolean;
+  presetName?: string;
+}
+
+const NUMBERED_LABEL = /^\s*(?:\(\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*\)|(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:[-=:.]|\))\s*)(.+?)\s*$/u;
+
+function numberedLabel(label: string): { number: number; text: string } | null {
+  const match = label.match(NUMBERED_LABEL);
+  if (!match) return null;
+  const number = Number(match[1] ?? match[2]);
+  return Number.isFinite(number) ? { number, text: match[3].trim() } : null;
+}
+
+function distinctObservedLabels(values: unknown[]): string[] {
+  const found = new Map<string, { first: string; variants: Map<string, number> }>();
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim() === "" || isBuiltInMissingCode(value) || Number.isFinite(Number(value))) continue;
+    const key = normalizeResponseText(value);
+    const label = value.trim();
+    const existing = found.get(key);
+    if (!existing) found.set(key, { first: label, variants: new Map([[label, 1]]) });
+    else existing.variants.set(label, (existing.variants.get(label) ?? 0) + 1);
+  }
+  return [...found.values()].map(({ first, variants }) => [...variants.entries()]
+    .reduce((best, candidate) => candidate[1] > best[1] ? candidate : best, [first, variants.get(first) ?? 0])[0]);
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const number = Number(value.trim());
+  return Number.isFinite(number) ? number : null;
+}
+
+function scaleDataMode(values: unknown[]): "numeric" | "word" | "continuous" | "demographic" {
+  const usable = values.filter((value) => value != null && String(value).trim() !== "" && !isBuiltInMissingCode(value));
+  const text = usable.filter((value) => numericValue(value) === null);
+  const distinctText = new Set(text.map((value) => normalizeResponseText(String(value))));
+  if (distinctText.size > 15) return "demographic";
+  if (usable.some((value) => { const number = numericValue(value); return number !== null && !Number.isInteger(number); })) return "continuous";
+  return text.length >= usable.length / 2 ? "word" : "numeric";
+}
+
+export function seedResponseScale(rows: Record<string, unknown>[], columns: string[]): SeededResponseScale {
+  const values = columns.flatMap((column) => rows.map((row) => row[column]));
+  const numeric = values.map(numericValue).filter((value): value is number => value !== null && !isBuiltInMissingCode(value));
+  const mode = scaleDataMode(values);
+  const observed = distinctObservedLabels(values);
+  const numbered = observed.map((label) => numberedLabel(label));
+  const hasCompleteNumbering = observed.length > 0 && numbered.every((entry) => entry !== null)
+    && new Set(numbered.map((entry) => entry!.number)).size === numbered.length;
+  const matchValues = hasCompleteNumbering ? numbered.map((entry) => entry!.text) : observed;
+  const preset = mode === "word" ? matchResponsePreset(matchValues).preset : null;
+  const points = preset?.labels ?? [];
+  const labels: ResponseScaleLabelSetting[] = [];
+
+  for (const label of observed) {
+    const numberIndex = observed.findIndex((candidate) => normalizeResponseText(candidate) === normalizeResponseText(label));
+    const number = hasCompleteNumbering ? numbered[numberIndex] : null;
+    const point = preset ? presetLabelForText(preset, number?.text ?? label) : undefined;
+    labels.push({
+      label,
+      value: hasCompleteNumbering ? number!.number : point?.value ?? null,
+      kind: "scale",
+      manual: false,
+    });
+  }
+  for (const value of values) {
+    if (typeof value !== "string" || !isBuiltInMissingCode(value)) continue;
+    const label = value.trim();
+    const key = normalizeResponseText(label);
+    if (!labels.some((entry) => entry.kind === "special" && normalizeResponseText(entry.label) === key)) {
+      labels.push({ label, value: null, kind: "special", notScored: true, manual: false });
+    }
+  }
+  if (preset && !hasCompleteNumbering) {
+    for (const point of preset.labels) {
+      if (!labels.some((entry) => entry.kind !== "special" && entry.value === point.value && !entry.notScored)) {
+        labels.push({ label: point.label, value: point.value, kind: "scale", manual: false });
+      }
+    }
+  }
+
+  let minValue: number | null = null;
+  let maxValue: number | null = null;
+  let rangeSource: SeededResponseScale["rangeSource"] = "detected";
+  if (mode === "word") {
+    const mappedValues = hasCompleteNumbering
+      ? numbered.map((entry) => entry!.number)
+      : preset ? points.map((point) => point.value) : [];
+    if (mappedValues.length > 0) {
+      minValue = Math.min(...mappedValues);
+      maxValue = Math.max(...mappedValues);
+      if (preset && !hasCompleteNumbering) rangeSource = "preset";
+    }
+  } else if (numeric.length > 0 && mode !== "demographic") {
+    try {
+      const range = detectConventionalRange(numeric).range;
+      minValue = range.min;
+      maxValue = range.max;
+    } catch {
+      minValue = Math.min(...numeric);
+      maxValue = Math.max(...numeric);
+    }
+  }
+  return {
+    scaleType: "numeric",
+    labelMap: mode === "demographic" ? [] : labels,
+    labelSource: "detected",
+    minValue,
+    maxValue,
+    baseMin: minValue,
+    baseMax: maxValue,
+    rangeSource,
+    flipped: false,
+    startsAtZero: false,
+    presetName: preset?.name,
+  };
+}
+
+export function detectDifferentPresets(values: unknown[]): boolean {
+  return matchingResponsePresets(values).length > 1;
 }
 
 export function resolveResponse(raw: unknown, scale: ResponseScaleV2): ResolvedResponse {
@@ -391,24 +547,32 @@ export function resolveResponse(raw: unknown, scale: ResponseScaleV2): ResolvedR
   const text = String(raw);
   if (text.trim() === "") return { kind: "blank", value: null };
   const normalized = normalizeResponseText(text);
-  const label = scale.labels.find((candidate) => normalizeResponseText(candidate.text) === normalized);
+  const labelsByKey = new Map(scale.labels.map((candidate) => [normalizeResponseText(candidate.text), candidate]));
+  let label = labelsByKey.get(normalized);
   if (label) {
-    if (label.value === null) return { kind: "special_missing", value: null };
+    if (label.notScored) return { kind: "special_missing", value: null };
+    const visited = new Set<string>();
+    while (label.aliasOf) {
+      const aliasKey = normalizeResponseText(label.text);
+      if (visited.has(aliasKey)) return { kind: "unmapped", value: null, raw };
+      visited.add(aliasKey);
+      const target = labelsByKey.get(normalizeResponseText(label.aliasOf));
+      if (!target) return { kind: "unmapped", value: null, raw };
+      label = target;
+      if (label.notScored) return { kind: "special_missing", value: null };
+    }
+    if (label.value === null) {
+      return label.kind === "special" ? { kind: "special_missing", value: null } : { kind: "unmapped", value: null, raw };
+    }
     const value = label.reverse ? reverseValue(label.value, scale) : label.value;
     return {
       kind: label.kind === "special" ? "special_scored" : "valid",
       value,
     };
   }
+  if (isBuiltInMissingCode(raw)) return { kind: "special_missing", value: null };
 
-  if (BUILT_IN_NUMERIC_MISSING_CODES.has(normalized)) {
-    return { kind: "special_missing", value: null };
-  }
-  if (BUILT_IN_SPECIAL_WORDS.has(normalized)) {
-    return { kind: "special_missing", value: null };
-  }
-
-  const numeric = typeof raw === "number" ? raw : parseNumeric(normalized);
+  const numeric = typeof raw === "number" ? raw : parseNumeric(text.trim());
   if (numeric === null) return { kind: "unmapped", value: null, raw };
   if (numeric < scale.min || numeric > scale.max) {
     return {

@@ -64,9 +64,11 @@ export interface ResponseScale {
   scale_type: 'numeric' | 'categorical';
   min_value: number | null;
   max_value: number | null;
-  label_map: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+  label_map: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean; notScored?: boolean; aliasOf?: string; manual?: boolean; manualLabel?: boolean }[];
   confirmed?: boolean;
   range_source?: 'detected' | 'manual' | 'preset';
+  label_source?: 'detected' | 'preset' | 'manual';
+  preset_name?: string;
   base_min?: number | null;
   base_max?: number | null;
   out_of_range_decisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
@@ -118,11 +120,13 @@ export interface TemplateDefinition {
     scaleType: 'numeric' | 'categorical';
     minValue: number | null;
     maxValue: number | null;
-    labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+    labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean; notScored?: boolean; aliasOf?: string; manual?: boolean; manualLabel?: boolean }[];
     flipped?: boolean;
     startsAtZero?: boolean;
     confirmed?: boolean;
     rangeSource?: 'detected' | 'manual' | 'preset';
+    labelSource?: 'detected' | 'preset' | 'manual';
+    presetName?: string;
     baseMin?: number | null;
     baseMax?: number | null;
     outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;

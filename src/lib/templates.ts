@@ -25,11 +25,13 @@ export interface SubscaleStateLike {
   scaleType: 'numeric' | 'categorical';
   minValue: number | null;
   maxValue: number | null;
-  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+  labelMap: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean; notScored?: boolean; aliasOf?: string; manual?: boolean; manualLabel?: boolean }[];
   flipped?: boolean;
   startsAtZero?: boolean;
   confirmed?: boolean;
   rangeSource?: 'detected' | 'manual' | 'preset';
+  labelSource?: 'detected' | 'preset' | 'manual';
+  presetName?: string;
   baseMin?: number | null;
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
@@ -125,6 +127,8 @@ export function buildTemplateDefinition(
       labelMap: s.labelMap,
       confirmed: s.confirmed === true,
       rangeSource: s.rangeSource,
+      labelSource: s.labelSource,
+      presetName: s.presetName,
       baseMin: s.baseMin,
       baseMax: s.baseMax,
       outOfRangeDecisions: s.outOfRangeDecisions,

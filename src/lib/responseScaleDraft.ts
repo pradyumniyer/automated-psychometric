@@ -10,7 +10,8 @@ export function commitScaleRangeDraft(
 ): { range: CommittedRange; changed: boolean } {
   const min = Number(minText);
   const max = Number(maxText);
-  if (!/^-?\d+$/.test(minText) || !/^-?\d+$/.test(maxText) || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min >= max) {
+  const numberPattern = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+  if (!numberPattern.test(minText.trim()) || !numberPattern.test(maxText.trim()) || !Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
     return { range: committed, changed: false };
   }
   return { range: { min, max }, changed: min !== committed.min || max !== committed.max };

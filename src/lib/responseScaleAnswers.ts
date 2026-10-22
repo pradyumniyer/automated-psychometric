@@ -1,4 +1,11 @@
-import { BUILT_IN_MISSING_CODES, normalizeResponseText, type ResponseScaleLabelSetting } from '../scientific/responseScales';
+import {
+  isBuiltInMissingCode,
+  matchResponsePreset,
+  normalizeResponseText,
+  presetLabelForText,
+  type ResponseScaleLabelSetting,
+} from '../scientific/responseScales';
+import type { LikertPreset } from '../scientific/detection';
 
 export type ResponseMode = 'numeric' | 'word' | 'continuous' | 'demographic';
 export type AnswerRowKind = 'scale' | 'special' | 'out_of_range' | 'unknown';
@@ -13,7 +20,14 @@ export interface AnswerTableInput {
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
   displayIds?: string[];
-  preset?: { name: string; labels: { label: string; value: number }[] };
+  excludedRows?: Set<number>;
+  preset?: { name: string; labels: { label: string; value: number; aliases?: string[] }[] };
+}
+
+export interface AnswerCellRef {
+  column: string;
+  rowIndex: number;
+  displayId?: string;
 }
 
 export interface AnswerTableRow {
@@ -25,7 +39,13 @@ export interface AnswerTableRow {
   grey: boolean;
   reversed: boolean;
   decision?: '' | 'missing' | 'widen';
-  cells: { column: string; rowIndex: number; displayId?: string }[];
+  cells: AnswerCellRef[];
+  excludedOnly?: boolean;
+  suggestion?: string;
+  manual?: boolean;
+  manualLabel?: boolean;
+  notScored?: boolean;
+  aliasOf?: string;
 }
 
 export interface AnswerTableResult {
@@ -33,9 +53,14 @@ export interface AnswerTableResult {
   rows: AnswerTableRow[];
   range: { min: number; max: number } | null;
   presetName?: string;
+  hasDifferentPresets?: boolean;
 }
 
-const specialWords = new Set(BUILT_IN_MISSING_CODES.map(normalizeResponseText));
+export interface PendingResponseAnswer {
+  subscaleId: string;
+  subscaleName: string;
+  answer: AnswerTableRow;
+}
 
 function numberValue(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -44,16 +69,12 @@ function numberValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isSpecial(value: unknown): boolean {
-  return typeof value === 'string' && specialWords.has(normalizeResponseText(value));
-}
-
 function isBlank(value: unknown): boolean {
   return value == null || (typeof value === 'string' && value.trim() === '');
 }
 
 export function detectResponseMode(values: unknown[]): ResponseMode {
-  const nonBlank = values.filter((value) => !isBlank(value) && !isSpecial(value));
+  const nonBlank = values.filter((value) => !isBlank(value) && !isBuiltInMissingCode(value));
   const textValues = nonBlank.filter((value) => numberValue(value) === null);
   const distinctText = new Set(textValues.map((value) => normalizeResponseText(String(value))));
   if (distinctText.size > 15) return 'demographic';
@@ -64,89 +85,181 @@ export function detectResponseMode(values: unknown[]): ResponseMode {
   return textValues.length >= nonBlank.length / 2 ? 'word' : 'numeric';
 }
 
-function displayAnswer(value: string, min: number | null, max: number | null, kind: AnswerRowKind): string {
+function resolveLabelValue(label: ResponseScaleLabelSetting | undefined, labels: ResponseScaleLabelSetting[], seen = new Set<string>()): number | null {
+  if (!label || label.notScored) return null;
+  if (!label.aliasOf) return label.value;
+  const key = normalizeResponseText(label.label);
+  if (seen.has(key)) return null;
+  seen.add(key);
+  const target = labels.find((entry) => normalizeResponseText(entry.label) === normalizeResponseText(label.aliasOf!));
+  return resolveLabelValue(target, labels, seen);
+}
+
+function levenshtein(left: string, right: string): number {
+  const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = row[0];
+    row[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const above = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return row[right.length];
+}
+
+function nearLabel(answer: string, labels: string[]): string | undefined {
+  const normalized = normalizeResponseText(answer).replace(/\s+/g, '');
+  if (normalized.length < 4) return undefined;
+  const maxDistance = normalized.length >= 8 ? 2 : normalized.length >= 4 ? 1 : 0;
+  return labels.find((candidate) => {
+    const other = normalizeResponseText(candidate).replace(/\s+/g, '');
+    return other !== normalized && other.length >= 4 && levenshtein(normalized, other) <= maxDistance;
+  });
+}
+
+function makeDisplayAnswer(value: string, min: number | null, max: number | null, kind: AnswerRowKind): string {
   return kind === 'out_of_range' && min !== null && max !== null
     ? `${value} (outside ${min} to ${max})`
     : value;
 }
 
 export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
-  const cellsByKey = new Map<string, AnswerTableRow>();
   const values = input.columns.flatMap((column) => input.rows.map((row) => row[column]));
   const mode = detectResponseMode(values);
-  const labelByKey = new Map(input.labels.map((label) => [normalizeResponseText(label.label), label]));
-  const presetValueByKey = new Map(input.preset?.labels.map((label) => [normalizeResponseText(label.label), label.value]) ?? []);
+  const labelsByKey = new Map(input.labels.map((label) => [normalizeResponseText(label.label), label]));
+  const cellsByKey = new Map<string, AnswerTableRow>();
+  const includedFound = new Map<string, number>();
   const add = (rawAnswer: string, kind: AnswerRowKind, column: string, rowIndex: number) => {
-    const label = labelByKey.get(normalizeResponseText(rawAnswer));
     const key = `${kind}:${normalizeResponseText(rawAnswer)}`;
+    const label = labelsByKey.get(normalizeResponseText(rawAnswer));
     const existing = cellsByKey.get(key);
+    const included = !input.excludedRows?.has(rowIndex);
     if (existing) {
       existing.found += 1;
       existing.cells.push({ column, rowIndex, displayId: input.displayIds?.[rowIndex] });
+      if (included) includedFound.set(key, (includedFound.get(key) ?? 0) + 1);
       return;
     }
-    const countsAs = label?.value ?? presetValueByKey.get(normalizeResponseText(rawAnswer)) ?? null;
+    const countsAs = resolveLabelValue(label, input.labels);
     const savedDecision = input.outOfRangeDecisions?.[rawAnswer];
-    const isUnreviewed = (kind === 'unknown' || kind === 'out_of_range') && countsAs === null
+    const noNumber = countsAs === null && !label?.notScored;
+    const pendingWord = kind === 'scale' && noNumber;
+    const pendingNumeric = (kind === 'unknown' || kind === 'out_of_range') && noNumber
       && savedDecision?.action !== 'widen' && savedDecision?.reviewed !== true;
+    const review = included && (pendingWord || pendingNumeric);
+    const cell = { column, rowIndex, displayId: input.displayIds?.[rowIndex] };
     cellsByKey.set(key, {
-      answer: displayAnswer(rawAnswer, kind === 'out_of_range' ? (input.baseMin ?? input.min) : input.min,
+      answer: makeDisplayAnswer(rawAnswer, kind === 'out_of_range' ? (input.baseMin ?? input.min) : input.min,
         kind === 'out_of_range' ? (input.baseMax ?? input.max) : input.max, kind),
       found: 1,
       kind,
       countsAs,
-      review: isUnreviewed,
-      grey: kind === 'special',
+      review,
+      grey: (kind === 'special' && countsAs === null) || label?.notScored === true || !included,
       reversed: false,
-      decision: savedDecision?.action ?? (isUnreviewed ? '' : 'missing'),
-      cells: [{ column, rowIndex, displayId: input.displayIds?.[rowIndex] }],
+      decision: savedDecision?.action ?? (label?.notScored ? 'missing' : pendingWord || pendingNumeric ? '' : 'missing'),
+      cells: [cell],
+      manual: label?.manual,
+      manualLabel: label?.manualLabel,
+      notScored: label?.notScored,
+      aliasOf: label?.aliasOf,
     });
+    includedFound.set(key, included ? 1 : 0);
   };
 
   input.rows.forEach((row, rowIndex) => input.columns.forEach((column) => {
     const raw = row[column];
     if (isBlank(raw)) return;
     const answer = String(raw).trim();
-    if (isSpecial(raw)) return add(answer, 'special', column, rowIndex);
+    if (isBuiltInMissingCode(raw)) return add(answer, 'special', column, rowIndex);
     const number = numberValue(raw);
     if (number !== null) {
       const baseMin = input.baseMin ?? input.min;
       const baseMax = input.baseMax ?? input.max;
-      if (baseMin !== null && baseMax !== null && (number < baseMin || number > baseMax)) {
-        return add(String(number), 'out_of_range', column, rowIndex);
-      }
+      if (baseMin !== null && baseMax !== null && (number < baseMin || number > baseMax)) return add(String(number), 'out_of_range', column, rowIndex);
       return;
     }
     if (mode === 'word') return add(answer, 'scale', column, rowIndex);
     return add(answer, 'unknown', column, rowIndex);
   }));
 
-  if (mode === 'word' && input.preset) {
-    for (const presetLabel of input.preset.labels) {
-      const key = `scale:${normalizeResponseText(presetLabel.label)}`;
-      if (!cellsByKey.has(key)) {
-        const mapped = labelByKey.get(normalizeResponseText(presetLabel.label));
-        cellsByKey.set(key, {
-          answer: presetLabel.label, found: 0, kind: 'scale',
-          countsAs: mapped?.value ?? presetLabel.value, review: mapped?.value == null,
-          grey: true, reversed: false, cells: [],
-        });
-      }
+  for (const label of input.labels) {
+    const kind = label.kind ?? (label.value === null ? 'special' : 'scale');
+    if (kind !== 'scale') continue;
+    const key = `scale:${normalizeResponseText(label.label)}`;
+    if (cellsByKey.has(key)) continue;
+    cellsByKey.set(key, {
+      answer: label.label, found: 0, kind: 'scale', countsAs: resolveLabelValue(label, input.labels),
+      review: false, grey: true, reversed: false, decision: 'missing', cells: [], manual: label.manual, notScored: label.notScored,
+      aliasOf: label.aliasOf,
+      manualLabel: label.manualLabel,
+    });
+    includedFound.set(key, 0);
+  }
+
+  const keys = [...cellsByKey.keys()];
+  for (const key of keys) {
+    const row = cellsByKey.get(key)!;
+    row.excludedOnly = row.found > 0 && (includedFound.get(key) ?? 0) === 0;
+    if (row.excludedOnly) {
+      row.review = false;
+      row.grey = true;
     }
   }
-  const ordered = [...cellsByKey.values()];
-  if (mode === 'word' && input.preset) {
-    const order = new Map(input.preset.labels.map((label, index) => [normalizeResponseText(label.label), index]));
-    ordered.sort((a, b) => (order.get(normalizeResponseText(a.answer)) ?? 999) - (order.get(normalizeResponseText(b.answer)) ?? 999));
+
+  const scaleRows = [...cellsByKey.values()].filter((row) => row.kind === 'scale');
+  for (const row of scaleRows) if (row.review) {
+    const suggestion = nearLabel(row.answer, scaleRows.filter((candidate) => candidate !== row && candidate.kind === 'scale').map((candidate) => candidate.answer));
+    if (suggestion) row.suggestion = suggestion;
   }
+
+  const preset = input.preset as LikertPreset | undefined;
+  const presetIndex = (answer: string) => preset ? presetLabelForText(preset, answer)?.value ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+  const ordered = [...cellsByKey.values()];
+  ordered.sort((a, b) => {
+    const aSpecial = a.kind === 'special' ? 1 : 0;
+    const bSpecial = b.kind === 'special' ? 1 : 0;
+    if (aSpecial !== bSpecial) return aSpecial - bSpecial;
+    if (preset) {
+      const aIndex = presetIndex(a.answer);
+      const bIndex = presetIndex(b.answer);
+      if (aIndex !== bIndex) return aIndex - bIndex;
+    }
+    if (a.kind === 'scale' && b.kind === 'scale' && a.found !== b.found) return b.found - a.found;
+    return 0;
+  });
+  const mappedWordValues = input.labels.filter((label) => (label.kind ?? 'scale') === 'scale')
+    .map((label) => resolveLabelValue(label, input.labels)).filter((value): value is number => value !== null && Number.isFinite(value));
   return {
     mode,
     rows: ordered,
-    range: mode === 'word' && input.preset
-      ? { min: Math.min(...input.preset.labels.map((label) => label.value)), max: Math.max(...input.preset.labels.map((label) => label.value)) }
+    range: mode === 'word' && mappedWordValues.length > 0
+      ? { min: Math.min(...mappedWordValues), max: Math.max(...mappedWordValues) }
       : input.min !== null && input.max !== null ? { min: input.min, max: input.max } : null,
     presetName: input.preset?.name,
   };
+}
+
+export function collectPendingResponseAnswers(
+  subscales: { id: string; name: string; items: { column: string }[]; minValue: number | null; maxValue: number | null; baseMin?: number | null; baseMax?: number | null; labelMap: ResponseScaleLabelSetting[]; outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }> }[],
+  rows: Record<string, unknown>[],
+  displayIds: string[],
+  excludedRows: Set<number>,
+): PendingResponseAnswer[] {
+  return subscales.filter((subscale) => subscale.items.length > 0).flatMap((subscale) => {
+    const columns = subscale.items.map((item) => item.column);
+    const textAnswers = columns.flatMap((column) => rows.map((row) => row[column]))
+      .filter((value) => typeof value === 'string' && value.trim() !== '' && Number.isNaN(Number(value)));
+    const preset = matchResponsePreset(textAnswers).preset;
+    const table = buildAnswerTable({
+      rows, columns, min: subscale.minValue, max: subscale.maxValue, baseMin: subscale.baseMin, baseMax: subscale.baseMax,
+      labels: subscale.labelMap, outOfRangeDecisions: subscale.outOfRangeDecisions, displayIds, excludedRows,
+      preset: preset ? { name: preset.name, labels: preset.labels } : undefined,
+    });
+    return table.rows.filter((answer) => answer.review).map((answer) => ({ subscaleId: subscale.id, subscaleName: subscale.name, answer }));
+  });
 }
 
 export function countReviewAnswers(rows: Pick<AnswerTableRow, 'review'>[]): number {

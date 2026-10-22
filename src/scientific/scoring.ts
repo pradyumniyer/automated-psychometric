@@ -4,10 +4,12 @@ export interface SubscaleItemConfig { column: string; order: number; reverse: bo
 export interface ResponseScaleConfig {
   scaleType: 'numeric' | 'categorical';
   minValue?: number; maxValue?: number;
-  labelMap?: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean }[];
+  labelMap?: { label: string; value: number | null; kind?: 'scale' | 'special'; reverse?: boolean; notScored?: boolean; aliasOf?: string; manual?: boolean; manualLabel?: boolean }[];
   allowedNonresponse?: string[];
   confirmed?: boolean;
   rangeSource?: 'detected' | 'manual' | 'preset';
+  labelSource?: 'detected' | 'preset' | 'manual';
+  presetName?: string;
   baseMin?: number | null;
   baseMax?: number | null;
   outOfRangeDecisions?: Record<string, { action: 'missing' | 'widen'; reviewed: boolean }>;
@@ -37,6 +39,7 @@ import type { ScoreOutput } from '@/types/domain';
 import {
   normalizeResponseText,
   resolveResponse,
+  seedResponseScale,
   type ResponseScaleV2,
   detectConventionalRange,
 } from './responseScales';
@@ -98,10 +101,12 @@ export function responseScaleRange(scale: ResponseScaleConfig): ScaleRange {
     return { min: scale.minValue!, max: scale.maxValue! };
   }
   if (scale.labelMap?.length) {
-    const values = scale.labelMap.map((entry) => entry.value).filter((value): value is number => value !== null);
-    if (values.every(Number.isFinite)) {
+    const scaleEntries = scale.labelMap.filter((entry) => (entry.kind ?? 'scale') === 'scale' && !entry.notScored);
+    const values = scaleEntries.map((entry) => entry.value).filter((value): value is number => value !== null && Number.isFinite(value));
+    if (values.length > 0) {
       return { min: Math.min(...values), max: Math.max(...values) };
     }
+    if (scale.labelMap.every((entry) => entry.kind === 'special' || entry.notScored)) return { min: 0, max: 0 };
   }
   throw new Error('Set the response scale min/max before scoring.');
 }
@@ -110,7 +115,7 @@ function scaleSignature(scale: ResponseScaleConfig): string {
   return JSON.stringify({
     scaleType: scale.scaleType,
     range: responseScaleRange(scale),
-    labels: scale.labelMap?.map(({ label, value, kind, reverse }) => [label.trim().toLowerCase(), value, kind, reverse]).sort(),
+    labels: scale.labelMap?.map(({ label, value, kind, reverse, notScored, aliasOf, manual, manualLabel }) => [normalizeResponseText(label), value, kind, reverse, notScored, aliasOf ? normalizeResponseText(aliasOf) : undefined, manual, manualLabel]).sort(),
     allowed: scale.allowedNonresponse?.map((value) => value.trim().toLowerCase()).sort(),
   });
 }
@@ -121,7 +126,7 @@ function toResolverScale(
   allowedNonresponse: Set<string>,
 ): ResponseScaleV2 {
   const labels = [
-    ...(scale.labelMap ?? []).map((entry) => ({ text: entry.label, value: entry.value, kind: entry.kind ?? (entry.value === null ? 'special' as const : 'scale' as const), reverse: entry.reverse })),
+    ...(scale.labelMap ?? []).map((entry) => ({ text: entry.label, value: entry.value, kind: entry.kind ?? (entry.value === null ? 'scale' as const : 'scale' as const), reverse: entry.reverse, notScored: entry.notScored, aliasOf: entry.aliasOf, manual: entry.manual, manualLabel: entry.manualLabel })),
     ...[...allowedNonresponse].map((text) => ({ text, value: null, kind: 'special' as const })),
   ];
   return {
@@ -382,7 +387,9 @@ export function scoreDataset(
             }) ? 'integer' as const : 'continuous' as const,
         };
       })();
-  if (overall.enabled && selectedSubscales.length >= 2) {
+  const hasOverallOutput = overall.enabled && (selectedSubscales.length >= 2
+    || (selectedSubscales.length === 1 && selectedSubscales[0].id === AUTOMATIC_SUBSCALE_ID));
+  if (hasOverallOutput) {
     headers.push('Overall Scale Score');
     if (overallBands?.length) headers.push('Overall Scale Interpretation');
   }
@@ -469,7 +476,7 @@ export function scoreDataset(
     outputRows.push(outRow);
   }
 
-  if (overall.enabled && selectedSubscales.length >= 2) {
+  if (hasOverallOutput) {
     const flippedIds = new Set(overall.flippedSubscaleIds || []);
     for (let rowIndex = 0; rowIndex < rawRows.length; rowIndex++) {
       let score: number | null = null;
@@ -536,7 +543,7 @@ export function scoreDataset(
     subscaleScores,
     scaleScores,
     interpretationLabels,
-    overallScaleScore: overall.enabled && selectedSubscales.length >= 2 ? overallScores : undefined,
+    overallScaleScore: hasOverallOutput ? overallScores : undefined,
     rowIds,
     normalizedMatrix,
     excludedRowIndices,
@@ -583,18 +590,20 @@ export function buildAutoScale(
         maxValue: undefined,
         uniqueValues: [...new Set(observedValues)],
       };
+  const seededLabels = seedResponseScale(rows, itemColumns);
   return {
     id: AUTOMATIC_SUBSCALE_ID,
     name: 'Overall scale',
     items: itemColumns.map((column, order) => ({ column, order, reverse: false })),
     scoringMethod: 'sum',
     responseScale: {
-      scaleType: detected.scaleType,
-      minValue: detected.minValue ?? undefined,
-      maxValue: detected.maxValue ?? undefined,
-      labelMap: detected.scaleType === 'categorical'
-        ? detected.uniqueValues.map((label, index) => ({ label, value: index + 1 }))
-        : [],
+      scaleType: 'numeric',
+      minValue: detected.scaleType === 'numeric' ? detected.minValue : seededLabels.minValue ?? undefined,
+      maxValue: detected.scaleType === 'numeric' ? detected.maxValue : seededLabels.maxValue ?? undefined,
+      labelMap: seededLabels.labelMap,
+      rangeSource: detected.scaleType === 'numeric' ? 'detected' : seededLabels.rangeSource,
+      labelSource: seededLabels.labelSource,
+      presetName: seededLabels.presetName,
       confirmed: false,
     },
   };
