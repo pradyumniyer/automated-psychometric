@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import React from 'react';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigScreen } from '../src/components/ConfigScreen';
 import { db } from '../src/storage/db';
@@ -112,6 +112,53 @@ describe('word response scales on the real ConfigScreen', () => {
     expect(current.user.queryByRole('button', { name: 'Flip order' })).toBeNull();
     expect(current.user.queryByRole('button', { name: 'Start at 0' })).toBeNull();
     expect((within(answerRow(current.card, 'oui')).getByLabelText('Counts as oui') as HTMLInputElement).value).toBe('');
+    current.view.unmount();
+  });
+
+  it('T5: recognizes aliases and numbered labels on the real screen', async () => {
+    const rows = [
+      'Totally agree', 'Neither agree or disagree', 'Strongly-agree', "Don't know", 'Prefer not to answer',
+    ].map((answer, index) => ({ Respondent: `r${index + 1}`, Item: answer }));
+    const { project, dataset } = await setupRealScreen({
+      data: { headers: ['Respondent', 'Item'], rows },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'aliases', name: 'Alias scale', columns: ['Item'], reversed: [] }],
+    });
+    let current = await openResponseScaleCard(project, dataset.id, 'Alias scale');
+    expect((within(answerRow(current.card, 'Totally agree')).getByLabelText('Counts as Totally agree') as HTMLInputElement).value).toBe('5');
+    expect((within(answerRow(current.card, 'Neither agree or disagree')).getByLabelText('Counts as Neither agree or disagree') as HTMLInputElement).value).toBe('3');
+    expect((within(answerRow(current.card, 'Strongly-agree')).getByLabelText('Counts as Strongly-agree') as HTMLInputElement).value).toBe('5');
+    expect(current.card.textContent).toContain('5-pt Agreement');
+    current.view.unmount();
+
+    const numberedRows = [
+      '5 - Strongly agree', '4 - Agree', '3 - Neutral', '2 - Disagree', '1 - Strongly disagree',
+    ].map((answer, index) => ({ Respondent: `n${index + 1}`, Item: answer }));
+    const numbered = await setupRealScreen({
+      data: { headers: ['Respondent', 'Item'], rows: numberedRows },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'numbered', name: 'Numbered scale', columns: ['Item'], reversed: [] }],
+    });
+    current = await openResponseScaleCard(numbered.project, numbered.dataset.id, 'Numbered scale');
+    for (const [answer, value] of numberedRows.map((row) => [row.Item, row.Item[0]] as const)) {
+      expect((within(answerRow(current.card, answer)).getByLabelText(`Counts as ${answer}`) as HTMLInputElement).value).toBe(value);
+    }
+    current.view.unmount();
+  });
+
+  it('T7: Reset to detected restores seeded word labels after manual changes', async () => {
+    const { project, dataset } = await setupWordsA();
+    const current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    expect(current.user.queryByRole('button', { name: 'Reset to detected' })).toBeNull();
+    const maybe = answerRow(current.card, 'Maybe');
+    fireEvent.change(within(maybe).getByLabelText('Counts as Maybe'), { target: { value: '3' } });
+    expect(await screen.findByRole('button', { name: 'Reset to detected' })).toBeTruthy();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to detected' }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(current.user.queryByRole('button', { name: 'Reset to detected' })).toBeNull());
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('');
+    confirm.mockRestore();
     current.view.unmount();
   });
 
