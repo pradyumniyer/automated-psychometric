@@ -314,8 +314,7 @@ export function ConfigScreen({
     if (!currentDataset) return;
     const previous = subscaleStatesRef.current;
     const next = previous.map((subscale) => {
-      const hasPersistedAnswerDecisions = Object.keys(subscale.outOfRangeDecisions ?? {}).length > 0
-        || Boolean(subscale.outOfRangeDecision);
+      const hasPersistedAnswerDecisions = Object.keys(subscale.outOfRangeDecisions ?? {}).length > 0;
       if ((subscale.labelSource && subscale.labelSource !== 'detected')
         || (subscale.rangeSource && subscale.rangeSource !== 'detected')
         || hasPersistedAnswerDecisions
