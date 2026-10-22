@@ -242,7 +242,7 @@ describe('word response scales on the real ConfigScreen', () => {
     fireEvent.change(within(answerRow(current.card, 'Maybe')).getByRole('combobox', { name: 'Maybe action' }), { target: { value: 'not-scored' } });
     expect(current.user.getByRole('button', { name: 'Confirm range' })).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 1100));
-    let saved = await surveyConfigRepository.get(dataset.id);
+    const saved = await surveyConfigRepository.get(dataset.id);
     expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 2')?.response_scale?.label_map?.find((label) => label.label === 'Maybe')).toMatchObject({ notScored: true });
     current.view.unmount();
 
