@@ -580,7 +580,9 @@ export function ConfigScreen({
       delete nextBands[automatic.name];
       const nextBandsByOutput = { ...bandStatesByOutput };
       delete nextBandsByOutput[automatic.name];
-      const name = 'Subscale 1';
+      let nextSubscaleNumber = 1;
+      while (withoutAutomatic.some((subscale) => subscale.name === `Subscale ${nextSubscaleNumber}`)) nextSubscaleNumber += 1;
+      const name = `Subscale ${nextSubscaleNumber}`;
       const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, labelSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: 0 };
       try {
         await persistSurveyConfig({ subscales: [...withoutAutomatic, newSub], bands: nextBands, bandsByOutput: nextBandsByOutput, overallScale: null });
