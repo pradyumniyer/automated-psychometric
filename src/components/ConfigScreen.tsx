@@ -32,7 +32,7 @@ import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
 import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection';
-import { applyOutOfRangeAction, detectDifferentPresets, matchResponsePreset, seedResponseScale, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
+import { applyOutOfRangeAction, detectDifferentPresetsAcrossColumns, matchResponsePreset, seedResponseScale, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
 import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
@@ -2203,7 +2203,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           {COMMON_LIKERT_SCALES.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
         </select>
       </div>}
-      {detectDifferentPresets(textAnswers) && <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>}
+      {detectDifferentPresetsAcrossColumns(rows, itemCols) && <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>}
       {mode === 'demographic' && <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p>}
       {mode !== 'demographic' && <ResponseScaleAnswersTable rows={answerTable.rows} labels={labelMap} allowAdd={mode === 'word'}
         onSetNumber={setAnswerNumber} onChoose={chooseAnswer} onCountsAs={setAnswerAlias} onRemove={removeAnswerLabel}

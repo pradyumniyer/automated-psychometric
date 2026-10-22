@@ -538,6 +538,15 @@ export function detectDifferentPresets(values: unknown[]): boolean {
   return matchingResponsePresets(values).length > 1;
 }
 
+export function detectDifferentPresetsAcrossColumns(rows: Record<string, unknown>[], columns: string[]): boolean {
+  const matchedNames = new Set<string>();
+  for (const column of columns) {
+    const preset = matchingResponsePresets(rows.map((row) => row[column]))[0]?.preset;
+    if (preset) matchedNames.add(preset.name);
+  }
+  return matchedNames.size > 1;
+}
+
 export function resolveResponse(raw: unknown, scale: ResponseScaleV2): ResolvedResponse {
   if (raw == null) return { kind: "blank", value: null };
   if (typeof raw !== "string" && (typeof raw !== "number" || !Number.isFinite(raw))) {

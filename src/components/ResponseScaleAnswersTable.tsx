@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { normalizeResponseText, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
 import type { AnswerTableRow } from '@/lib/responseScaleAnswers';
 
@@ -27,6 +27,24 @@ export function ResponseScaleAnswersTable({ rows, labels, allowAdd = true, onSet
   const [newLabel, setNewLabel] = useState('');
   const [newValue, setNewValue] = useState('');
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setNumberDrafts((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const row of rows) {
+        const key = rowKey(row);
+        const draft = next[key];
+        if (draft === undefined) continue;
+        const draftValue = draft.trim() === '' ? null : Number(draft);
+        if (draftValue !== row.countsAs) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [rows]);
 
   const rowKey = (row: AnswerTableRow) => `${row.kind}:${normalizeResponseText(row.answer)}`;
   const commitNumber = (row: AnswerTableRow, key: string) => {
