@@ -242,6 +242,33 @@ describe('word response scales on the real ConfigScreen', () => {
     finalView.unmount();
   }, 20000);
 
+  it('T14: a displayed manual word number survives save, scoring, and reload', async () => {
+    const { project, dataset } = await setupWordsA();
+    let current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    const maybe = answerRow(current.card, 'Maybe');
+    fireEvent.change(within(maybe).getByLabelText('Counts as Maybe'), { target: { value: '3' } });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    let saved = await surveyConfigRepository.get(dataset.id);
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('3');
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 2')?.response_scale?.label_map?.find((label) => label.label === 'Maybe')?.value).toBe(3);
+    current.view.unmount();
+
+    const scoring = render(React.createElement(ConfigScreen, screenProps(project, dataset.id)));
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    await screen.findByText(/Scoring complete/);
+    const result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
+    const respondent = result.rows.find((row) => Object.values(row).includes('W12'));
+    expect(respondent).toMatchObject({ 'Subscale 1 Sum': 4, 'Subscale 2 Sum': 7, 'Overall Scale Score': 11 });
+    scoring.unmount();
+
+    current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    expect((within(answerRow(current.card, 'Maybe')).getByLabelText('Counts as Maybe') as HTMLInputElement).value).toBe('3');
+    saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 2')?.response_scale?.label_map?.find((label) => label.label === 'Maybe')?.value).toBe(3);
+    current.view.unmount();
+  }, 20000);
+
   it('T10: an immediate unmount flushes a range edit', async () => {
     const { project, dataset } = await setupRealScreen();
     let current = await openResponseScaleCard(project, dataset.id, 'Subscale 1');
