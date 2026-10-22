@@ -199,6 +199,49 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T6: reverse-scored word subscales require confirmation and use the saved mapping', async () => {
+    const reversedScales = [
+      { id: 's1', name: 'Subscale 1', columns: ['Q1', 'Q2'], reversed: ['Q2'] },
+      { id: 's2', name: 'Subscale 2', columns: ['Q3', 'Q4', 'Q5'], reversed: ['Q4'] },
+    ];
+    const { project, dataset } = await setupRealScreen({ fileName: 'fixture_words.csv', scales: reversedScales, overall: true });
+    let current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
+    fireEvent.change(within(answerRow(current.card, 'Maybe')).getByRole('combobox', { name: 'Maybe action' }), { target: { value: 'not-scored' } });
+    expect(current.user.getByRole('button', { name: 'Confirm range' })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    let saved = await surveyConfigRepository.get(dataset.id);
+    expect(saved?.subscales.find((subscale) => subscale.name === 'Subscale 2')?.response_scale?.label_map?.find((label) => label.label === 'Maybe')).toMatchObject({ notScored: true });
+    current.view.unmount();
+
+    const scoring = render(React.createElement(ConfigScreen, screenProps(project, dataset.id)));
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    expect(await screen.findByText(/Confirm the range before reverse-scoring/)).toBeTruthy();
+    scoring.unmount();
+
+    for (const name of ['Subscale 1', 'Subscale 2']) {
+      current = await openResponseScaleCard(project, dataset.id, name);
+      fireEvent.click(current.user.getByRole('button', { name: 'Confirm range' }));
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      const saved = await surveyConfigRepository.get(dataset.id);
+      expect(saved?.subscales.find((subscale) => subscale.name === name)?.response_scale?.confirmed).toBe(true);
+      current.view.unmount();
+    }
+    const finalView = render(React.createElement(ConfigScreen, screenProps(project, dataset.id)));
+    fireEvent.click(await screen.findByText('Scoring'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run Scoring' }));
+    await screen.findByText(/Scoring complete/);
+    const result = (await scoreRepository.getLatest(dataset.id))!.payload.result as { rows: Record<string, unknown>[] };
+    const byRespondent = new Map(result.rows.map((row) => [Object.values(row).find((value) => typeof value === 'string' && /^W\d+$/.test(value)) as string, row]));
+    expect(byRespondent.get('W01')).toMatchObject({ 'Subscale 1 Sum': 4, 'Subscale 2 Sum': 11, 'Overall Scale Score': 15 });
+    expect(byRespondent.get('W02')).toMatchObject({ 'Subscale 1 Sum': 4, 'Subscale 2 Sum': 4, 'Overall Scale Score': 8 });
+    expect(byRespondent.get('W04')).toMatchObject({ 'Subscale 1 Sum': 7, 'Subscale 2 Sum': 3, 'Overall Scale Score': 10 });
+    expect(byRespondent.get('W06')).toMatchObject({ 'Subscale 1 Sum': 7, 'Subscale 2 Sum': 12, 'Overall Scale Score': 19 });
+    expect(byRespondent.get('W03')).toMatchObject({ 'Subscale 1 Sum': null, 'Overall Scale Score': null });
+    expect(byRespondent.get('W12')).toMatchObject({ 'Subscale 2 Sum': null, 'Overall Scale Score': null });
+    finalView.unmount();
+  }, 20000);
+
   it('T10: an immediate unmount flushes a range edit', async () => {
     const { project, dataset } = await setupRealScreen();
     let current = await openResponseScaleCard(project, dataset.id, 'Subscale 1');
