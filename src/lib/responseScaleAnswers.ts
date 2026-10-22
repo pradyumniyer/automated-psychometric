@@ -128,7 +128,14 @@ function makeDisplayAnswer(value: string, min: number | null, max: number | null
 export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
   const values = input.columns.flatMap((column) => input.rows.map((row) => row[column]));
   const mode = detectResponseMode(values);
-  const labelsByKey = new Map(input.labels.map((label) => [normalizeResponseText(label.label), label]));
+  const preset = input.preset as LikertPreset | undefined;
+  const tableLabels = [...input.labels];
+  for (const point of preset?.labels ?? []) {
+    if (!tableLabels.some((label) => normalizeResponseText(label.label) === normalizeResponseText(point.label))) {
+      tableLabels.push({ label: point.label, value: point.value, kind: 'scale' });
+    }
+  }
+  const labelsByKey = new Map(tableLabels.map((label) => [normalizeResponseText(label.label), label]));
   const cellsByKey = new Map<string, AnswerTableRow>();
   const includedFound = new Map<string, number>();
   const observedNumericKeys = new Set<string>();
@@ -187,7 +194,7 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     return add(answer, 'unknown', column, rowIndex);
   }));
 
-  for (const label of input.labels) {
+  for (const label of tableLabels) {
     const kind = label.kind ?? (label.value === null ? 'special' : 'scale');
     if (kind !== 'scale') continue;
     const normalizedLabel = normalizeResponseText(label.label);
@@ -222,7 +229,6 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     if (suggestion) row.suggestion = suggestion;
   }
 
-  const preset = input.preset as LikertPreset | undefined;
   const presetIndex = (answer: string) => preset ? presetLabelForText(preset, answer)?.value ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
   const ordered = [...cellsByKey.values()];
   ordered.sort((a, b) => {
@@ -237,7 +243,7 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     if (a.kind === 'scale' && b.kind === 'scale' && a.found !== b.found) return b.found - a.found;
     return 0;
   });
-  const mappedWordValues = input.labels.filter((label) => (label.kind ?? 'scale') === 'scale')
+  const mappedWordValues = tableLabels.filter((label) => (label.kind ?? 'scale') === 'scale')
     .map((label) => resolveLabelValue(label, input.labels)).filter((value): value is number => value !== null && Number.isFinite(value));
   return {
     mode,

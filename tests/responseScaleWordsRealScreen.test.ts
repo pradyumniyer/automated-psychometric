@@ -48,6 +48,27 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T1b: shows an unused preset word with zero found on the real screen', async () => {
+    const { project, dataset } = await setupRealScreen({
+      data: {
+        headers: ['Respondent', 'Item'],
+        rows: [
+          { Respondent: 'r1', Item: 'Disagree' },
+          { Respondent: 'r2', Item: 'Neither agree nor disagree' },
+          { Respondent: 'r3', Item: 'Agree' },
+          { Respondent: 'r4', Item: 'Strongly agree' },
+        ],
+      },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'agreement', name: 'Agreement', columns: ['Item'], reversed: [] }],
+    });
+    const current = await openResponseScaleCard(project, dataset.id, 'Agreement');
+    const unused = answerRow(current.card, 'Strongly Disagree');
+    expect(unused.cells[0].textContent?.trim()).toBe('Strongly Disagree');
+    expect(unused.cells[1].textContent?.trim()).toBe('0');
+    current.view.unmount();
+  });
+
   it('T2: automatic Overall waits for Maybe and scores with the saved word mapping after Not scored', async () => {
     const { project, dataset } = await setupRealScreen({ fileName: 'fixture_words.csv', scales: [], overall: true });
     let current = await openResponseScaleCard(project, dataset.id, 'Overall scale');
