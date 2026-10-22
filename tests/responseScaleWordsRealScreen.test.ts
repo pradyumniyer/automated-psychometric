@@ -129,6 +129,7 @@ describe('word response scales on the real ConfigScreen', () => {
     expect((within(answerRow(current.card, 'Neither agree or disagree')).getByLabelText('Counts as Neither agree or disagree') as HTMLInputElement).value).toBe('3');
     expect((within(answerRow(current.card, 'Strongly-agree')).getByLabelText('Counts as Strongly-agree') as HTMLInputElement).value).toBe('5');
     expect(current.card.textContent).toContain('5-pt Agreement');
+    expect(current.card.textContent).not.toContain('These items look like two different scales');
     current.view.unmount();
 
     const numberedRows = [
@@ -143,6 +144,20 @@ describe('word response scales on the real ConfigScreen', () => {
     for (const [answer, value] of numberedRows.map((row) => [row.Item, row.Item[0]] as const)) {
       expect((within(answerRow(current.card, answer)).getByLabelText(`Counts as ${answer}`) as HTMLInputElement).value).toBe(value);
     }
+    current.view.unmount();
+  });
+
+  it('T11: warns when different item columns match different response scales', async () => {
+    const agreement = ['Strongly disagree', 'Disagree', 'Neither agree nor disagree', 'Agree', 'Strongly agree'];
+    const frequency = ['Never', 'Rarely', 'Sometimes', 'Often', 'Always'];
+    const rows = agreement.map((answer, index) => ({ Respondent: `r${index + 1}`, Agreement: answer, Frequency: frequency[index] }));
+    const { project, dataset } = await setupRealScreen({
+      data: { headers: ['Respondent', 'Agreement', 'Frequency'], rows },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'mixed', name: 'Mixed scale', columns: ['Agreement', 'Frequency'], reversed: [] }],
+    });
+    const current = await openResponseScaleCard(project, dataset.id, 'Mixed scale');
+    expect(current.card.textContent).toContain('These items look like two different scales. Consider separate subscales.');
     current.view.unmount();
   });
 
