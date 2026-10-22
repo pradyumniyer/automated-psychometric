@@ -1,6 +1,27 @@
-# Owner fix list (from hands-on testing, 15 Oct 2026)
+# Owner fix list (from hands-on testing; last updated 21 Oct 2026)
 
-Order = priority. These are owner-approved changes to the frozen UI (see `UI_FREEZE.md`). Each item: problem → required behavior → tests. Math stays per `scientific-spec.md`.
+Order = priority. These are owner-approved changes to the frozen UI (see `UI_FREEZE.md`). Each item: problem -> required behavior -> tests. Math stays per `scientific-spec.md`.
+
+## Status board (21 Oct 2026)
+| Item | What | State |
+|---|---|---|
+| F2, F3, F4, F5 | Unscored rows line, shared columns, reload keeps place, opaque # column | done, merged |
+| F10, F12, F14 | Scoring UI streamlining, bands for decimals, no subscales = automatic subscale | done, merged |
+| F1, F15 | Response scales v2 and answers table (numeric scales) | done on branch `p2c2-codex` (5fa8d4c); hand-tested Fixture A, B, template; merge pending |
+| F16 | Word scales v3 (display not saved, legacy numbering, uneditable words, dead link, no variants); redesigned by the owner as a labels-left / numbers-right table with preset fill, "+" and Counts as (RESPONSE_SCALES 17.2) | NEXT: prompt P2c-4 |
+| F17 | Autosave never loses an edit (flush on leave) | NEXT: in P2c-4 |
+| F7 | Normality panel and reliability section | after P2d (P2d-2) |
+| F6 | Subscale builder rework | P3a |
+| F8 | Proration control | P3b |
+| F9 | Import v2 | P4 |
+| F11 | Report rework (APA section) | later, not specced |
+| F13 | Clarity pass | C1, C2 |
+| F27, F28 | Scoring waits for decisions; card-wide Reset to detected | in P2c-4 |
+| F23 to F26 | Numbered labels ("5 - Strongly agree"), typo suggestions, notice for two scales in one subscale, drag-to-order helper | in P2c-4 (first three); helper later |
+| F18 | Preset library expansion (PHQ-9, GAD-7, PSS, BSI, PANAS, GSE) | P6 |
+| F19 | Real-world fixtures and robustness | P2e |
+| Small fixes S1 to S5 | Summary rows, Summary sheet A1, (i) tip, Overall transparency | S1 prompt ready; rest in the backlog below |
+| Cosmetic polish | Response scales card visuals | deferred by owner to an end-of-project list (see the end of this file) |
 
 ## Batch 1: correctness (F2, F3, F4, F5 first; F1 follows as Response Scales v2)
 **F1. Response Scales v2** (owner items 2-3 of the scales discussion; moved to Batch 2, a bigger step). Replaces the numeric/categorical choice: detected range plus an "other responses" table; empty number = not scored; out-of-range defaults to missing; the separate allowed non-response editor is removed (each scale card's table replaces it). Full spec: `RESPONSE_SCALES.md`, ADR 0015.
@@ -25,7 +46,7 @@ Order = priority. These are owner-approved changes to the frozen UI (see `UI_FRE
 **F9. Import v2** (item 1): see `IMPORT_DETECTION.md`.
 
 ## Not yet checked by owner
-Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
+Checked: Fixture A, Fixture B and the template apply path for numeric scales (21 Oct 2026). Not yet checked: history/undo, the rest of Data Quality, Export (other cards), Report, templates with word scales (after P2c-4).
 
 ## Batch 1b: scoring UI streamlining (owner, 17 Oct 2026, after hand-testing P1)
 **F2 correction.** The status line must list every included row with at least one missing score (any subscale score, or Overall when on), not only rows with no score at all. Fixture A: P25, P26, P29, P30. Without an ID column, show "row N" (the grid's # number), not an internal ID.
@@ -61,3 +82,53 @@ Templates, history/undo, the rest of Data Quality, Export (other cards), Report.
 **F14. No subscales = one automatic subscale** (owner, 18 Oct 2026; P2c-U). The old separate "Overall Scale" path lacked the Show toggles, bands per output, Confirm range, out-of-range decision, collapsed card and cell links. The dataset is treated as one automatic subscale ("Overall scale") that uses the normal code path; headers follow the subscale pattern; no migration of old projects.
 
 **F15. Answers table** (owner, 20 Oct 2026): one scale line and one answers table per card, presets detected automatically, Flip order and Start at 0 only in word mode; see RESPONSE_SCALES section 15 and prompt P2c-3. Mockup approved 20 Oct 2026 (`docs/mockups/response_scale_card_five_scenarios.html`); P2c-3 queued.
+
+## Cosmetic backlog for the Response scales card (owner hand test, 20 Oct 2026; DEFERRED on 21 Oct 2026 to the end-of-project polish list at the bottom of this file; original wording kept)
+1. Dropdown and option font size too small (all screens).
+2. The (i) tip text is clipped.
+3. The "or number" placeholder in the box under the dropdown is cut off.
+4. Uneven spacing between Answer, Found and Counts as.
+5. After Confirm range, show a quiet "Confirmed" text instead of the button vanishing.
+6. Remove the "Not confirmed" chip (the Confirm button, the amber status bar and the card opening itself already say it); the agent also noted the chip sits in the collapsed header rather than beside the open scale line.
+7. Word mode shows its note inside the scale line, not on the separate "Detected" line of section 15.
+
+## P2e. Robustness pass (owner request, 20 Oct 2026; runs before the first public deployment; extended on 21 Oct 2026 by F19 and F20)
+The app must handle ANY dataset, not only Fixture A. Run Fixture B (`docs/fixtures/fixture_B.csv` with `fixture_B_expected.json`: three subscales, ranges 1-5, 0-4, 1-7, reverse items in two, an item in no subscale, a blank, an N/A, an out-of-range 8) and further synthetic shapes through the whole pipeline: import, subscales, response scales, scoring, bands, data quality, export, template apply, reload. Extra shapes: 10 or more subscales, custom formulas, no ID column, duplicate IDs, an all-blank column, word scales mixed with numbers, decimals, one-item subscales, very wide files. Expected numbers are computed independently of the app. Every new prompt must also forbid fixture literals in non-test source.
+
+
+## Findings of 20-21 Oct 2026 (new items; owner hand tests plus architect probes on the real screen)
+
+**F16. Word scales v3** (owner hand test of `fixture_words.csv`, 21 Oct 2026; design in `RESPONSE_SCALES.md` section 17; prompt P2c-4). Subscale 1 = Q1+Q2, Subscale 2 = Q3+Q4+Q5, nothing reversed: nothing could be edited and the links did nothing. Architect findings (reproduced): W1 preset numbers are displayed but not saved, so every score is blank after Run Scoring; W2 legacy first-seen numbering still exists in `buildAutomaticSubscale` and the Auto button, so datasets with no subscales get silently wrong scores (W02 17 instead of 16, W03 and W05 scored instead of blank); W3 a word without a number cannot be numbered (two stale state updates, the second overwrites the first); W4 "Wrong scale? Change" is dead; W5 no word variants ("Neither agree nor disagree" does not match "Neutral"); W6 the status line blames the wrong cause and amber rows have no cell links. Expected numbers are in `RESPONSE_SCALES.md` 17.3. **Design revised by the owner (21 Oct 2026, late):** the app lists the labels found in the data on the left with empty number boxes on the right; if the labels (including variants such as "Neither agree nor disagree") match a preset the numbers are filled in, and only then do "Wrong scale? Change", Flip order and Start at 0 appear; an odd label such as "Maybe" stays blank and amber with a message and actions; all numbers stay editable; "+" adds labels. Architect refinements: a per-row "Counts as..." (fixes typos and unusual spellings without touching the data), a per-row "Not scored", detected label text is not editable (it mirrors the file) while manual labels are, scale points nobody chose are listed with "0 found" or added with "+" so reverse scoring uses the full range, Flip and Start at 0 shown only when a preset is recognised and every label has a decision, "Reset to detected", stable row order, and the raw data is never changed.
+
+**F17. Autosave loses edits** (architect probe, verified on the real screen): saves run 1 second after the last change and unmounting cancels the timer, so editing and switching screens within a second discards the edit. Fix: flush on unmount, tab or step switch, pagehide and visibilitychange (in P2c-4).
+
+**F18. Preset library expansion.** Only generic presets exist (agreement, frequency, satisfaction, quality, importance, likelihood, severity). Psychology exports use PHQ-9/GAD-7 words (0-3), Perceived Stress Scale (0-4), BSI-style (0-4), PANAS (1-5), General Self-Efficacy (1-4) and more. Add with native numbering, aliases and a native-zero flag (P6).
+
+**F27. Scoring waits for decisions** (owner, 21 Oct 2026; part of P2c-4): a row that still says "Choose…" blocks scoring for words, unknown text and out-of-range numbers alike; "Not scored" must always be available because any number would be invented data; Fixture A and Fixture B hand tests now need the decision step (the numbers do not change). Flip order and Start at 0 appear only when a preset is recognised and every label has a decision.
+**F28. Reset to detected, whole card** (owner, 21 Oct 2026; part of P2c-4): appears only when the card differs from what the app first showed; restores range, source, decisions, word numbers, Counts as, added labels, preset, Flip, Start at 0 and confirmed state (not reverse ticks, Show toggles, bands, formulas).
+**F23. Numbered labels** (architect, part of P2c-4): exports often contain "5 - Strongly agree", "(2) Disagree", "3=Neutral"; when every label carries a distinct leading number the numbers are read from the data.
+**F24. Typo suggestions** (part of P2c-4): a label that is a near-spelling of another label ("Agre") gets a one-click "Counts as Agree" suggestion; never applied silently.
+**F25. Two scales in one subscale** (part of P2c-4): message "These items look like two different scales. Consider separate subscales." (message only).
+**F26. Drag-to-order helper** (later): drag rows into order and a "Number 1 to n" button for no-preset scales.
+
+**F19. Real-world fixtures and robustness (P2e).** Fixtures so far are small, clean and hand-made (A: 30 respondents; B: 12; words: 20). Real exports are messy: Qualtrics extra header rows, Google Forms long headers, mixed numeric and word columns, duplicate or missing IDs, decimal commas, 2,000 columns, 5,000 rows, 6 respondents, 10 or more subscales, one-item subscales. Generate synthetic fixtures with independent expected values and run the whole pipeline (import to export, reload, template).
+
+**F20. Leftovers from the state-fix prompts** (agent report 21 Oct 2026, accepted as follow-up): template-apply through the real preview/confirm UI is not tested; the exhaustive short action sequences do not re-check storage and template round trips after every action or compare app scores after every sequence step; negative ranges (-3 to 3) not confirmed in the range boxes; autosave on unmount (F17). Cleaning-log rule: typed-number decisions are not logged (differs from RESPONSE_SCALES 15).
+
+**F21. Decisions still to take (owner):** (a) show again the reverse-widening explanation note under an out-of-range row (RESPONSE_SCALES 12 and 15), or drop it; (b) log typed-number decisions or not; (c) RESOLVED (owner, 21 Oct 2026, late): scoring WAITS until every flagged answer, word or number, has a decision (number, Counts as, Widen, or Not scored); waiting status bar with a Go to button and "Treat all N as not scored"; included respondents only.
+
+**F22. Range detection for small samples** (owner hand test of Fixture B, 21 Oct 2026; built): weak-end check, see `RESPONSE_SCALES.md` 16.3. Fixture B Subscale 3 = Q10-Q12 (not Q13) detects 1-7 with the 8 flagged; Confirm range never appears for a subscale without reverse items (by design).
+
+**Hand-test recipe Fixture B (corrected 21 Oct 2026).** Import `fixture_B.csv`; add subscales ONE card at a time (known builder bug with several empty cards): Subscale 1 = Q1-Q5 with Q2 and Q4 reversed; Subscale 2 = Q6-Q9 with Q8 reversed; Subscale 3 = Q10-Q12 (do NOT add Q13); leave Q13 and Age unassigned; Overall on. Expected ranges 1-5, 0-4, 1-7; Confirm only for Subscales 1 and 2; Subscale 3 shows "8 (outside 1 to 7)" with "Choose…". R01 17 / 4 / 18 / Overall 39; R02 19 / 8 / 17 / 44; R04 Subscale 3 and Overall blank; R07 Subscale 2 and Overall blank; R09 Subscale 3 and Overall blank; status line R04, R07, R09 (scoring first waits for the 8: choose Not scored, or Widen). Widen the 8: R09 Subscale 3 = 20, Overall 43, status line R04, R07.
+
+## End-of-project polish list (deferred by the owner on 21 Oct 2026: "no need to waste time on beautifying it now")
+Response scales card, from the owner's hand test of 20 Oct (E1 to E7 were attempted by the agent; the owner reports the visual problems still persist, so treat all as NOT DONE except where the DOM can be asserted):
+1. Dropdown and option font size too small (agent set text-sm; owner says still small; check actual rendered size).
+2. The (i) tip text is clipped (shared `Tooltip` in `src/components/ui.tsx`).
+3. The "or number" placeholder is cut off.
+4. Uneven spacing between Answer, Found and Counts as.
+5. After Confirm range a quiet "Confirmed" text (built, DOM-asserted; visual check pending).
+6. "Not confirmed" chip removed from the collapsed header (built, DOM-asserted).
+7. Word mode shows its note inside the scale line (built; visual check pending).
+8. Empty "Answer / Found / Counts as" header when there are no rows (fixed in the follow-up).
+Plus everything C1 and C2 will not cover. Do this list in one pass, with screenshots, shortly before the first public release.
