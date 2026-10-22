@@ -177,6 +177,39 @@ describe('word response scales on the real ConfigScreen', () => {
     current.view.unmount();
   });
 
+  it('T7b: manual word labels can extend the range, reject duplicates, edit, and remove', async () => {
+    const { project, dataset } = await setupRealScreen({
+      data: { headers: ['Respondent', 'Item'], rows: [{ Respondent: 'r1', Item: 'uno' }, { Respondent: 'r2', Item: 'dos' }, { Respondent: 'r3', Item: 'tres' }] },
+      demographicColumns: ['Respondent'],
+      scales: [{ id: 'manual-words', name: 'Manual words', columns: ['Item'], reversed: [] }],
+    });
+    const current = await openResponseScaleCard(project, dataset.id, 'Manual words');
+    for (const [answer, value] of [['uno', '1'], ['dos', '2'], ['tres', '3']]) {
+      fireEvent.change(within(answerRow(current.card, answer)).getByLabelText(`Counts as ${answer}`), { target: { value } });
+    }
+    fireEvent.click(current.user.getByRole('button', { name: '+ Add a label' }));
+    fireEvent.change(current.user.getByLabelText('New label'), { target: { value: 'Top point' } });
+    fireEvent.change(current.user.getByLabelText('New label number'), { target: { value: '4' } });
+    fireEvent.click(current.user.getByRole('button', { name: 'Add', exact: true }));
+    await waitFor(() => expect((current.user.getByLabelText('Manual words maximum') as HTMLInputElement).value).toBe('4'));
+    const topPoint = current.user.getByLabelText('Edit label Top point').closest('tr') as HTMLTableRowElement;
+    expect(topPoint.cells[1].textContent).toBe('0');
+
+    fireEvent.click(current.user.getByRole('button', { name: '+ Add a label' }));
+    fireEvent.change(current.user.getByLabelText('New label'), { target: { value: 'top POINT' } });
+    fireEvent.change(current.user.getByLabelText('New label number'), { target: { value: '5' } });
+    fireEvent.click(current.user.getByRole('button', { name: 'Add', exact: true }));
+    expect(current.user.getByRole('status').textContent).toContain('already listed');
+    fireEvent.click(current.user.getByRole('button', { name: 'Cancel' }));
+
+    fireEvent.change(current.user.getByLabelText('Edit label Top point'), { target: { value: 'Highest point' } });
+    fireEvent.blur(current.user.getByLabelText('Edit label Top point'));
+    const highestPointInput = current.user.getByLabelText('Edit label Highest point');
+    fireEvent.change(within(highestPointInput.closest('tr') as HTMLElement).getByRole('combobox', { name: 'Highest point action' }), { target: { value: 'remove' } });
+    expect(current.user.queryByLabelText('Edit label Highest point')).toBeNull();
+    current.view.unmount();
+  });
+
   it('T9: waiting links navigate to the answer cell and scoring reports unresolved respondents', async () => {
     const { project, dataset } = await setupWordsA();
     const current = await openResponseScaleCard(project, dataset.id, 'Subscale 2');
