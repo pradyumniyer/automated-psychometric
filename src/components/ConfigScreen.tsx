@@ -5,7 +5,7 @@ import {
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
-  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight, ChevronUp,
+    PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight, ChevronUp, MoreHorizontal,
 } from 'lucide-react';
 import {
   ActionHistory,
@@ -2074,6 +2074,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
   const summary = `${itemCols.length} items · ${reviewRows.length > 0 ? `${reviewRows.length} answer${reviewRows.length === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
   const [rangeDraft, setRangeDraft] = useState({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
   const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const updateScaleState = (update: (current: SubscaleState) => SubscaleState) => {
     if (onUpdateScale) { onUpdateScale(update); return; }
     const current = { id: cardId ?? name, name, items, scoringMethod, customFormula, scaleType,
@@ -2189,39 +2190,117 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-500 mb-2">
-        <span>Scale:</span>
-        <input type="text" value={rangeDraft.min} onChange={(event) => setRangeDraft((draft) => ({ ...draft, min: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} minimum`} />
-        <span>to</span>
-        <input type="text" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-14 px-1 py-1 border border-secondary-200 rounded" aria-label={`${name} maximum`} />
-        <span>{activePreset ? `${activePreset.name} (${labelSource === 'detected' ? 'detected' : 'selected'})` : rangeSource === 'manual' ? 'set by you' : mode === 'continuous' ? 'continuous' : minValue === null ? 'choose a range' : 'detected'}</span>
-        <Tooltip text="The raw data is never changed. Counts as tells scoring, Data Quality, reliability, and export how to read this answer."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip>
-        {hasReverseItems && confirmed !== true && <><button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">Confirm range</button><Tooltip text="Confirm the range before reverse-scoring items."><Info className="w-3.5 h-3.5 text-secondary-400" /></Tooltip></>}
-        {hasReverseItems && confirmed === true && <span className="inline-flex items-center gap-1 text-[11px] text-success-700"><Check className="w-3 h-3" />Confirmed</span>}
-        {activePreset && <button type="button" className="text-primary-600 hover:underline" onClick={() => setShowPresetPicker((shown) => !shown)}>Wrong scale? Change</button>}
-        {resetAvailable && <button type="button" className="text-primary-600 hover:underline" onClick={() => {
-          if (!window.confirm('Reset this card to the detected response scale?')) return;
-          updateScaleState((current) => resetResponseScaleToDetected(current, seed) as SubscaleState);
-        }}>Reset to detected</button>}
-        {mode === 'word' && activePreset && reviewRows.length === 0 && <>
-          <button type="button" className="text-primary-600 hover:underline" onClick={() => updateScaleState((current) => togglePresetFlip(current) as SubscaleState)}>Flip order</button>
-          <button type="button" className="text-primary-600 hover:underline" onClick={() => updateScaleState((current) => togglePresetStartAtZero(current) as SubscaleState)}>Start at 0</button>
-        </>}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-secondary-600 mb-3">
+        <span className="text-secondary-500">Scale</span>
+        <input type="text" value={rangeDraft.min} onChange={(event) => setRangeDraft((draft) => ({ ...draft, min: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-12 px-1 py-1 border border-secondary-200 rounded text-center" aria-label={`${name} minimum`} />
+        <span className="text-secondary-400">to</span>
+        <input type="text" value={rangeDraft.max} onChange={(event) => setRangeDraft((draft) => ({ ...draft, max: event.target.value }))} onBlur={commitRangeDraft} onKeyDown={handleRangeKeyDown} className="w-12 px-1 py-1 border border-secondary-200 rounded text-center" aria-label={`${name} maximum`} />
+        <span className="text-secondary-500">
+          {activePreset
+            ? `${activePreset.name}${labelSource === 'detected' ? ' (detected)' : ''}`
+            : rangeSource === 'manual'
+              ? 'set by you'
+              : mode === 'continuous'
+                ? 'continuous'
+                : minValue === null
+                  ? 'set from the numbers you type'
+                  : 'detected'}
+        </span>
+        <Tooltip text="The raw data is never changed. The number next to an answer tells scoring how to read it. An empty box means Not scored.">
+          <Info className="w-3.5 h-3.5 text-secondary-400" />
+        </Tooltip>
+        {hasReverseItems && confirmed !== true && (
+          <button type="button" onClick={confirmRange} className="px-2 py-1 rounded-md border border-primary-300 text-primary-700 bg-primary-50">
+            Confirm range
+          </button>
+        )}
+        {hasReverseItems && confirmed === true && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-success-700">
+            <Check className="w-3 h-3" />Confirmed
+          </span>
+        )}
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            aria-label={`${name} more actions`}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="p-1 rounded hover:bg-secondary-100 text-secondary-500"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 min-w-[11rem] rounded-md border border-secondary-200 bg-white shadow-md py-1 text-xs text-secondary-700">
+              {mode === 'word' && activePreset && reviewRows.length === 0 && (
+                <>
+                  <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { updateScaleState((current) => togglePresetFlip(current) as SubscaleState); setMenuOpen(false); }}>
+                    Flip order{flipped ? ' ✓' : ''}
+                  </button>
+                  <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { updateScaleState((current) => togglePresetStartAtZero(current) as SubscaleState); setMenuOpen(false); }}>
+                    Start at 0{startsAtZero ? ' ✓' : ''}
+                  </button>
+                </>
+              )}
+              {activePreset && (
+                <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { setShowPresetPicker(true); setMenuOpen(false); }}>
+                  Wrong scale? Change
+                </button>
+              )}
+              {resetAvailable && (
+                <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => {
+                  setMenuOpen(false);
+                  if (!window.confirm('Reset this card to the detected response scale?')) return;
+                  updateScaleState((current) => resetResponseScaleToDetected(current, seed) as SubscaleState);
+                }}>
+                  Reset to detected
+                </button>
+              )}
+              <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { onAutoDetect(); setMenuOpen(false); }}>
+                Auto-detect
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      {showPresetPicker && activePreset && <div className="mb-2 flex items-center gap-2 text-xs">
-        <label htmlFor={`${cardId ?? name}-preset`}>Choose scale</label>
-        <select id={`${cardId ?? name}-preset`} aria-label="Choose response scale preset" value={presetName ?? activePreset.name} onChange={(event) => applyPreset(event.target.value)} className="px-2 py-1 border border-secondary-200 rounded">
-          {COMMON_LIKERT_SCALES.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
-        </select>
-      </div>}
-      {detectDifferentPresetsAcrossColumns(rows, itemCols) && <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>}
-      {mode === 'demographic' && <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p>}
-      {mode !== 'demographic' && <ResponseScaleAnswersTable rows={answerTable.rows} labels={labelMap}
-        widenRange={baseMin !== null && baseMax !== null ? { min: baseMin, max: baseMax } : null} allowAdd={mode === 'word'}
-        onSetNumber={setAnswerNumber} onChoose={chooseAnswer} onCountsAs={setAnswerAlias} onRemove={removeAnswerLabel}
-        onEditLabel={editAnswerLabel} onAddLabel={addAnswerLabel}
-        onHighlightCell={(rowIndex, column) => onHighlightCell?.(rowIndex, column)} />}
-      {answerTable.rows.some((row) => row.kind === 'special') && <p className="mt-1 text-[11px] text-secondary-400">Special answers are not scored by default. Type a number to score one; they are never reversed.</p>}      <div className="flex items-center gap-1 mb-2">
+      {showPresetPicker && (
+        <div className="mb-2 flex items-center gap-2 text-xs">
+          <label htmlFor={`${cardId ?? name}-preset`}>Choose scale</label>
+          <select
+            id={`${cardId ?? name}-preset`}
+            aria-label="Choose response scale preset"
+            value={presetName ?? activePreset?.name ?? ''}
+            onChange={(event) => applyPreset(event.target.value)}
+            className="px-2 py-1 border border-secondary-200 rounded"
+          >
+            {COMMON_LIKERT_SCALES.map((preset) => (
+              <option key={preset.name} value={preset.name}>{preset.name}</option>
+            ))}
+          </select>
+          <button type="button" className="text-secondary-500 hover:underline" onClick={() => setShowPresetPicker(false)}>Close</button>
+        </div>
+      )}
+      {detectDifferentPresetsAcrossColumns(rows, itemCols) && (
+        <p className="mb-2 text-xs text-warning-700">These items look like two different scales. Consider separate subscales.</p>
+      )}
+      {mode === 'demographic' && (
+        <p className="mb-2 text-xs text-warning-700">This looks like a demographic or an ID, not a scale item</p>
+      )}
+      {mode !== 'demographic' && (
+        <ResponseScaleAnswersTable
+          rows={answerTable.rows}
+          labels={labelMap}
+          widenRange={baseMin !== null && baseMax !== null ? { min: baseMin, max: baseMax } : null}
+          allowAdd={mode === 'word' || mode === 'numeric'}
+          splitOtherAnswers
+          onSetNumber={setAnswerNumber}
+          onChoose={chooseAnswer}
+          onCountsAs={setAnswerAlias}
+          onRemove={removeAnswerLabel}
+          onEditLabel={editAnswerLabel}
+          onAddLabel={addAnswerLabel}
+          onHighlightCell={(rowIndex, column) => onHighlightCell?.(rowIndex, column)}
+        />
+      )}      <div className="flex items-center gap-1 mb-2">
         {multipleOutputs && <span className="text-xs text-secondary-500">Show:</span>}
         {(multipleOutputs ? ['sum', 'mean', 'custom'] as const : ['sum', 'mean', 'custom'] as const).map((output) => (
           <button
