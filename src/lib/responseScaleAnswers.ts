@@ -273,27 +273,26 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     });
   }
 
-  // Other answers (unknown / non-built-in special): empty box = needs review (amber); scored = calm.
+  // Other answers: default Not scored is a real decision — never amber, never blocks scoring.
+  // Rare others (Maybe) still count toward the card summary via countReviewAnswers().
   for (const row of cellsByKey.values()) {
     if (row.kind !== 'unknown' && row.kind !== 'special') continue;
     if (row.excludedOnly) continue;
     const builtIn = isBuiltInMissingCode(row.answer);
-    const noNumber = row.countsAs === null && !row.notScored;
-    if (row.kind === 'unknown' || (row.kind === 'special' && !builtIn)) {
-      // Rare labels like Maybe: amber until numbered; clearing the number returns to amber.
-      row.review = noNumber || (row.countsAs === null && row.notScored === true && !builtIn && row.found > 0);
-      // Treat "not scored" empty other-answers as still needing a glance when observed.
-      if (row.countsAs === null && row.found > 0 && !builtIn) {
-        row.review = true;
-        row.grey = false;
-        row.notScored = false;
-      } else if (row.countsAs !== null) {
-        row.review = false;
-        row.grey = false;
-      } else if (builtIn) {
-        row.review = false;
-        row.grey = true;
-      }
+    if (row.countsAs !== null) {
+      row.review = false;
+      row.grey = false;
+      row.notScored = false;
+    } else {
+      // Empty = not scored (default). Built-ins and rare others look the same: calm grey.
+      row.review = false;
+      row.grey = true;
+      row.notScored = true;
+    }
+    if (builtIn && row.countsAs === null) {
+      row.notScored = true;
+      row.grey = true;
+      row.review = false;
     }
   }
 
@@ -345,12 +344,27 @@ export function collectPendingResponseAnswers(
       labels: subscale.labelMap, outOfRangeDecisions: subscale.outOfRangeDecisions, displayIds, excludedRows,
       preset: preset ? { name: preset.name, labels: preset.labels } : undefined,
     });
-    return table.rows.filter((answer) => answer.review).map((answer) => ({ subscaleId: subscale.id, subscaleName: subscale.name, answer }));
+    // Only incomplete scale points and undecided out-of-range values block scoring.
+    // Other answers default to Not scored and never block.
+    return table.rows
+      .filter((answer) => answer.review && (answer.kind === 'scale' || answer.kind === 'out_of_range'))
+      .map((answer) => ({ subscaleId: subscale.id, subscaleName: subscale.name, answer }));
   });
 }
 
-export function countReviewAnswers(rows: Pick<AnswerTableRow, 'review'>[]): number {
-  return rows.filter((row) => row.review).length;
+/** Rows that should surface in the card summary as "N answers to review". */
+export function countsTowardReviewSummary(row: Pick<AnswerTableRow, 'review' | 'kind' | 'countsAs' | 'found' | 'answer' | 'notScored'>): boolean {
+  if (row.review) return true;
+  // Rare other answers with no number: visible in the summary, but do not block scoring.
+  if (row.found <= 0) return false;
+  if (row.kind !== 'unknown' && row.kind !== 'special') return false;
+  if (row.countsAs != null) return false;
+  if (isBuiltInMissingCode(row.answer)) return false;
+  return true;
+}
+
+export function countReviewAnswers(rows: Pick<AnswerTableRow, 'review' | 'kind' | 'countsAs' | 'found' | 'answer' | 'notScored'>[]): number {
+  return rows.filter((row) => countsTowardReviewSummary(row)).length;
 }
 
 export function resetConfirmationAfterScaleChange(state: { confirmed?: boolean; hasReverseItems: boolean }): boolean {

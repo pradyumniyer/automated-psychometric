@@ -42,7 +42,7 @@ import { getDisplayIds, hasDifferentScaleItem, shouldOpenResponseScaleCard, wait
 import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
-import { buildAnswerTable, collectPendingResponseAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
+import { buildAnswerTable, collectPendingResponseAnswers, countReviewAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
 import { commitScaleRangeDraft } from '@/lib/responseScaleDraft';
 import { addResponseLabel, afterScaleChange, aliasResponseLabel, chooseDecision, chooseResponsePreset, confirmRange as confirmRangeState, editManualResponseLabel, markResponseLabelNotScored, migrateRangeState, normalizedLabelKey, removeResponseLabel, resetResponseScaleToDetected, responseScaleMatchesSeed, setTypedRange, setWordLabelNumber, togglePresetFlip, togglePresetStartAtZero } from '@/lib/responseScaleState';
 import { ResponseScaleAnswersTable } from './ResponseScaleAnswersTable';
@@ -2087,7 +2087,11 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
   const mode: ResponseMode = answerTable.mode;
   const hasReverseItems = items.some((item) => item.reverse);
   const reviewRows = answerTable.rows.filter((row) => row.review);
-  const summary = `${itemCols.length} items · ${reviewRows.length > 0 ? `${reviewRows.length} answer${reviewRows.length === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
+  const summaryReviewCount = countReviewAnswers(answerTable.rows);
+  const scaleLabelsComplete = answerTable.rows
+    .filter((row) => row.kind === 'scale')
+    .every((row) => row.countsAs != null || row.found === 0);
+  const summary = `${itemCols.length} items · ${summaryReviewCount > 0 ? `${summaryReviewCount} answer${summaryReviewCount === 1 ? '' : 's'} to review` : `scale ${minValue ?? '–'} to ${maxValue ?? '–'}`}`;
   const [rangeDraft, setRangeDraft] = useState({ min: minValue === null ? '' : String(minValue), max: maxValue === null ? '' : String(maxValue) });
   const [showPresetPicker, setShowPresetPicker] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2237,7 +2241,7 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full mt-1 z-20 min-w-[11rem] rounded-md border border-secondary-200 bg-white shadow-md py-1 text-xs text-secondary-700">
-              {mode === 'word' && activePreset && reviewRows.length === 0 && (
+              {mode === 'word' && activePreset && scaleLabelsComplete && (
                 <>
                   <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { updateScaleState((current) => togglePresetFlip(current) as SubscaleState); setMenuOpen(false); }}>Flip order{flipped ? ' ✓' : ''}</button>
                   <button type="button" className="w-full text-left px-3 py-1.5 hover:bg-secondary-50" onClick={() => { updateScaleState((current) => togglePresetStartAtZero(current) as SubscaleState); setMenuOpen(false); }}>Start at 0{startsAtZero ? ' ✓' : ''}</button>
