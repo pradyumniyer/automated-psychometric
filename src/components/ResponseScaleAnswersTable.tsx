@@ -21,6 +21,20 @@ function cellLocation(cell: AnswerTableRow['cells'][number]): string {
   return `${cell.column}: ${cell.displayId ?? `row ${cell.rowIndex + 1}`}`;
 }
 
+
+function sanitizeNumberDraft(raw: string): string {
+  // Allow leading minus, digits, one dot — strip everything else.
+  let next = raw.replace(/[^0-9.+\-]/g, '');
+  // Keep only the first dot.
+  const dot = next.indexOf('.');
+  if (dot !== -1) {
+    next = next.slice(0, dot + 1) + next.slice(dot + 1).replace(/\./g, '');
+  }
+  // Keep minus only at start.
+  next = next.replace(/(?!^)-/g, '');
+  return next;
+}
+
 function rowKey(row: AnswerTableRow): string {
   return `${row.kind}:${normalizeResponseText(row.answer)}`;
 }
@@ -115,13 +129,16 @@ export function ResponseScaleAnswersTable({
         inputMode="decimal"
         value={numberValue}
         aria-label={`Counts as ${row.answer}`}
-        placeholder="Not scored"
+        placeholder={row.kind === 'scale' ? 'Needs a number' : 'Not scored'}
         onChange={(event) => {
-          const draft = event.target.value;
+          const draft = sanitizeNumberDraft(event.target.value);
           setNumberDrafts((current) => ({ ...current, [key]: draft }));
-          const validNumber = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(draft.trim());
-          if (draft.trim() === '') onSetNumber(row, null);
-          else if (validNumber && Number.isFinite(Number(draft))) onSetNumber(row, Number(draft));
+          if (draft.trim() === '' || draft === '-' || draft === '.' || draft === '-.') {
+            onSetNumber(row, null);
+            return;
+          }
+          const validNumber = /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(draft.trim());
+          if (validNumber && Number.isFinite(Number(draft))) onSetNumber(row, Number(draft));
         }}
         onBlur={() => commitNumber(row, key)}
         onKeyDown={(event) => {
@@ -289,7 +306,7 @@ export function ResponseScaleAnswersTable({
           ) : (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <input type="text" value={newLabel} onChange={(event) => setNewLabel(event.target.value)} placeholder="Label" aria-label="New label text" className="px-2 py-1 border border-secondary-200 rounded" />
-              <input type="text" inputMode="decimal" value={newValue} onChange={(event) => setNewValue(event.target.value)} placeholder="Not scored" aria-label="New label number" className="w-20 px-2 py-1 border border-secondary-200 rounded" />
+              <input type="text" inputMode="decimal" value={newValue} onChange={(event) => setNewValue(sanitizeNumberDraft(event.target.value))} placeholder="Not scored" aria-label="New label number" className="w-20 px-2 py-1 border border-secondary-200 rounded" />
               <button type="button" className="px-2 py-1 rounded-md bg-primary-600 text-white" onClick={addLabel}>Add</button>
               <button type="button" className="text-secondary-500 hover:underline" onClick={() => { setAdding(false); setMessage(''); }}>Cancel</button>
             </div>

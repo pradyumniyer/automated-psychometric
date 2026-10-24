@@ -152,8 +152,9 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     }
     const countsAs = resolveLabelValue(label, input.labels);
     const savedDecision = input.outOfRangeDecisions?.[rawAnswer];
-    const noNumber = countsAs === null && !label?.notScored;
-    const pendingWord = kind === 'scale' && noNumber;
+    // Scale labels: any missing number needs attention (even if previously notScored).
+    const noNumber = countsAs === null && (kind === 'scale' || !label?.notScored);
+    const pendingWord = kind === 'scale' && countsAs === null;
     const pendingNumeric = (kind === 'unknown' || kind === 'out_of_range') && noNumber
       && savedDecision?.action !== 'widen' && savedDecision?.reviewed !== true;
     const review = included && (pendingWord || pendingNumeric);
@@ -293,6 +294,21 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
       row.notScored = true;
       row.grey = true;
       row.review = false;
+    }
+  }
+
+  // Scale labels with no number always need a number (blocks scoring), including after backspace.
+  for (const row of cellsByKey.values()) {
+    if (row.kind !== 'scale' || row.excludedOnly) continue;
+    if (row.found === 0) {
+      // Unused preset points do not block.
+      row.review = false;
+      continue;
+    }
+    if (row.countsAs === null) {
+      row.review = true;
+      row.grey = false;
+      row.notScored = false;
     }
   }
 

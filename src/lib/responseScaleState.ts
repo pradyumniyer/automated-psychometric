@@ -178,7 +178,14 @@ export function setWordLabelNumber<T extends ScaleRangeState>(
     ?? (isBuiltInMissingLabel(label) ? 'special' : 'scale');
   const entry = existing ?? { label, value: null, kind };
   const updated: ResponseScaleLabelEntry = {
-    ...entry, value, kind, notScored: value === null, aliasOf: undefined, manual: true,
+    ...entry,
+    value,
+    kind,
+    // Scale points with an empty box still need a number (blocks scoring).
+    // Specials/other answers: empty = not scored by default (does not block).
+    notScored: kind === 'special' ? value === null : false,
+    aliasOf: undefined,
+    manual: true,
   };
   const next = {
     ...state,
