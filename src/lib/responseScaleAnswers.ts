@@ -223,6 +223,45 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     }
   }
 
+  // Rare non-preset text labels → Other answers (not scale points).
+  // Preset + user-manual labels always stay on the scale (even Found = 0 or 1).
+  const totalScaleLikeAnswers = [...cellsByKey.values()]
+    .filter((row) => row.kind === 'scale' || row.kind === 'unknown')
+    .reduce((sum, row) => sum + (includedFound.get(`${row.kind}:${normalizeResponseText(row.answer.replace(/ \(outside .+\)$/, ''))}`) ?? row.found), 0);
+  // Small samples: ≥2. Large samples: also ≥1% of answers.
+  const occurrenceThreshold = Math.max(2, Math.ceil(0.01 * Math.max(totalScaleLikeAnswers, 1)));
+  const presetKeys = new Set(
+    (preset?.labels ?? []).flatMap((point) => [point.label, ...(point.aliases ?? [])].map((label) => normalizeResponseText(label))),
+  );
+  for (const [key, row] of [...cellsByKey.entries()]) {
+    if (row.kind !== 'scale') continue;
+    const rawKey = normalizeResponseText(row.answer.replace(/ \(outside .+\)$/, ''));
+    const label = labelsByKey.get(rawKey);
+    const userOwned = label?.manual === true || label?.manualLabel === true;
+    const foundIncluded = includedFound.get(key) ?? 0;
+    if (userOwned || presetKeys.has(rawKey) || foundIncluded >= occurrenceThreshold) continue;
+    // Zero-found preset fillers are in presetKeys; pure one-offs (Maybe ×1) are demoted.
+    if (foundIncluded === 0) continue;
+    cellsByKey.delete(key);
+    const nextKey = `unknown:${rawKey}`;
+    if (cellsByKey.has(nextKey)) {
+      const existingUnknown = cellsByKey.get(nextKey)!;
+      existingUnknown.found += row.found;
+      existingUnknown.cells.push(...row.cells);
+      continue;
+    }
+    const countsAs = resolveLabelValue(label, input.labels);
+    const noNumber = countsAs === null && !label?.notScored;
+    cellsByKey.set(nextKey, {
+      ...row,
+      kind: 'unknown',
+      answer: row.answer.replace(/ \(outside .+\)$/, ''),
+      review: !row.excludedOnly && noNumber,
+      grey: label?.notScored === true || !!row.excludedOnly,
+      decision: label?.notScored ? 'missing' : noNumber ? '' : 'missing',
+    });
+  }
+
   const scaleRows = [...cellsByKey.values()].filter((row) => row.kind === 'scale');
   for (const row of scaleRows) if (row.review) {
     const suggestion = nearLabel(row.answer, scaleRows.filter((candidate) => candidate !== row && candidate.kind === 'scale').map((candidate) => candidate.answer));

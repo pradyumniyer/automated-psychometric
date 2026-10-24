@@ -148,7 +148,11 @@ function labelValue(state: Pick<ScaleRangeState, 'labelMap'>, entry: ResponseSca
 function refreshWordRange<T extends ScaleRangeState>(state: T): T {
   const values = (state.labelMap ?? []).filter((entry) => (entry.kind ?? 'scale') === 'scale')
     .map((entry) => labelValue(state, entry)).filter((value): value is number => value !== null && Number.isFinite(value));
-  if (values.length === 0) return { ...state, minValue: null, maxValue: null, baseMin: null, baseMax: null };
+  // No scale-word numbers: keep any existing range (never blank the boxes because of specials/others).
+  if (values.length === 0) {
+    if (state.minValue != null && state.maxValue != null) return state;
+    return { ...state, minValue: null, maxValue: null, baseMin: null, baseMax: null };
+  }
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   return { ...state, minValue, maxValue, baseMin: minValue, baseMax: maxValue,
@@ -159,14 +163,41 @@ function findLabelIndex(state: ScaleRangeState, label: string): number {
   return (state.labelMap ?? []).findIndex((entry) => normalizedLabelKey(entry.label) === normalizedLabelKey(label));
 }
 
-export function setWordLabelNumber<T extends ScaleRangeState>(state: T, label: string, value: number | null): T {
+export function setWordLabelNumber<T extends ScaleRangeState>(
+  state: T,
+  label: string,
+  value: number | null,
+  forceKind?: 'scale' | 'special',
+): T {
   if (value !== null && !Number.isFinite(value)) return state;
   const labels = [...(state.labelMap ?? [])];
   const index = findLabelIndex(state, label);
-  const entry = index >= 0 ? labels[index] : { label, value: null, kind: 'scale' as const };
-  const updated: ResponseScaleLabelEntry = { ...entry, value, kind: entry.kind ?? 'scale', notScored: false, aliasOf: undefined, manual: true };
-  const next = { ...state, labelMap: index >= 0 ? labels.map((candidate, position) => position === index ? updated : candidate) : [...labels, updated], labelSource: 'manual' as const } as T;
+  const existing = index >= 0 ? labels[index] : undefined;
+  const kind: 'scale' | 'special' = forceKind
+    ?? existing?.kind
+    ?? (isBuiltInMissingLabel(label) ? 'special' : 'scale');
+  const entry = existing ?? { label, value: null, kind };
+  const updated: ResponseScaleLabelEntry = {
+    ...entry, value, kind, notScored: value === null, aliasOf: undefined, manual: true,
+  };
+  const next = {
+    ...state,
+    labelMap: index >= 0
+      ? labels.map((candidate, position) => (position === index ? updated : candidate))
+      : [...labels, updated],
+    labelSource: 'manual' as const,
+  } as T;
+  if (kind === 'special') return next;
   return refreshWordRange(next);
+}
+
+function isBuiltInMissingLabel(label: string): boolean {
+  const key = normalizedLabelKey(label);
+  return [
+    'n/a', 'na', 'not applicable', 'prefer not to say', 'prefer not to answer',
+    "don't know", 'dont know', 'dk', 'refused', 'no answer', 'no response',
+    'skipped', 'missing', 'unknown', '-99', '-999',
+  ].includes(key);
 }
 
 export function aliasResponseLabel<T extends ScaleRangeState>(state: T, label: string, targetLabel: string): T {
