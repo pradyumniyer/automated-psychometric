@@ -7,7 +7,6 @@ interface Props {
   labels: ResponseScaleLabelSetting[];
   widenRange?: { min: number; max: number } | null;
   allowAdd?: boolean;
-  /** When true, scale rows are the main list; specials/out-of-range go under "Other answers". */
   splitOtherAnswers?: boolean;
   onSetNumber: (row: AnswerTableRow, value: number | null) => void;
   onChoose: (row: AnswerTableRow, choice: 'missing' | 'widen') => void;
@@ -78,12 +77,7 @@ export function ResponseScaleAnswersTable({
   const cellLinks = (row: AnswerTableRow) => (
     <span className="inline-flex flex-wrap items-center gap-x-1 text-secondary-500">
       {row.cells.slice(0, 3).map((cell) => (
-        <button
-          key={`${cell.column}-${cell.rowIndex}`}
-          type="button"
-          className="underline"
-          onClick={() => onHighlightCell(cell.rowIndex, cell.column)}
-        >
+        <button key={`${cell.column}-${cell.rowIndex}`} type="button" className="underline" onClick={() => onHighlightCell(cell.rowIndex, cell.column)}>
           {cellLocation(cell)}
         </button>
       ))}
@@ -92,40 +86,29 @@ export function ResponseScaleAnswersTable({
   );
 
   const addLabel = () => {
-    if (!newLabel.trim()) {
-      setMessage('Enter a label first.');
-      return;
-    }
+    if (!newLabel.trim()) { setMessage('Enter a label first.'); return; }
     const key = normalizeResponseText(newLabel);
-    if (labels.some((entry) => normalizeResponseText(entry.label) === key)) {
-      setMessage('That label is already listed.');
-      return;
-    }
+    if (labels.some((entry) => normalizeResponseText(entry.label) === key)) { setMessage('That label is already listed.'); return; }
     const value = newValue.trim() === '' ? null : Number(newValue);
-    if (value !== null && !Number.isFinite(value)) {
-      setMessage('Enter a finite number or leave the number blank.');
-      return;
-    }
-    if (onAddLabel(newLabel, value)) {
-      setNewLabel('');
-      setNewValue('');
-      setAdding(false);
-      setMessage('');
-    } else {
-      setMessage('That label could not be added.');
-    }
+    if (value !== null && !Number.isFinite(value)) { setMessage('Enter a finite number or leave the number blank.'); return; }
+    if (onAddLabel(newLabel, value)) { setNewLabel(''); setNewValue(''); setAdding(false); setMessage(''); }
+    else setMessage('That label could not be added.');
   };
 
-  const scaleRows = splitOtherAnswers
-    ? rows.filter((row) => row.kind === 'scale')
-    : rows;
-  const otherRows = splitOtherAnswers
-    ? rows.filter((row) => row.kind !== 'scale')
-    : [];
+  const scaleRows = splitOtherAnswers ? rows.filter((row) => row.kind === 'scale') : rows;
+  const otherRows = splitOtherAnswers ? rows.filter((row) => row.kind !== 'scale') : [];
 
   const renderNumberBox = (row: AnswerTableRow, key: string, numberValue: string) => {
+    // Unused scale points (Found 0): show as unused, not as a scored answer.
+    if (row.kind === 'scale' && row.found === 0 && !row.manualLabel) {
+      return (
+        <span className="inline-block w-20 px-1.5 py-1 text-sm text-secondary-400" title="Defined by the scale but not observed in the data">
+          Unused
+        </span>
+      );
+    }
     const isEmpty = numberValue.trim() === '';
-    const isGrey = row.grey || (row.kind === 'special' && isEmpty) || row.notScored;
+    const isGrey = !row.review && (row.grey || isEmpty);
     return (
       <input
         type="text"
@@ -168,13 +151,7 @@ export function ResponseScaleAnswersTable({
     return (
       <select
         aria-label={`${row.answer} action`}
-        value={
-          row.decision === 'widen'
-            ? 'widen'
-            : row.notScored || row.decision === 'missing'
-              ? 'missing'
-              : ''
-        }
+        value={row.decision === 'widen' ? 'widen' : row.notScored || row.decision === 'missing' ? 'missing' : ''}
         onChange={(event) => {
           const choice = event.target.value;
           if (choice === 'missing' || choice === 'widen') onChoose(row, choice);
@@ -186,9 +163,7 @@ export function ResponseScaleAnswersTable({
         {row.review && <option value="">Choose…</option>}
         <option value="missing">Not scored</option>
         {row.kind === 'out_of_range' && (
-          <option value="widen">
-            {widenTarget ? `Widen to ${widenTarget}` : 'Widen scale'}
-          </option>
+          <option value="widen">{widenTarget ? `Widen to ${widenTarget}` : 'Widen scale'}</option>
         )}
       </select>
     );
@@ -207,7 +182,7 @@ export function ResponseScaleAnswersTable({
           className={
             row.review
               ? 'bg-warning-50 text-warning-800'
-              : row.grey || (row.kind === 'special' && row.countsAs == null)
+              : row.grey || (row.countsAs == null && row.kind !== 'scale')
                 ? 'text-secondary-400'
                 : 'text-secondary-700'
           }
@@ -218,9 +193,7 @@ export function ResponseScaleAnswersTable({
                 type="text"
                 aria-label={`Edit label ${displayName}`}
                 value={labelDrafts[key] ?? displayName}
-                onChange={(event) =>
-                  setLabelDrafts((current) => ({ ...current, [key]: event.target.value }))
-                }
+                onChange={(event) => setLabelDrafts((current) => ({ ...current, [key]: event.target.value }))}
                 onBlur={(event) => {
                   const next = event.currentTarget.value.trim();
                   if (next !== displayName && !onEditLabel(row, next)) {
@@ -239,15 +212,9 @@ export function ResponseScaleAnswersTable({
             ) : (
               displayName
             )}
-            {row.excludedOnly && (
-              <span className="ml-1 text-secondary-400">only in excluded respondents</span>
-            )}
+            {row.excludedOnly && <span className="ml-1 text-secondary-400">only in excluded respondents</span>}
             {row.manualLabel && (
-              <button
-                type="button"
-                className="ml-2 text-[11px] text-secondary-400 hover:text-danger-600"
-                onClick={() => onRemove(row)}
-              >
+              <button type="button" className="ml-2 text-[11px] text-secondary-400 hover:text-danger-600" onClick={() => onRemove(row)}>
                 Remove
               </button>
             )}
@@ -261,23 +228,14 @@ export function ResponseScaleAnswersTable({
           <tr className="bg-warning-50 text-warning-800">
             <td colSpan={3} className="px-2 pb-2 text-[11px]">
               {row.found === 1 ? 'appears once' : `appears ${row.found} times`}
-              {row.cells.length > 0 && (
-                <>
-                  {' '}
-                  ({cellLinks(row)})
-                </>
-              )}
-              {row.suggestion && (
-                <span className="ml-1">Looks like &lsquo;{row.suggestion}&rsquo;?</span>
-              )}
+              {row.cells.length > 0 && <> ({cellLinks(row)})</>}
+              {row.suggestion && <span className="ml-1">Looks like &lsquo;{row.suggestion}&rsquo;?</span>}
             </td>
           </tr>
         )}
         {row.review && isOutOfRange && row.cells.length > 0 && (
           <tr className="bg-warning-50 text-warning-800">
-            <td colSpan={3} className="px-2 pb-2 text-[11px]">
-              {cellLinks(row)}
-            </td>
+            <td colSpan={3} className="px-2 pb-2 text-[11px]">{cellLinks(row)}</td>
           </tr>
         )}
       </React.Fragment>
@@ -322,64 +280,18 @@ export function ResponseScaleAnswersTable({
         </div>
       )}
 
-      {!splitOtherAnswers && rows.length > 0 && scaleRows.length === 0 && (
-        <table className="w-full table-fixed text-xs mb-2">
-          <colgroup>
-            <col className="w-[54%]" />
-            <col className="w-[14%]" />
-            <col className="w-[32%]" />
-          </colgroup>
-          {tableHead}
-          <tbody>{rows.map(renderRow)}</tbody>
-        </table>
-      )}
-
       {allowAdd && (
         <div className="mt-1 mb-2">
           {!adding ? (
-            <button
-              type="button"
-              className="text-xs text-primary-600 hover:underline"
-              onClick={() => setAdding(true)}
-            >
+            <button type="button" className="text-xs text-primary-600 hover:underline" onClick={() => setAdding(true)}>
               + Add label
             </button>
           ) : (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <input
-                type="text"
-                value={newLabel}
-                onChange={(event) => setNewLabel(event.target.value)}
-                placeholder="Label"
-                aria-label="New label text"
-                className="px-2 py-1 border border-secondary-200 rounded"
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={newValue}
-                onChange={(event) => setNewValue(event.target.value)}
-                placeholder="Not scored"
-                aria-label="New label number"
-                className="w-20 px-2 py-1 border border-secondary-200 rounded"
-              />
-              <button
-                type="button"
-                className="px-2 py-1 rounded-md bg-primary-600 text-white"
-                onClick={addLabel}
-              >
-                Add
-              </button>
-              <button
-                type="button"
-                className="text-secondary-500 hover:underline"
-                onClick={() => {
-                  setAdding(false);
-                  setMessage('');
-                }}
-              >
-                Cancel
-              </button>
+              <input type="text" value={newLabel} onChange={(event) => setNewLabel(event.target.value)} placeholder="Label" aria-label="New label text" className="px-2 py-1 border border-secondary-200 rounded" />
+              <input type="text" inputMode="decimal" value={newValue} onChange={(event) => setNewValue(event.target.value)} placeholder="Not scored" aria-label="New label number" className="w-20 px-2 py-1 border border-secondary-200 rounded" />
+              <button type="button" className="px-2 py-1 rounded-md bg-primary-600 text-white" onClick={addLabel}>Add</button>
+              <button type="button" className="text-secondary-500 hover:underline" onClick={() => { setAdding(false); setMessage(''); }}>Cancel</button>
             </div>
           )}
           {message && <p className="text-[11px] text-warning-700 mt-1">{message}</p>}

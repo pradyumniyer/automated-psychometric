@@ -190,6 +190,9 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
       if (baseMin !== null && baseMax !== null && (number < baseMin || number > baseMax)) return add(String(number), 'out_of_range', column, rowIndex);
       return;
     }
+    // User-scored "other" answers are stored as kind special so they never join the scale list.
+    const mapped = labelsByKey.get(normalizeResponseText(answer));
+    if (mapped?.kind === 'special') return add(answer, 'special', column, rowIndex);
     if (mode === 'word') return add(answer, 'scale', column, rowIndex);
     return add(answer, 'unknown', column, rowIndex);
   }));
@@ -237,29 +240,61 @@ export function buildAnswerTable(input: AnswerTableInput): AnswerTableResult {
     if (row.kind !== 'scale') continue;
     const rawKey = normalizeResponseText(row.answer.replace(/ \(outside .+\)$/, ''));
     const label = labelsByKey.get(rawKey);
-    const userOwned = label?.manual === true || label?.manualLabel === true;
-    const foundIncluded = includedFound.get(key) ?? 0;
-    if (userOwned || presetKeys.has(rawKey) || foundIncluded >= occurrenceThreshold) continue;
-    // Zero-found preset fillers are in presetKeys; pure one-offs (Maybe ×1) are demoted.
-    if (foundIncluded === 0) continue;
+    // Manual scale labels the user added stay on the scale; specials never do.
+    if (label?.kind === 'special') {
+      // fall through to demote into other answers
+    } else {
+      const userOwned = label?.manual === true || label?.manualLabel === true;
+      const foundIncluded = includedFound.get(key) ?? 0;
+      if (userOwned || presetKeys.has(rawKey) || foundIncluded >= occurrenceThreshold) continue;
+      // Zero-found preset fillers are in presetKeys; pure one-offs (Maybe ×1) are demoted.
+      if (foundIncluded === 0) continue;
+    }
     cellsByKey.delete(key);
-    const nextKey = `unknown:${rawKey}`;
+    const otherKind = label?.kind === 'special' ? 'special' : 'unknown';
+    const nextKey = `${otherKind}:${rawKey}`;
     if (cellsByKey.has(nextKey)) {
-      const existingUnknown = cellsByKey.get(nextKey)!;
-      existingUnknown.found += row.found;
-      existingUnknown.cells.push(...row.cells);
+      const existingOther = cellsByKey.get(nextKey)!;
+      existingOther.found += row.found;
+      existingOther.cells.push(...row.cells);
       continue;
     }
     const countsAs = resolveLabelValue(label, input.labels);
     const noNumber = countsAs === null && !label?.notScored;
+    const builtIn = isBuiltInMissingCode(row.answer);
     cellsByKey.set(nextKey, {
       ...row,
-      kind: 'unknown',
+      kind: otherKind,
       answer: row.answer.replace(/ \(outside .+\)$/, ''),
-      review: !row.excludedOnly && noNumber,
-      grey: label?.notScored === true || !!row.excludedOnly,
+      review: !row.excludedOnly && noNumber && !builtIn,
+      grey: builtIn || label?.notScored === true || !!row.excludedOnly,
       decision: label?.notScored ? 'missing' : noNumber ? '' : 'missing',
+      notScored: label?.notScored,
     });
+  }
+
+  // Other answers (unknown / non-built-in special): empty box = needs review (amber); scored = calm.
+  for (const row of cellsByKey.values()) {
+    if (row.kind !== 'unknown' && row.kind !== 'special') continue;
+    if (row.excludedOnly) continue;
+    const builtIn = isBuiltInMissingCode(row.answer);
+    const noNumber = row.countsAs === null && !row.notScored;
+    if (row.kind === 'unknown' || (row.kind === 'special' && !builtIn)) {
+      // Rare labels like Maybe: amber until numbered; clearing the number returns to amber.
+      row.review = noNumber || (row.countsAs === null && row.notScored === true && !builtIn && row.found > 0);
+      // Treat "not scored" empty other-answers as still needing a glance when observed.
+      if (row.countsAs === null && row.found > 0 && !builtIn) {
+        row.review = true;
+        row.grey = false;
+        row.notScored = false;
+      } else if (row.countsAs !== null) {
+        row.review = false;
+        row.grey = false;
+      } else if (builtIn) {
+        row.review = false;
+        row.grey = true;
+      }
+    }
   }
 
   const scaleRows = [...cellsByKey.values()].filter((row) => row.kind === 'scale');
