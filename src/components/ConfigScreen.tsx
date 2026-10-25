@@ -137,6 +137,9 @@ export function ConfigScreen({
   const [showExcludedOnly, setShowExcludedOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [scoring, setScoring] = useState(false);
+  const [prorationEnabled, setProrationEnabled] = useState(false);
+  const [prorationMaxMissingPct, setProrationMaxMissingPct] = useState<20 | 25 | 50>(20);
+
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info' | 'waiting'; text: string; targetId?: string; pendingCount?: number } | null>(null);
   const [scaleFocusId, setScaleFocusId] = useState<string | null>(null);
   const [sheetInfos, setSheetInfos] = useState<SheetInfo[] | null>(null);
@@ -169,6 +172,8 @@ export function ConfigScreen({
     overallScale?: SubscaleState | null;
     overallSettings?: OverallSettings;
     linkedTemplateId?: string | null;
+    prorationEnabled?: boolean;
+    prorationMaxMissingPct?: 20 | 25 | 50;
   } = {}) => {
     if (!dataset) throw new Error('No active dataset to save.');
     const datasetId = dataset.id;
@@ -194,6 +199,8 @@ export function ConfigScreen({
           : null,
         overallSettings: overrides.overallSettings ?? overallSettings,
         linkedTemplateId: overrides.linkedTemplateId,
+        prorationEnabled: overrides.prorationEnabled ?? prorationEnabled,
+        prorationMaxMissingPct: overrides.prorationMaxMissingPct ?? prorationMaxMissingPct,
       }, existing);
       return surveyConfigRepository.save(datasetId, config);
     };
@@ -265,6 +272,12 @@ export function ConfigScreen({
         idColumns: config.id_columns,
       });
       setDemoCols(adapted.demographicColumns);
+      setProrationEnabled(config.proration_enabled === true);
+      setProrationMaxMissingPct(
+        config.proration_max_missing_pct === 25 || config.proration_max_missing_pct === 50
+          ? config.proration_max_missing_pct
+          : 20,
+      );
       setSubscaleStates(adapted.subscales);
       setBandStates(adapted.bands);
       setBandStatesByOutput(adapted.bandsByOutput);
@@ -939,6 +952,7 @@ export function ConfigScreen({
         bandConfigs,
         Array.from(sharedExcludedRows),
         {
+          proration: { enabled: prorationEnabled, maxMissingPercent: prorationMaxMissingPct },
           rowIds: dataset.row_ids,
           bandsByOutput: bandConfigsByOutput,
           overall: realSubscales.length >= 2 || realSubscales.length === 0 ? {
@@ -956,6 +970,21 @@ export function ConfigScreen({
         payload: { result },
       });
       setScoringResult(result);
+      const proratedCount = Object.values(result.scaleScores).reduce((count, byRow) => {
+        return count + Object.values(byRow).filter((detail) => detail.prorated).length;
+      }, 0);
+      if (prorationEnabled && proratedCount > 0) {
+        setStatusMsg({
+          type: 'info',
+          text: `${proratedCount} score${proratedCount === 1 ? '' : 's'} used proration (up to ${prorationMaxMissingPct}% missing items per scale).`,
+        });
+      } else if (prorationEnabled) {
+        setStatusMsg({
+          type: 'info',
+          text: `Proration on (${prorationMaxMissingPct}% threshold); no scores needed it this run.`,
+        });
+      }
+
       const nv = saved.version;
       await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
       const idColumn = demoCols.find((column) => /\bID\b/i.test(column.detected_by))?.column_name;
@@ -1556,6 +1585,18 @@ export function ConfigScreen({
                     originalColCount={originalColCount} computedColCount={computedColCount}
                     hasSubscaleItems={realSubscales.length > 0 && realSubscales.some((s) => s.items.length === 0 && s.scoringMethod !== 'custom')}
                     unassignedItemCount={realSubscales.length > 0 ? getUnassignedItemCount(itemColumns, realSubscales) : 0}
+                    prorationEnabled={prorationEnabled}
+                    prorationMaxMissingPct={prorationMaxMissingPct}
+                    onProrationEnabledChange={(enabled) => {
+                      setProrationEnabled(enabled);
+                      void persistSurveyConfig({ prorationEnabled: enabled });
+                      markDirty();
+                    }}
+                    onProrationThresholdChange={(pct) => {
+                      setProrationMaxMissingPct(pct);
+                      void persistSurveyConfig({ prorationMaxMissingPct: pct });
+                      markDirty();
+                    }}
                   />
                 )}
               </div>
@@ -2641,14 +2682,23 @@ function BandsPanel({ subscales, bandStates, bandStatesByOutput, selectedBandOut
 }
 
 // ── Scoring Panel ──
-function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount, hasSubscaleItems, unassignedItemCount }: {
+function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport, excludedCount, subscaleCount, usedAutoScale, originalColCount, computedColCount, hasSubscaleItems, unassignedItemCount, prorationEnabled, prorationMaxMissingPct, onProrationEnabledChange, onProrationThresholdChange }: {
   canScore: boolean; scoring: boolean; onRunScoring: () => void;
   scoringResult: ReturnType<typeof scoreDataset> | null; onExport: (f: 'csv' | 'xlsx') => void;
   excludedCount: number; subscaleCount: number; usedAutoScale: boolean;
   originalColCount: number; computedColCount: number;
   hasSubscaleItems: boolean;
   unassignedItemCount: number;
+  prorationEnabled: boolean;
+  prorationMaxMissingPct: 20 | 25 | 50;
+  onProrationEnabledChange: (enabled: boolean) => void;
+  onProrationThresholdChange: (pct: 20 | 25 | 50) => void;
 }) {
+  const proratedCount = scoringResult
+    ? Object.values(scoringResult.scaleScores).reduce((count, byRow) => (
+      count + Object.values(byRow).filter((detail) => detail.prorated).length
+    ), 0)
+    : 0;
   return (
     <div className="p-3">
       <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-3 block">Scoring</span>
@@ -2683,6 +2733,37 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
           </div>
         </Card>
       )}
+      <Card className="p-2.5 mb-3 border-secondary-200">
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={prorationEnabled}
+            onChange={(e) => onProrationEnabledChange(e.target.checked)}
+          />
+          <span>
+            <span className="text-xs font-medium text-secondary-800 block">Proration (opt-in)</span>
+            <span className="text-[11px] text-secondary-500">When a few items are missing, estimate the scale score from the observed items. Off by default (strict scoring).</span>
+          </span>
+        </label>
+        {prorationEnabled && (
+          <div className="mt-2 ml-6">
+            <div className="text-[11px] text-secondary-500 mb-1">Allow missing up to</div>
+            <div className="flex gap-1">
+              {([20, 25, 50] as const).map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => onProrationThresholdChange(pct)}
+                  className={`px-2.5 py-1 text-xs rounded-md border ${prorationMaxMissingPct === pct ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium' : 'border-secondary-200 text-secondary-600 hover:border-primary-300'}`}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">
         {scoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
         {scoring ? 'Scoring...' : 'Run Scoring'}
@@ -2694,6 +2775,13 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
             <div>{scoringResult.rows.length} rows scored</div>
             <div>{originalColCount + computedColCount} total columns</div>
             <div>{scoringResult.excludedRowIndices.length} excluded</div>
+            {prorationEnabled && (
+              <div>
+                {proratedCount > 0
+                  ? `${proratedCount} score${proratedCount === 1 ? '' : 's'} prorated (≤${prorationMaxMissingPct}% missing)`
+                  : `Proration on (≤${prorationMaxMissingPct}%); none needed`}
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => onExport('csv')} className="flex-1 text-xs"><FileDown className="w-3 h-3" /> CSV</Button>
