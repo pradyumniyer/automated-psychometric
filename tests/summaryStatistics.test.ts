@@ -50,15 +50,35 @@ describe('summary statistics', () => {
 
     expect(result.includedCount).toBe(2);
     expect(result.numericColumns).toEqual(new Set([
-      'Age', 'Q1', 'Q2', 'Subscale 1 Score', 'Overall Scale Score',
+      'Q1', 'Q2', 'Subscale 1 Score', 'Overall Scale Score',
     ]));
     expect(result.columns).toEqual({
-      Age: { sum: 20, mean: 20, nUsed: 1, nNotCounted: 1 },
+      // Age is demographic — omitted from summary (S1)
       Q1: { sum: 4, mean: 4, nUsed: 1, nNotCounted: 1 },
       Q2: { sum: 2, mean: 2, nUsed: 1, nNotCounted: 1 },
       'Subscale 1 Score': { sum: 6, mean: 6, nUsed: 1, nNotCounted: 1 },
       'Overall Scale Score': { sum: 7, mean: 7, nUsed: 1, nNotCounted: 1 },
     });
+  });
+
+  it('S1: omits demographic Age and ID from summary columns', () => {
+    const result = buildSummaryStatistics(columns, [
+      {
+        ID: '1',
+        Age: '20',
+        Q1: '4',
+        Q2: '3',
+        'Subscale 1 Score': 7,
+        'Subscale 1 Interpretation': 'High',
+        'Overall Scale Score': 7,
+      },
+    ], new Set(), new Set(['ID']));
+    expect(result.numericColumns.has('Age')).toBe(false);
+    expect(result.numericColumns.has('ID')).toBe(false);
+    expect(result.columns.Age).toBeUndefined();
+    expect(result.columns.ID).toBeUndefined();
+    expect(result.numericColumns.has('Q1')).toBe(true);
+    expect(result.numericColumns.has('Subscale 1 Score')).toBe(true);
   });
 
   it('builds Fixture A export statistics independently and excludes a respondent from counts', () => {

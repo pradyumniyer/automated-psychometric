@@ -236,6 +236,13 @@ describe('shared scored columns', () => {
     );
     expect(summary?.rows[2]).toEqual(data.headers);
     expect(summary?.rows[3]).toHaveLength(data.headers.length);
+    // S1: Age (demo) blank in Sum row; score columns filled
+    const sumRow = summary?.rows[3] ?? [];
+    const ageIdx = data.headers.indexOf('Age');
+    const q1Idx = data.headers.indexOf('Q1');
+    expect(ageIdx).toBeGreaterThanOrEqual(0);
+    expect(sumRow[ageIdx]).toBe('');
+    expect(typeof sumRow[q1Idx] === 'number' || sumRow[q1Idx] === '').toBe(true);
   });
 
   it('adds Overall interpretation immediately after Overall when Overall bands exist', () => {

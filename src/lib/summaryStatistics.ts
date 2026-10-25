@@ -47,7 +47,15 @@ export function buildSummaryStatistics(
   const summaries: Record<string, SummaryColumnStatistics> = {};
 
   for (const column of columns) {
-    if (column.type === 'interpretation' || idColumns.has(column.key)) continue;
+    // S1: summary rows / Summary sheet cover only items, score columns, and Overall —
+    // never ID, demographics (e.g. Age), text, or interpretation columns.
+    if (
+      column.type === 'interpretation'
+      || column.type === 'demo'
+      || idColumns.has(column.key)
+    ) continue;
+    if (column.type !== 'data' && column.type !== 'score') continue;
+
     const values = includedRows
       .map(({ row, index }) => {
         const state = itemStates?.[index]?.[column.key];
@@ -73,10 +81,6 @@ export function buildSummaryStatistics(
           unmapped: 0,
         })
       : undefined;
-    if (
-      column.type === 'demo'
-      && rows.every((row) => numericCell(row[column.key]) === null)
-    ) continue;
 
     numericColumns.add(column.key);
     const sum = values.length > 0 ? values.reduce((total, value) => total + value, 0) : null;
