@@ -1363,7 +1363,6 @@ export function ConfigScreen({
             <Button variant="outline" size="sm" onClick={updateLinkedTemplate}><Check className="w-3.5 h-3.5" /> Update Template</Button>
           )}
           <div className="w-px h-6 bg-secondary-200" />
-          <Button variant="outline" size="sm" onClick={onGoToQuality}><ShieldCheck className="w-4 h-4" /> Data Quality</Button>
         </div>
         <div className="flex items-center gap-3">
           {/* Auto-save indicator */}
@@ -1449,6 +1448,29 @@ export function ConfigScreen({
               )?.name ?? 'subscale'}
             </button>
           )}
+          {statusMsg.type === 'success' && (
+            <button
+              type="button"
+              className="text-xs font-medium text-primary-700 hover:underline ml-auto"
+              onClick={() => onGoToQuality()}
+            >
+              Next: check data quality
+            </button>
+          )}
+          {statusMsg.type !== 'success' && statusMsg.type !== 'waiting' && statusMsg.type !== 'error' && (
+            <button
+              type="button"
+              className="text-xs font-medium text-primary-700 hover:underline ml-auto"
+              onClick={() => {
+                if (activeStep === 'demographics') changeActiveStep('subscales');
+                else if (activeStep === 'subscales') changeActiveStep('scales');
+                else if (activeStep === 'scales') changeActiveStep('bands');
+                else if (activeStep === 'bands') changeActiveStep('scoring');
+              }}
+            >
+              Next step
+            </button>
+          )}
           <button onClick={() => setStatusMsg(null)}><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
@@ -1463,27 +1485,45 @@ export function ConfigScreen({
           <>
             {/* Step rail */}
             <StepRail activeStep={activeStep} onStepClick={changeActiveStep} stepStatuses={{
-              demographics: demoCols.length > 0 ? 'done' : 'pending',
-              subscales: realSubscales.length > 0 ? (realSubscales.every((s) => s.items.length > 0) ? 'done' : 'active') : 'pending',
-              scales: subscaleStates.length > 0 ? (subscaleStates.some((s) => s.scaleType === 'categorical' && s.labelMap.length > 0) ? 'done' : 'active') : 'pending',
+              demographics: demoCols.length > 0 || itemColumns.length > 0 ? 'done' : 'pending',
+              subscales: realSubscales.length > 0
+                ? (realSubscales.every((s) => s.items.length > 0) ? 'done' : 'attention')
+                : (itemColumns.length > 0 ? 'active' : 'pending'),
+              scales: (() => {
+                if (subscaleStates.length === 0) return 'pending';
+                const pendingAnswers = dataset
+                  ? collectPendingResponseAnswers(subscaleStates, dataset.rows, getDisplayIds(dataset.rows, demoCols), sharedExcludedRows)
+                  : [];
+                if (pendingAnswers.length > 0) return 'attention';
+                const needsConfirm = subscaleStates.some((s) => s.items.some((i) => i.reverse) && s.confirmed !== true);
+                if (needsConfirm) return 'attention';
+                return subscaleStates.every((s) => s.minValue != null && s.maxValue != null) ? 'done' : 'active';
+              })(),
               bands: Object.values(bandStates).some((bs) => bs.length > 0)
                 || Object.values(bandStatesByOutput).some((outputs) =>
                   Object.values(outputs).some((bs) => (bs?.length ?? 0) > 0))
                 ? 'done' : 'pending',
-              scoring: scoringResult ? 'done' : 'pending',
+              scoring: scoringResult ? 'done' : (canScore ? 'active' : 'pending'),
             }} />
 
             {/* Config panel */}
             {!leftPanelCollapsed && (
               <div style={{ width: leftPanelWidth }} className="border-r border-secondary-200 bg-white overflow-y-auto flex-shrink-0">
                 <div className="px-3 py-2 border-b border-secondary-200 bg-secondary-50/50">
-                  <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">
+                  <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide block">
                     {activeStep === 'demographics' && 'ID Columns'}
                     {activeStep === 'subscales' && 'Scale Groups'}
                     {activeStep === 'scales' && 'Response Scales'}
                     {activeStep === 'bands' && 'Interpretation Bands'}
                     {activeStep === 'scoring' && 'Scoring'}
                   </span>
+                  <p className="text-[11px] text-secondary-500 mt-0.5">
+                    {activeStep === 'demographics' && 'Mark which columns are IDs or demographics; the rest are scored as items.'}
+                    {activeStep === 'subscales' && 'Group items into one scale or several subscales.'}
+                    {activeStep === 'scales' && 'Set how each answer maps to a number for scoring.'}
+                    {activeStep === 'bands' && 'Optional labels for score ranges (for example Low / Moderate / High).'}
+                    {activeStep === 'scoring' && 'Run scoring when scales are ready. Proration is optional.'}
+                  </p>
                 </div>
                 {activeStep === 'demographics' && (
                   <DemographicsPanel allColumns={allColumns} demoCols={demoCols} onToggle={toggleDemographic} onMarkAllItems={markAllAsItems} />
@@ -1747,7 +1787,7 @@ export function ConfigScreen({
 // ── Panel Tab ──
 // ── Step Rail ──
 type StepName = 'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring';
-type StepStatus = 'pending' | 'active' | 'done';
+type StepStatus = 'pending' | 'active' | 'done' | 'attention';
 
 function StepRail({ activeStep, onStepClick, stepStatuses }: {
   activeStep: StepName;
@@ -1781,6 +1821,9 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
                 <div className="absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full bg-success-500 border-2 border-white flex items-center justify-center">
                   <Check className="w-2 h-2 text-white" strokeWidth={3} />
                 </div>
+              )}
+              {status === 'attention' && (
+                <div className="absolute -top-1 -right-1.5 w-2.5 h-2.5 rounded-full bg-warning-500 border-2 border-white" title="Needs attention" />
               )}
             </div>
             <span className="text-[9px] font-medium leading-none text-center break-words">{s.label}</span>
