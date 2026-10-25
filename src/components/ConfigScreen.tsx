@@ -43,6 +43,7 @@ import { buildScoredColumnData } from '@/lib/scoredColumns';
 import { buildSummaryExportContent, buildSummaryStatistics } from '@/lib/summaryStatistics';
 import { SCORE_OUTPUT_ORDER, scoreOutputLabel, shownScoreOutputs } from '@/lib/scoreOutputs';
 import { buildAnswerTable, collectPendingResponseAnswers, countReviewAnswers, type AnswerTableRow, type ResponseMode } from '@/lib/responseScaleAnswers';
+import { assignItemsToSubscale, removeItemFromSubscaleById } from '@/lib/subscaleAssignment';
 import { commitScaleRangeDraft } from '@/lib/responseScaleDraft';
 import { addResponseLabel, afterScaleChange, aliasResponseLabel, chooseDecision, chooseResponsePreset, confirmRange as confirmRangeState, editManualResponseLabel, markResponseLabelNotScored, migrateRangeState, normalizedLabelKey, removeResponseLabel, resetResponseScaleToDetected, responseScaleMatchesSeed, setTypedRange, setWordLabelNumber, togglePresetFlip, togglePresetStartAtZero } from '@/lib/responseScaleState';
 import { ResponseScaleAnswersTable } from './ResponseScaleAnswersTable';
@@ -143,6 +144,7 @@ export function ConfigScreen({
   const [checkedSheets, setCheckedSheets] = useState<Set<string>>(new Set());
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [scaleGroupMode, setScaleGroupMode] = useState<'one' | 'subscales'>('one');
   const [activeSubscaleId, setActiveSubscaleId] = useState<string | null>(null);
   const [highlightCell, setHighlightCell] = useState<{ rowIndex: number; columnKey: string } | null>(null);
 
@@ -373,6 +375,22 @@ export function ConfigScreen({
   const itemColumns = allColumns.filter((c) => !demoColumnNames.has(c));
   const realSubscales = subscaleStates.filter((subscale) => !isAutomaticSubscale(subscale));
   const hasRealSubscales = realSubscales.length > 0;
+  useEffect(() => {
+    if (hasRealSubscales) setScaleGroupMode('subscales');
+  }, [hasRealSubscales]);
+
+  useEffect(() => {
+    if (scaleGroupMode !== 'one') return;
+    if (itemColumns.length === 0) return;
+    setSubscaleStates((previous) => {
+      const primary = previous.find((s) => isAutomaticSubscale(s)) ?? previous[0];
+      if (!primary) return previous;
+      const totalItems = previous.reduce((n, s) => n + s.items.length, 0);
+      if (totalItems > 0) return previous;
+      const merged = itemColumns.map((column, order) => ({ column, order, reverse: false }));
+      return previous.map((s) => (s.id === primary.id ? { ...s, items: merged } : s));
+    });
+  }, [scaleGroupMode, itemColumns]);
   const subscalesForPanel = hasRealSubscales ? realSubscales : subscaleStates;
   const unassignedItems = itemColumns.filter((col) => !realSubscales.some((s) => s.items.some((item) => item.column === col)));
 
@@ -673,18 +691,13 @@ export function ConfigScreen({
   };
 
   const batchAddItems = (subscaleId: string, columns: string[]) => {
-    setSubscaleStates(subscaleStates.map((s) => {
-      if (s.id !== subscaleId) return s;
-      const existing = new Set(s.items.map((i) => i.column));
-      const newItems = columns.filter((c) => !existing.has(c)).map((c) => ({ column: c, order: s.items.length, reverse: false }));
-      return { ...s, items: [...s.items, ...newItems] };
-    }));
+    setSubscaleStates((previous) => assignItemsToSubscale(previous, subscaleId, columns) as SubscaleState[]);
     setSelectedItems(new Set());
     markDirty();
   };
 
   const removeItemFromSubscale = (subscaleId: string, column: string) => {
-    setSubscaleStates(subscaleStates.map((s) => s.id !== subscaleId ? s : { ...s, items: s.items.filter((i) => i.column !== column).map((i, idx) => ({ ...i, order: idx })) }));
+    setSubscaleStates((previous) => removeItemFromSubscaleById(previous, subscaleId, column) as SubscaleState[]);
     markDirty();
   };
 
@@ -1449,11 +1462,42 @@ export function ConfigScreen({
                 {activeStep === 'subscales' && (
                   <SubscalesPanel
                     subscales={subscalesForPanel} unassignedItems={unassignedItems}
-                    onAddSubscale={addSubscale} onDeleteSubscale={deleteSubscale} onRenameSubscale={renameSubscale}
+                    onAddSubscale={() => { setScaleGroupMode('subscales'); void addSubscale(); }}
+                    onDeleteSubscale={deleteSubscale} onRenameSubscale={renameSubscale}
                     onRemoveItem={removeItemFromSubscale} onToggleReverse={toggleReverse} onMoveItem={moveItem}
                     selectedItems={selectedItems} onToggleSelection={toggleItemSelection}
                     onSelectAll={selectAllUnassigned} onClearSelection={clearSelection}
                     onBatchAdd={batchAddItems} activeSubscaleId={activeSubscaleId} onSetActiveSubscale={setActiveSubscaleId}
+                    mode={scaleGroupMode}
+                    onModeChange={(next) => {
+                      setScaleGroupMode(next);
+                      if (next === 'subscales' && !hasRealSubscales) {
+                        void addSubscale();
+                        return;
+                      }
+                      if (next === 'one') {
+                        setSubscaleStates((previous) => {
+                          const auto = previous.find((s) => isAutomaticSubscale(s));
+                          const primary = auto ?? previous.find((s) => !isAutomaticSubscale(s)) ?? previous[0];
+                          if (!primary) return previous;
+                          const owned = new Set<string>();
+                          const merged: { column: string; order: number; reverse: boolean }[] = [];
+                          for (const scale of previous) {
+                            for (const item of scale.items) {
+                              if (owned.has(item.column)) continue;
+                              owned.add(item.column);
+                              merged.push({ column: item.column, order: merged.length, reverse: item.reverse });
+                            }
+                          }
+                          for (const col of itemColumns) {
+                            if (owned.has(col)) continue;
+                            merged.push({ column: col, order: merged.length, reverse: false });
+                          }
+                          return previous.map((s) => (s.id === primary.id ? { ...s, items: merged } : isAutomaticSubscale(s) ? s : { ...s, items: [] }));
+                        });
+                        markDirty();
+                      }
+                    }}
                   />
                 )}
                 {activeStep === 'scales' && (
@@ -1762,124 +1806,270 @@ function DemographicsPanel({ allColumns, demoCols, onToggle, onMarkAllItems }: {
 }
 
 // ── Subscales Panel — with batch selection ──
-function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSubscale, onRenameSubscale, onRemoveItem, onToggleReverse, onMoveItem, selectedItems, onToggleSelection, onSelectAll, onClearSelection, onBatchAdd, activeSubscaleId, onSetActiveSubscale }: {
+
+function SubscalesPanel({ subscales, unassignedItems, onAddSubscale, onDeleteSubscale, onRenameSubscale, onRemoveItem, onToggleReverse, onMoveItem, selectedItems, onToggleSelection, onSelectAll, onClearSelection, onBatchAdd, activeSubscaleId, onSetActiveSubscale, mode, onModeChange }: {
   subscales: SubscaleState[]; unassignedItems: string[];
   onAddSubscale: () => void; onDeleteSubscale: (id: string) => void; onRenameSubscale: (id: string, name: string) => void;
   onRemoveItem: (id: string, col: string) => void; onToggleReverse: (id: string, col: string) => void; onMoveItem: (id: string, idx: number, dir: 'up' | 'down') => void;
   selectedItems: Set<string>; onToggleSelection: (col: string) => void; onSelectAll: () => void; onClearSelection: () => void;
   onBatchAdd: (subscaleId: string, cols: string[]) => void; activeSubscaleId: string | null; onSetActiveSubscale: (id: string | null) => void;
+  mode: 'one' | 'subscales'; onModeChange: (mode: 'one' | 'subscales') => void;
 }) {
-  const [batchTarget, setBatchTarget] = useState<string>('');
   const [search, setSearch] = useState('');
+  const [assignToId, setAssignToId] = useState<string | null>(null);
   const selectedArr = Array.from(selectedItems);
   const filteredUnassigned = unassignedItems.filter((c) => c.toLowerCase().includes(search.toLowerCase()));
+  const assignTarget = assignToId ?? activeSubscaleId;
+  const assignTargetName = subscales.find((s) => s.id === assignTarget)?.name ?? 'subscale';
 
-  const handleBatchAdd = () => {
-    const targetId = activeSubscaleId || batchTarget;
-    if (!targetId || selectedArr.length === 0) return;
-    onBatchAdd(targetId, selectedArr);
+  const openAssign = (id: string) => {
+    onSetActiveSubscale(id);
+    setAssignToId(id);
+    onClearSelection();
+    setSearch('');
+  };
+
+  const closeAssign = () => {
+    setAssignToId(null);
+    onClearSelection();
+    setSearch('');
+  };
+
+  const handleAddSelected = () => {
+    if (!assignTarget || selectedArr.length === 0) return;
+    onBatchAdd(assignTarget, selectedArr);
+    closeAssign();
   };
 
   return (
-    <div className="p-3">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Scale Groups</span>
-        <Button onClick={onAddSubscale} size="sm" className="px-2 py-1 text-xs"><Plus className="w-3 h-3" /> Add</Button>
+    <div className="p-3 space-y-3">
+      {/* One scale / Subscales */}
+      <div className="flex rounded-lg border border-secondary-200 p-0.5 bg-secondary-50">
+        <button
+          type="button"
+          onClick={() => onModeChange('one')}
+          className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${mode === 'one' ? 'bg-white text-primary-700 shadow-sm font-medium' : 'text-secondary-600 hover:text-secondary-800'}`}
+        >
+          One scale
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange('subscales')}
+          className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${mode === 'subscales' ? 'bg-white text-primary-700 shadow-sm font-medium' : 'text-secondary-600 hover:text-secondary-800'}`}
+        >
+          Subscales
+        </button>
       </div>
 
-      {/* Unassigned items — searchable scrollable list */}
-      <div className="mb-3 p-2.5 rounded-xl border border-secondary-200 bg-secondary-50">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-secondary-500">Unassigned ({unassignedItems.length})</span>
-          {unassignedItems.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button onClick={onSelectAll} className="text-xs text-primary-600 hover:underline">Select all</button>
-              {selectedItems.size > 0 && <button onClick={onClearSelection} className="text-xs text-secondary-500 hover:underline">Clear</button>}
-            </div>
-          )}
-        </div>
-        {unassignedItems.length === 0 ? (
-          <p className="text-sm text-secondary-400 py-2 text-center">All items assigned.</p>
-        ) : (
-          <>
-            <div className="relative mb-2">
-              <Search className="w-3.5 h-3.5 text-secondary-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items..." className="w-full pl-8 pr-3 py-1.5 text-xs border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400 bg-white" />
-            </div>
-            <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-              {filteredUnassigned.map((col) => (
-                <button
-                  key={col}
-                  onClick={() => onToggleSelection(col)}
-                  className={`px-2.5 py-1 text-sm rounded-lg border transition-all ${selectedItems.has(col) ? 'border-primary-500 bg-primary-100 text-primary-700 font-medium' : 'border-secondary-200 bg-white text-secondary-700 hover:border-primary-300'}`}
-                >
-                  {col}
-                </button>
-              ))}
-              {filteredUnassigned.length === 0 && <p className="text-xs text-secondary-400 py-2 text-center w-full">No items match "{search}"</p>}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Batch assignment bar */}
-      {selectedArr.length > 0 && (
-        <div className="mb-3 p-2.5 bg-primary-50 border border-primary-200 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-primary-700 whitespace-nowrap flex-shrink-0">{selectedArr.length} selected</span>
-            <select value={batchTarget} onChange={(e) => setBatchTarget(e.target.value)} className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded bg-white">
-              <option value="">Choose subscale...</option>
-              {subscales.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <Button size="sm" className="px-2 py-1 text-xs" onClick={handleBatchAdd} disabled={!batchTarget && !activeSubscaleId}><ArrowRight className="w-3 h-3" /> Add</Button>
-          </div>
-        </div>
+      {mode === 'one' && (
+        <p className="text-xs text-secondary-500">
+          All items score as one scale. Switch to <strong>Subscales</strong> to split items into groups.
+        </p>
       )}
 
-      {/* Subscale cards */}
-      <div className="space-y-2.5">
-        {subscales.map((sub) => (
-          <div key={sub.id} data-subscale-id={sub.id}
-            onClick={() => onSetActiveSubscale(sub.id)}
-            className={`p-3 rounded-xl border bg-white transition-all cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-secondary-200 hover:border-secondary-300'}`}>
-            <div className="flex items-center justify-between mb-2">
-              {isAutomaticSubscale(sub) ? (
-                <span className="text-sm font-semibold text-secondary-900">Overall scale (all items)</span>
-              ) : (
-                <>
-                  <input value={sub.name} onChange={(e) => onRenameSubscale(sub.id, e.target.value)} onClick={(e) => e.stopPropagation()} className="text-sm font-semibold text-secondary-900 bg-transparent border-none outline-none flex-1 min-w-0 focus:underline" />
-                  <button onClick={(e) => { e.stopPropagation(); onDeleteSubscale(sub.id); }} className="p-1 text-error-400 hover:text-error-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
-                </>
+      {mode === 'subscales' && (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Subscales</span>
+            <Button onClick={onAddSubscale} size="sm" className="px-2 py-1 text-xs"><Plus className="w-3 h-3" /> Add subscale</Button>
+          </div>
+
+          {/* Unassigned strip */}
+          <div className="rounded-lg border border-dashed border-secondary-300 bg-secondary-50 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-secondary-600">
+                Unassigned items: <strong className="text-secondary-800">{unassignedItems.length}</strong>
+              </span>
+              {unassignedItems.length > 0 && (
+                <span className="text-[11px] text-secondary-400">Click a card to assign</span>
               )}
             </div>
-            {isAutomaticSubscale(sub) && <p className="text-xs text-secondary-500 mb-2">No subscales yet: all items are scored together as one scale. Add a subscale to group items.</p>}
-            {sub.items.length === 0 ? (
-              <p className="text-xs text-secondary-400 py-2 text-center border border-dashed border-secondary-100 rounded">Select items above and add them here</p>
-            ) : (
-              <div className="space-y-0.5">
-                {sub.items.map((item, idx) => (
-                  <div key={item.column} onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1.5 px-2 py-1 bg-secondary-50 rounded text-xs group">
-                    <span className="text-secondary-400 font-mono w-4 flex-shrink-0">{idx + 1}.</span>
-                    <span className="flex-1 min-w-0 text-secondary-700 truncate" title={item.column}>{item.column}</span>
-                    <div className="flex items-center gap-0.5 flex-shrink-0">
-                      {!isAutomaticSubscale(sub) && <button onClick={() => onMoveItem(sub.id, idx, 'up')} disabled={idx === 0} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-[-90deg]" /></button>}
-                      {!isAutomaticSubscale(sub) && <button onClick={() => onMoveItem(sub.id, idx, 'down')} disabled={idx === sub.items.length - 1} className="p-0.5 text-secondary-400 hover:text-secondary-700 disabled:opacity-30"><ArrowRight className="w-3 h-3 rotate-90" /></button>}
-                      <button onClick={() => onToggleReverse(sub.id, item.column)} className={`px-1.5 py-0.5 text-xs rounded-full font-medium transition-colors ${item.reverse ? 'bg-warning-100 text-warning-700 border border-warning-300' : 'bg-secondary-100 text-secondary-400 border border-secondary-200 hover:text-secondary-600'}`}>Rev</button>
-                      {!isAutomaticSubscale(sub) && <button onClick={() => onRemoveItem(sub.id, item.column)} className="p-0.5 text-error-400 hover:text-error-600"><X className="w-3 h-3" /></button>}
-                    </div>
+            {unassignedItems.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                {unassignedItems.slice(0, 40).map((col) => (
+                  <span key={col} className="px-1.5 py-0.5 text-[11px] rounded bg-white border border-secondary-200 text-secondary-600 font-mono">{col}</span>
+                ))}
+                {unassignedItems.length > 40 && (
+                  <span className="text-[11px] text-secondary-400">+{unassignedItems.length - 40} more</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Cards */}
+          <div className="space-y-2">
+            {subscales.map((sub) => (
+              <div
+                key={sub.id}
+                data-subscale-id={sub.id}
+                className={`rounded-xl border p-2.5 transition-colors cursor-pointer ${activeSubscaleId === sub.id ? 'border-primary-400 bg-primary-50/40 ring-1 ring-primary-200' : 'border-secondary-200 bg-white hover:border-primary-300'}`}
+                onClick={() => openAssign(sub.id)}
+              >
+                <div className="flex items-center gap-2 mb-1.5" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    value={sub.name}
+                    onChange={(e) => onRenameSubscale(sub.id, e.target.value)}
+                    className="flex-1 min-w-0 text-sm font-medium text-secondary-900 bg-transparent border-b border-transparent focus:border-primary-400 focus:outline-none"
+                  />
+                  <span className="text-[11px] text-secondary-400 tabular-nums">{sub.items.length} items</span>
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary-600 hover:underline"
+                    onClick={() => openAssign(sub.id)}
+                  >
+                    Assign
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${sub.name}`}
+                    className="p-0.5 text-secondary-400 hover:text-error-600"
+                    onClick={() => onDeleteSubscale(sub.id)}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {sub.items.length === 0 ? (
+                  <p className="text-xs text-secondary-400 py-1">Empty — click to add items</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+                    {sub.items.map((item, idx) => (
+                      <span
+                        key={item.column}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] rounded-md bg-secondary-100 text-secondary-700 font-mono"
+                      >
+                        {item.column}
+                        <button
+                          type="button"
+                          title={item.reverse ? 'Reverse (on)' : 'Reverse (off)'}
+                          onClick={() => onToggleReverse(sub.id, item.column)}
+                          className={`px-1 rounded ${item.reverse ? 'bg-warning-200 text-warning-800' : 'text-secondary-400 hover:bg-secondary-200'}`}
+                        >
+                          R
+                        </button>
+                        {idx > 0 && (
+                          <button type="button" className="text-secondary-400 hover:text-secondary-700" onClick={() => onMoveItem(sub.id, idx, 'up')} aria-label="Move up">↑</button>
+                        )}
+                        {idx < sub.items.length - 1 && (
+                          <button type="button" className="text-secondary-400 hover:text-secondary-700" onClick={() => onMoveItem(sub.id, idx, 'down')} aria-label="Move down">↓</button>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${item.column}`}
+                          className="text-secondary-400 hover:text-error-600"
+                          onClick={() => onRemoveItem(sub.id, item.column)}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
                   </div>
+                )}
+              </div>
+            ))}
+            {subscales.length === 0 && (
+              <p className="text-xs text-secondary-400 text-center py-4">No subscales yet. Click Add subscale.</p>
+            )}
+          </div>
+
+          {/* Assign popup */}
+          {assignToId && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/30" onClick={closeAssign}>
+              <div
+                className="w-full max-w-md rounded-xl bg-white shadow-xl border border-secondary-200 p-4"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-label={`Assign items to ${assignTargetName}`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-secondary-900">Add items to {assignTargetName}</h3>
+                  <button type="button" onClick={closeAssign} className="text-secondary-400 hover:text-secondary-700"><X className="w-4 h-4" /></button>
+                </div>
+                {unassignedItems.length === 0 ? (
+                  <p className="text-sm text-secondary-500 py-4 text-center">No unassigned items left.</p>
+                ) : (
+                  <>
+                    <div className="relative mb-2">
+                      <Search className="w-3.5 h-3.5 text-secondary-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search items…"
+                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <button type="button" className="text-xs text-primary-600 hover:underline" onClick={onSelectAll}>Select all</button>
+                      <button type="button" className="text-xs text-secondary-500 hover:underline" onClick={onClearSelection}>Select none</button>
+                      <span className="text-[11px] text-secondary-400 ml-auto">{selectedArr.length} selected</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto mb-3 p-1">
+                      {filteredUnassigned.map((col) => (
+                        <button
+                          key={col}
+                          type="button"
+                          onClick={() => onToggleSelection(col)}
+                          className={`px-2.5 py-1 text-sm rounded-lg border font-mono transition-all ${selectedItems.has(col) ? 'border-primary-500 bg-primary-100 text-primary-700 font-medium' : 'border-secondary-200 bg-white text-secondary-700 hover:border-primary-300'}`}
+                        >
+                          {col}
+                        </button>
+                      ))}
+                      {filteredUnassigned.length === 0 && (
+                        <p className="text-xs text-secondary-400 py-2 w-full text-center">No items match “{search}”</p>
+                      )}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" onClick={closeAssign}>Cancel</Button>
+                      <Button size="sm" onClick={handleAddSelected} disabled={selectedArr.length === 0 || !assignTarget}>
+                        Add to {assignTargetName}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === 'one' && (() => {
+        const primary = subscales.find((s) => s.items.length > 0) ?? subscales[0] ?? null;
+        const items = primary?.items ?? [];
+        if (!primary) {
+          return <p className="text-xs text-secondary-500">Import a dataset to see items on this scale.</p>;
+        }
+        return (
+          <div className="rounded-xl border border-secondary-200 bg-white p-2.5">
+            <div className="flex items-center gap-2 mb-1.5">
+              <input
+                value={primary.name}
+                onChange={(e) => onRenameSubscale(primary.id, e.target.value)}
+                className="flex-1 min-w-0 text-sm font-medium text-secondary-900 bg-transparent border-b border-transparent focus:border-primary-400 focus:outline-none"
+              />
+              <span className="text-[11px] text-secondary-400 tabular-nums">{items.length} items</span>
+            </div>
+            {items.length === 0 ? (
+              <p className="text-xs text-secondary-400 py-1">No items yet. Mark columns as items under ID Columns, or switch to Subscales to assign them.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {items.map((item, idx) => (
+                  <span key={item.column} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] rounded-md bg-secondary-100 text-secondary-700 font-mono">
+                    {item.column}
+                    <button type="button" title={item.reverse ? 'Reverse (on)' : 'Reverse (off)'} onClick={() => onToggleReverse(primary.id, item.column)} className={`px-1 rounded ${item.reverse ? 'bg-warning-200 text-warning-800' : 'text-secondary-400 hover:bg-secondary-200'}`}>R</button>
+                    {idx > 0 && <button type="button" className="text-secondary-400 hover:text-secondary-700" onClick={() => onMoveItem(primary.id, idx, 'up')} aria-label="Move up">↑</button>}
+                    {idx < items.length - 1 && <button type="button" className="text-secondary-400 hover:text-secondary-700" onClick={() => onMoveItem(primary.id, idx, 'down')} aria-label="Move down">↓</button>}
+                  </span>
                 ))}
               </div>
             )}
           </div>
-        ))}
-      </div>
+        );
+      })()}
     </div>
   );
 }
 
-// ── Scales Panel — with custom formula support ──
+
 function ScalesPanel({ subscales, rows, excludedRows, displayIds, focusSubscaleId, onFocusHandled, onSetScaleRange, onConfirmRange, onApplyOutOfRange, onHighlightCell, onSetLabelMap, onSetWordOptions, onToggleOutput, onSetCustomFormula, onAutoDetect, onApplyToAll, onUpdateScale, overallSettings, onSetOverallSettings, formulaPreviewFn }: {
   subscales: SubscaleState[];
   rows: Record<string, unknown>[];
