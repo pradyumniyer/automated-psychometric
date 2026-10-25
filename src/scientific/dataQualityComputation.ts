@@ -51,9 +51,11 @@ export function computeDataQuality(
   const rowMeans: (number | null)[] = new Array(totalRows).fill(null);
   const itemMissingnessMap = Object.create(null) as Record<
     string,
-    { unexpected: number; allowed: number; outOfRange: number; valid: number }
+    { valid: number; notScored: number; specialScored: number; outOfRange: number; noNumber: number; blank: number }
   >;
-  for (const col of itemColumns) itemMissingnessMap[col] = { unexpected: 0, allowed: 0, outOfRange: 0, valid: 0 };
+  for (const col of itemColumns) {
+    itemMissingnessMap[col] = { valid: 0, notScored: 0, specialScored: 0, outOfRange: 0, noNumber: 0, blank: 0 };
+  }
   const perRow = Object.create(null) as Record<string, PerRowQuality>;
 
   for (const idx of includedIndices) {
@@ -68,16 +70,24 @@ export function computeDataQuality(
       const value = normalizedMatrix.values[idx][col];
       if (state === 'blank') {
         blank++;
-        itemMissingnessMap[col].unexpected++;
+        itemMissingnessMap[col].blank++;
       } else if (state === 'allowed') {
         allowed++;
-        itemMissingnessMap[col].allowed++;
+        itemMissingnessMap[col].notScored++;
       } else if (state === 'out_of_range') {
         outOfRange++;
         itemMissingnessMap[col].outOfRange++;
       } else if (state === 'unmapped') {
         blank++;
-        itemMissingnessMap[col].unexpected++;
+        itemMissingnessMap[col].noNumber++;
+      } else if (state === 'special_scored') {
+        itemMissingnessMap[col].specialScored++;
+        if (value === null || !Number.isFinite(value)) {
+          throw new Error(`Normalized special_scored item "${col}" has no finite value in row ${rowId}.`);
+        }
+        rowNumbers.push(value);
+        const reverseRange = options.reverseRangesByColumn?.[col];
+        normalizedValues.push(reverseRange ? reverseRange.min + reverseRange.max - value : value);
       } else {
         itemMissingnessMap[col].valid++;
         if (value === null || !Number.isFinite(value)) {
@@ -120,17 +130,26 @@ export function computeDataQuality(
   const itemMissingness: ItemMissingness[] = itemColumns.map((col) => {
     const m = itemMissingnessMap[col];
     const denom = includedIndices.length || 1;
+    const pct = (n: number) => (n / denom) * 100;
     return {
       column: col,
-      unexpectedMissingCount: m.unexpected,
-      allowedNonResponseCount: m.allowed,
-      outOfRangeCount: m.outOfRange,
       validCount: m.valid,
-      unexpectedMissingPct: (m.unexpected / denom) * 100,
-      allowedNonResponsePct: (m.allowed / denom) * 100,
-      outOfRangePct: (m.outOfRange / denom) * 100,
-      validPct: (m.valid / denom) * 100,
-      totalMissingPct: ((m.unexpected + m.allowed) / denom) * 100,
+      notScoredCount: m.notScored,
+      specialScoredCount: m.specialScored,
+      outOfRangeCount: m.outOfRange,
+      noNumberCount: m.noNumber,
+      blankCount: m.blank,
+      allowedNonResponseCount: m.notScored,
+      unexpectedMissingCount: m.blank + m.noNumber,
+      validPct: pct(m.valid),
+      notScoredPct: pct(m.notScored),
+      specialScoredPct: pct(m.specialScored),
+      outOfRangePct: pct(m.outOfRange),
+      noNumberPct: pct(m.noNumber),
+      blankPct: pct(m.blank),
+      allowedNonResponsePct: pct(m.notScored),
+      unexpectedMissingPct: pct(m.blank + m.noNumber),
+      totalMissingPct: pct(m.blank + m.noNumber + m.notScored),
     };
   }).sort((a, b) => b.unexpectedMissingPct - a.unexpectedMissingPct);
 

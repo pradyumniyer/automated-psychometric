@@ -44,14 +44,22 @@ export type FlagCategory = 'missingness' | 'outOfRange' | 'responseBias' | 'outl
 
 export interface ItemMissingness {
   column: string;
-  unexpectedMissingCount: number;
-  allowedNonResponseCount: number;
-  outOfRangeCount: number;
   validCount: number;
-  unexpectedMissingPct: number;
-  allowedNonResponsePct: number;
-  outOfRangePct: number;
+  notScoredCount: number;
+  specialScoredCount: number;
+  outOfRangeCount: number;
+  noNumberCount: number;
+  blankCount: number;
+  allowedNonResponseCount: number;
+  unexpectedMissingCount: number;
   validPct: number;
+  notScoredPct: number;
+  specialScoredPct: number;
+  outOfRangePct: number;
+  noNumberPct: number;
+  blankPct: number;
+  allowedNonResponsePct: number;
+  unexpectedMissingPct: number;
   totalMissingPct: number;
 }
 

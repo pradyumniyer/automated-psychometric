@@ -15,7 +15,7 @@ import { datasetRepository, surveyConfigRepository } from '@/storage/repositorie
 import {
   computeDataQuality, histogramData, qqPlotData, boxplotData,
   DEFAULT_THRESHOLDS, DEFAULT_ALLOWED_NON_RESPONSE,
-  QualityThresholds, AllowedNonResponse, Severity, FlagCategory,
+  QualityThresholds, Severity, FlagCategory,
 } from '@/scientific/dataQuality';
 import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
 import { saveDataQualityThresholds } from '@/lib/dataQualitySettings';
@@ -28,6 +28,7 @@ interface SubscaleState {
   minValue: number | null; maxValue: number | null;
   scaleType: 'numeric' | 'categorical';
   labelMap: ResponseScale['label_map'];
+  confirmed?: boolean;
 }
 
 function configuredRange(subscale: SubscaleState): { min: number; max: number } | null {
@@ -69,9 +70,9 @@ export function DataQualityScreen({
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [thresholds, setThresholds] = useState<QualityThresholds>(DEFAULT_THRESHOLDS);
   const thresholdsLoadedForDataset = useRef<string | null>(null);
-  const [allowedNonResponse, setAllowedNonResponse] = useState<AllowedNonResponse>(DEFAULT_ALLOWED_NON_RESPONSE);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
   const [newTextValue, setNewTextValue] = useState('');
   const [newSentinelValue, setNewSentinelValue] = useState('');
 
@@ -162,11 +163,12 @@ export function DataQualityScreen({
     return range?.max ?? null;
   }, [subscaleStates]);
 
+  // Only items assigned to subscales are analysed (same resolution path as scoring).
   const qualityNormalization = useMemo(() => {
     if (!dataset) return null;
     const configs: SubscaleConfig[] = [];
     const reverseRangesByColumn: Record<string, { min: number; max: number }> = {};
-    const assignedColumns = new Set<string>();
+    const analysedColumns: string[] = [];
 
     for (const subscale of subscaleStates) {
       if (subscale.items.length === 0) continue;
@@ -175,18 +177,13 @@ export function DataQualityScreen({
         minValue: subscale.minValue ?? undefined,
         maxValue: subscale.maxValue ?? undefined,
         labelMap: subscale.labelMap,
-        allowedNonresponse: [
-          ...allowedNonResponse.textValues,
-          ...allowedNonResponse.numericSentinels.map(String),
-        ],
+        confirmed: subscale.confirmed === true,
       };
       const hasNumericRange = responseScale.scaleType === 'numeric'
         && Number.isFinite(responseScale.minValue)
         && Number.isFinite(responseScale.maxValue)
         && responseScale.minValue! <= responseScale.maxValue!;
-      if (!hasNumericRange && responseScale.labelMap.length === 0) {
-        return null;
-      }
+      if (!hasNumericRange && responseScale.labelMap.length === 0) continue;
       configs.push({
         id: subscale.id,
         name: subscale.name,
@@ -195,67 +192,45 @@ export function DataQualityScreen({
         responseScale,
       });
       for (const item of subscale.items) {
-        assignedColumns.add(item.column);
+        analysedColumns.push(item.column);
         const range = configuredRange(subscale);
-        if (item.reverse && range) {
-          reverseRangesByColumn[item.column] = range;
-        }
+        if (item.reverse && range) reverseRangesByColumn[item.column] = range;
       }
     }
-
-    const unassignedColumns = itemColumns.filter((column) => !assignedColumns.has(column));
-    if (unassignedColumns.length > 0) {
-      const configuredScale = subscaleStates.find((subscale) => configuredRange(subscale) !== null);
-      if (!configuredScale) return null;
-      const range = configuredRange(configuredScale)!;
-      configs.push({
-        id: 'quality-unassigned-items',
-        name: 'Unassigned items',
-        items: unassignedColumns.map((column, order) => ({ column, order, reverse: false })),
-        scoringMethod: 'mean',
-        responseScale: {
-          scaleType: configuredScale.scaleType,
-          minValue: range.min,
-          maxValue: range.max,
-          labelMap: configuredScale.labelMap,
-          allowedNonresponse: [
-            ...allowedNonResponse.textValues,
-            ...allowedNonResponse.numericSentinels.map(String),
-          ],
-        },
-      });
-    }
-    if (configs.length === 0 || itemColumns.some((column) => !assignedColumns.has(column) && unassignedColumns.length === 0)) {
-      return null;
-    }
+    if (configs.length === 0) return null;
 
     const normalizedMatrix = normalizeResponseMatrix(
       dataset.rows as Record<string, unknown>[],
       configs,
-      [...allowedNonResponse.textValues, ...allowedNonResponse.numericSentinels.map(String)],
+      [],
     );
     const scaleForMidpoint = subscaleStates.find((subscale) => configuredRange(subscale) !== null) ?? null;
     const midpointRange = scaleForMidpoint ? configuredRange(scaleForMidpoint)! : null;
     const responseOptionCount = scaleForMidpoint
-      ? scaleForMidpoint.labelMap.length || (
-        midpointRange!.max - midpointRange!.min + 1
-      )
+      ? scaleForMidpoint.labelMap.length || (midpointRange ? midpointRange.max - midpointRange.min + 1 : null)
       : null;
-    return { normalizedMatrix, reverseRangesByColumn, responseOptionCount };
-  }, [dataset, subscaleStates, itemColumns, allowedNonResponse]);
+    return {
+      normalizedMatrix,
+      reverseRangesByColumn,
+      responseOptionCount,
+      analysedColumns: [...new Set(analysedColumns)],
+    };
+  }, [dataset, subscaleStates]);
 
   // ── Compute quality result ──
+  const analysedItemColumns = qualityNormalization?.analysedColumns ?? itemColumns;
+
   const qualityResult = useMemo(() => {
-    if (!dataset || itemColumns.length === 0) return null;
+    if (!dataset || analysedItemColumns.length === 0) return null;
     const rows = dataset.rows as Record<string, unknown>[];
     return computeDataQuality(
       rows,
       dataset.headers,
-      itemColumns,
+      analysedItemColumns,
       Array.from(excludedRows),
       scaleMin,
       scaleMax,
-      allowedNonResponse,
+      DEFAULT_ALLOWED_NON_RESPONSE,
       thresholds,
       {
         rowIds: dataset.row_ids,
@@ -264,7 +239,7 @@ export function DataQualityScreen({
         responseOptionCount: qualityNormalization?.responseOptionCount ?? undefined,
       },
     );
-  }, [dataset, itemColumns, excludedRows, scaleMin, scaleMax, allowedNonResponse, thresholds, qualityNormalization]);
+  }, [dataset, analysedItemColumns, excludedRows, scaleMin, scaleMax, thresholds, qualityNormalization]);
 
   const totalRows = dataset?.rows.length ?? 0;
   const includedCount = totalRows - excludedRows.size;
@@ -317,34 +292,8 @@ export function DataQualityScreen({
 
   const resetThresholds = () => {
     setThresholds(DEFAULT_THRESHOLDS);
-    setAllowedNonResponse(DEFAULT_ALLOWED_NON_RESPONSE);
   };
 
-  const addTextValue = () => {
-    const v = newTextValue.trim();
-    if (!v) return;
-    if (!allowedNonResponse.textValues.includes(v)) {
-      setAllowedNonResponse({ ...allowedNonResponse, textValues: [...allowedNonResponse.textValues, v] });
-    }
-    setNewTextValue('');
-  };
-
-  const removeTextValue = (v: string) => {
-    setAllowedNonResponse({ ...allowedNonResponse, textValues: allowedNonResponse.textValues.filter((t) => t !== v) });
-  };
-
-  const addSentinel = () => {
-    const v = Number(newSentinelValue);
-    if (isNaN(v)) return;
-    if (!allowedNonResponse.numericSentinels.includes(v)) {
-      setAllowedNonResponse({ ...allowedNonResponse, numericSentinels: [...allowedNonResponse.numericSentinels, v] });
-    }
-    setNewSentinelValue('');
-  };
-
-  const removeSentinel = (v: number) => {
-    setAllowedNonResponse({ ...allowedNonResponse, numericSentinels: allowedNonResponse.numericSentinels.filter((n) => n !== v) });
-  };
 
   // ── Empty / loading states ──
   if (datasets.length === 0) {
@@ -447,82 +396,82 @@ export function DataQualityScreen({
             </div>
           )}
 
-          {/* ── Allowed non-response + thresholds ── */}
+
+          {/* ── Plain-language summary ── */}
+          {(() => {
+            const items = qualityResult.itemMissingness;
+            const totals = items.reduce((acc, item) => ({
+              outOfRange: acc.outOfRange + item.outOfRangeCount,
+              noNumber: acc.noNumber + item.noNumberCount,
+              blank: acc.blank + item.blankCount,
+            }), { outOfRange: 0, noNumber: 0, blank: 0 });
+            const attention = qualityResult.missingness.respondentsAboveThreshold > 0
+              || totals.outOfRange > 0 || totals.noNumber > 0 || totals.blank > 0;
+            return (
+              <div className={`rounded-lg border px-4 py-3 ${attention ? 'border-warning-200 bg-warning-50' : 'border-success-200 bg-success-50'}`}>
+                <p className={`text-sm ${attention ? 'text-warning-900' : 'text-success-800'}`}>
+                  {includedCount} respondent{includedCount === 1 ? '' : 's'} · {analysedItemColumns.length} item{analysedItemColumns.length === 1 ? '' : 's'} analysed.
+                  {qualityResult.missingness.respondentsAboveThreshold > 0 && <> {qualityResult.missingness.respondentsAboveThreshold} above the missingness threshold.</>}
+                  {totals.outOfRange > 0 && <> {totals.outOfRange} answer{totals.outOfRange === 1 ? '' : 's'} outside range.</>}
+                  {totals.noNumber > 0 && <> {totals.noNumber} answer{totals.noNumber === 1 ? '' : 's'} need a number or a decision.</>}
+                  {totals.blank > 0 && <> {totals.blank} blank cell{totals.blank === 1 ? '' : 's'}.</>}
+                  {!attention && <> No data-quality issues need attention.</>}
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-white/80 text-secondary-700 border border-secondary-200">{includedCount} respondents</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-white/80 text-secondary-700 border border-secondary-200">{analysedItemColumns.length} items</span>
+                  {qualityResult.missingness.respondentsAboveThreshold > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-100 text-warning-800 border border-warning-200">{qualityResult.missingness.respondentsAboveThreshold} high missingness</span>
+                  )}
+                  {totals.outOfRange > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-100 text-warning-800 border border-warning-200">{totals.outOfRange} outside range</span>
+                  )}
+                  {totals.noNumber > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-100 text-warning-800 border border-warning-200">{totals.noNumber} need a number</span>
+                  )}
+                  {totals.blank > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-100 text-warning-800 border border-warning-200">{totals.blank} blank</span>
+                  )}
+                </div>
+                {subscaleStates.length === 0 && (
+                  <p className="text-xs text-secondary-600 mt-2">Set up your scales first: go to Response scales.</p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Advanced thresholds ── */}
           <Card className="overflow-hidden">
-            <button onClick={() => setShowSettings(!showSettings)}
+            <button type="button" onClick={() => setShowSettings(!showSettings)}
               className="w-full flex items-center justify-between px-5 py-3 hover:bg-secondary-50 transition-colors">
               <div className="flex items-center gap-2">
                 <Settings2 className="w-4 h-4 text-secondary-500" />
-                <span className="text-sm font-semibold text-secondary-700">Allowed non-response & thresholds</span>
+                <span className="text-sm font-semibold text-secondary-700">Advanced</span>
               </div>
               {showSettings ? <ChevronDown className="w-4 h-4 text-secondary-400" /> : <ChevronRight className="w-4 h-4 text-secondary-400" />}
             </button>
             {showSettings && (
-              <div className="px-5 pb-5 border-t border-secondary-100 space-y-5">
-                {/* Allowed non-response */}
-                <div className="pt-4">
-                  <div className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-2">Allowed non-response values</div>
-                  <p className="text-xs text-secondary-400 mb-3">These values are NOT treated as data-quality failures. They are excluded from missingness calculations.</p>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {allowedNonResponse.textValues.map((v) => (
-                      <span key={v} className="inline-flex items-center gap-1 px-2.5 py-1 bg-info-50 text-info-700 text-xs rounded-full border border-info-200">
-                        {v}
-                        <button onClick={() => removeTextValue(v)} className="hover:text-info-900"><X className="w-3 h-3" /></button>
-                      </span>
-                    ))}
-                    {allowedNonResponse.numericSentinels.map((v) => (
-                      <span key={v} className="inline-flex items-center gap-1 px-2.5 py-1 bg-accent-50 text-accent-700 text-xs rounded-full border border-accent-200">
-                        {v}
-                        <button onClick={() => removeSentinel(v)} className="hover:text-accent-900"><X className="w-3 h-3" /></button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="text" value={newTextValue} onChange={(e) => setNewTextValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTextValue(); } }}
-                      placeholder="Add text (e.g. Not applicable)"
-                      className="flex-1 px-3 py-1.5 text-sm border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" />
-                    <Button variant="secondary" size="sm" onClick={addTextValue}><Plus className="w-3.5 h-3.5" /> Text</Button>
-                  </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <input type="number" value={newSentinelValue} onChange={(e) => setNewSentinelValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSentinel(); } }}
-                      placeholder="Add numeric sentinel (e.g. -77)"
-                      className="flex-1 px-3 py-1.5 text-sm border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" />
-                    <Button variant="secondary" size="sm" onClick={addSentinel}><Plus className="w-3.5 h-3.5" /> Number</Button>
-                  </div>
+              <div className="px-5 pb-5 border-t border-secondary-100 space-y-4 pt-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Detection thresholds</div>
+                  <button type="button" onClick={resetThresholds} className="text-xs text-primary-600 hover:underline flex items-center gap-1">
+                    <RotateCcw className="w-3 h-3" /> Reset
+                  </button>
                 </div>
-
-                {/* Thresholds */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">Detection thresholds</div>
-                    <button onClick={resetThresholds} className="text-xs text-primary-600 hover:underline flex items-center gap-1">
-                      <RotateCcw className="w-3 h-3" /> Reset to defaults
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                    <ThresholdInput label="Unexpected missing (% of items)" value={thresholds.unexpectedMissingPct}
-                      onChange={(v) => setThresholds({ ...thresholds, unexpectedMissingPct: v })} />
-                    <ThresholdInput label="Longstring (consecutive identical)" value={thresholds.longstringMin}
-                      onChange={(v) => setThresholds({ ...thresholds, longstringMin: v })} step={1} />
-                    <ThresholdInput label="Extreme responding rate" value={thresholds.extremeRate}
-                      onChange={(v) => setThresholds({ ...thresholds, extremeRate: v })} step={0.05} />
-                    <ThresholdInput label="Midpoint responding rate" value={thresholds.midpointRate}
-                      onChange={(v) => setThresholds({ ...thresholds, midpointRate: v })} step={0.05} />
-                    <ThresholdInput label="Low variance (fraction of scale range)" value={thresholds.lowVarianceFraction}
-                      onChange={(v) => setThresholds({ ...thresholds, lowVarianceFraction: v })} step={0.01} />
-                    <ThresholdInput label="Z-score threshold (|z|)" value={thresholds.zscoreThreshold}
-                      onChange={(v) => setThresholds({ ...thresholds, zscoreThreshold: v })} step={0.1} />
-                  </div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                  <ThresholdInput label="Unexpected missing (% of items)" value={thresholds.unexpectedMissingPct}
+                    onChange={(v) => setThresholds({ ...thresholds, unexpectedMissingPct: v })} />
+                  <ThresholdInput label="Longstring (consecutive identical)" value={thresholds.longstringMin}
+                    onChange={(v) => setThresholds({ ...thresholds, longstringMin: v })} step={1} />
+                  <ThresholdInput label="Extreme responding rate" value={thresholds.extremeRate}
+                    onChange={(v) => setThresholds({ ...thresholds, extremeRate: v })} step={0.05} />
+                  <ThresholdInput label="Midpoint responding rate" value={thresholds.midpointRate}
+                    onChange={(v) => setThresholds({ ...thresholds, midpointRate: v })} step={0.05} />
+                  <ThresholdInput label="Low variance (fraction of scale range)" value={thresholds.lowVarianceFraction}
+                    onChange={(v) => setThresholds({ ...thresholds, lowVarianceFraction: v })} step={0.01} />
+                  <ThresholdInput label="Z-score threshold (|z|)" value={thresholds.zscoreThreshold}
+                    onChange={(v) => setThresholds({ ...thresholds, zscoreThreshold: v })} step={0.1} />
                 </div>
-
-                {qualityResult.outOfRange.rangeSource === 'inferred' && (
-                  <div className="flex items-center gap-2 px-3 py-2 bg-warning-50 text-warning-700 text-xs rounded-lg">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                    Scale range is <strong>inferred</strong> from observed data (min={qualityResult.outOfRange.scaleMin}, max={qualityResult.outOfRange.scaleMax}). Configure subscale scale min/max on the Configure screen for authoritative range checking.
-                  </div>
-                )}
               </div>
             )}
           </Card>
@@ -649,36 +598,68 @@ export function DataQualityScreen({
             )}
           </Card>
 
-          {/* ── Item missingness summary ── */}
+          {/* ── Item answer counts ── */}
           {qualityResult.itemMissingness.length > 0 && (
             <Card className="p-5">
-              <h2 className="text-sm font-semibold text-secondary-900 mb-3">Item missingness summary</h2>
-              <div className="overflow-auto max-h-[200px]">
+              <h2 className="text-sm font-semibold text-secondary-900 mb-3">Item answer counts</h2>
+              <div className="overflow-auto max-h-[320px]">
                 <table className="w-full text-xs border-collapse">
                   <thead className="sticky top-0 bg-secondary-50">
                     <tr>
                       <th className="px-2 py-1.5 text-left font-medium text-secondary-500 border-b border-secondary-200">Item</th>
-                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Unexpected missing %</th>
-                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Allowed non-response %</th>
-                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Total missing %</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Valid</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Not scored</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Scored special</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Outside range</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">No number</th>
+                      <th className="px-2 py-1.5 text-right font-medium text-secondary-500 border-b border-secondary-200">Blank</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-secondary-100">
-                    {qualityResult.itemMissingness.slice(0, 15).map((item) => (
-                      <tr key={item.column}>
-                        <td className="px-2 py-1.5 text-secondary-700 font-mono">{item.column}</td>
-                        <td className="px-2 py-1.5 text-right">
-                          <span className={item.unexpectedMissingPct > thresholds.unexpectedMissingPct ? 'text-error-600 font-medium' : 'text-secondary-600'}>
-                            {item.unexpectedMissingPct.toFixed(1)}%
-                          </span>
-                        </td>
-                        <td className="px-2 py-1.5 text-right text-info-600">{item.allowedNonResponsePct.toFixed(1)}%</td>
-                        <td className="px-2 py-1.5 text-right text-secondary-500">{item.totalMissingPct.toFixed(1)}%</td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const items = qualityResult.itemMissingness;
+                      const visible = showAllItems ? items : items.slice(0, 100);
+                      const totals = items.reduce((acc, item) => ({
+                        valid: acc.valid + item.validCount,
+                        notScored: acc.notScored + item.notScoredCount,
+                        specialScored: acc.specialScored + item.specialScoredCount,
+                        outOfRange: acc.outOfRange + item.outOfRangeCount,
+                        noNumber: acc.noNumber + item.noNumberCount,
+                        blank: acc.blank + item.blankCount,
+                      }), { valid: 0, notScored: 0, specialScored: 0, outOfRange: 0, noNumber: 0, blank: 0 });
+                      return (
+                        <>
+                          <tr className="bg-secondary-50 font-medium text-secondary-800">
+                            <td className="px-2 py-1.5">Totals</td>
+                            <td className="px-2 py-1.5 text-right">{totals.valid}</td>
+                            <td className="px-2 py-1.5 text-right">{totals.notScored}</td>
+                            <td className="px-2 py-1.5 text-right">{totals.specialScored}</td>
+                            <td className="px-2 py-1.5 text-right">{totals.outOfRange}</td>
+                            <td className="px-2 py-1.5 text-right">{totals.noNumber}</td>
+                            <td className="px-2 py-1.5 text-right">{totals.blank}</td>
+                          </tr>
+                          {visible.map((item) => (
+                            <tr key={item.column}>
+                              <td className="px-2 py-1.5 text-secondary-700 font-mono">{item.column}</td>
+                              <td className="px-2 py-1.5 text-right">{item.validCount}</td>
+                              <td className="px-2 py-1.5 text-right">{item.notScoredCount}</td>
+                              <td className="px-2 py-1.5 text-right">{item.specialScoredCount}</td>
+                              <td className="px-2 py-1.5 text-right">{item.outOfRangeCount}</td>
+                              <td className="px-2 py-1.5 text-right">{item.noNumberCount}</td>
+                              <td className="px-2 py-1.5 text-right">{item.blankCount}</td>
+                            </tr>
+                          ))}
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
+              {qualityResult.itemMissingness.length > 100 && (
+                <button type="button" className="mt-2 text-xs text-primary-600 hover:underline" onClick={() => setShowAllItems((v) => !v)}>
+                  {showAllItems ? 'Show first 100 items' : `Show all ${qualityResult.itemMissingness.length} items`}
+                </button>
+              )}
             </Card>
           )}
 
