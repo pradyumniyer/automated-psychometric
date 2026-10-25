@@ -10,9 +10,9 @@ Order = priority. These are owner-approved changes to the frozen UI (see `UI_FRE
 | F1, F15 | Response scales v2 and answers table (numeric scales) | done on branch `p2c2-codex` (5fa8d4c); hand-tested Fixture A, B, template; merge pending |
 | F16 | Word scales v3 (display not saved, legacy numbering, uneditable words, dead link, no variants); redesigned by the owner as a labels-left / numbers-right table with preset fill, "+" and Counts as (RESPONSE_SCALES 17.2) | NEXT: prompt P2c-4 |
 | F17 | Autosave never loses an edit (flush on leave) | NEXT: in P2c-4 |
-| F7 | Normality panel and reliability section | after P2d (P2d-2) |
-| F6 | Subscale builder rework | P3a |
-| F8 | Proration control | P3b |
+| F7 | Normality panel and reliability section **DONE (P2d-2, 25 Oct 2026)** | after P2d (P2d-2) |
+| F6 | Subscale builder **DONE (P3a, 25 Oct 2026)** rework | P3a |
+| F8 | Proration control **DONE core (P3b, 25 Oct 2026)**; UX detail in backlog | — |
 | F9 | Import v2 | P4 |
 | F11 | Report rework (APA section) | later, not specced |
 | F13 | Clarity pass | C1, C2 |
@@ -39,8 +39,8 @@ Order = priority. These are owner-approved changes to the frozen UI (see `UI_FRE
 
 **Toggles decision (owner, 17 Oct 2026):** the existing footer Sum/Mean toggles stay unchanged; F3/F4 use new separate persisted "Score columns" toggles (Sum, Mean, Overall) whose defaults reproduce today's grid and export.
 **F6. Subscale builder** (item 2). Click **Add subscale** as many times as needed. Click a subscale card → popup with the **unassigned item pool** (search, multi-select, select all/none) → **Add**. A **×** on an item chip in the card removes it back to the pool. Above the cards, an "Unassigned items" strip shows what is left (count + chips). The old "select subscale" box goes away. Reverse toggle and reordering inside a subscale are unchanged. **Owner-found bug (17 Oct 2026):** with two empty subscale cards added first, selecting items and assigning them through the popup to Subscale 1 put them in Subscale 2; after deleting Subscale 2, assigning to Subscale 1 did nothing. Adding one card at a time works. F6 must assign to the card that was clicked (by id, not by position or a shared 'selected' state) and needs a test with 2-3 empty cards, deleting cards, and assigning to each. **Design addition (owner, 19 Oct 2026):** the step starts with a choice between "One scale" (default; shows the single "Overall scale" card with all items and Rev toggles, no item pool, no Add subscale) and "Subscales" (item pool, Add subscale, cards). Switching to One scale asks first because the subscales are removed; switching to Subscales returns the items to the pool and keeps the reverse flags.
-**F7. Data-quality normality panel** (item 7, from the owner's screenshot; numbers verified correct: W 0.9804, p 0.8356, skew −0.2906, kurtosis −0.2038, 1 outlier). Replace "Verdict: Normal" and "Parametric analyses are appropriate" with the neutral wording in spec §2.6; format Q–Q axis labels to 2 decimals and stop them clipping; add the Lilliefors KS line next to Shapiro–Wilk; add the reliability section (approved addition).
-**F8. Proration control** in the Scoring panel (opt-in, default off, 20/25/50%).
+**F7. Data-quality normality panel** — **DONE (P2d-2, 25 Oct 2026)**. Neutral wording (no Verdict Normal / parametric gatekeeping); KS line; reliability section; Fixture A numbers verified in UI.
+**F8. Proration control** in the Scoring panel (opt-in, default off, 20/25/50%) — **core DONE (P3b)**. Backlog: pre-score explanation, per-respondent/scale missing-item list with links, grid highlight on prorated score cells, richer result card, remove CSV/XLSX from Scoring panel.
 
 ## Batch 3: import
 **F9. Import v2** (item 1): see `IMPORT_DETECTION.md`.
@@ -132,3 +132,16 @@ Response scales card, from the owner's hand test of 20 Oct (E1 to E7 were attemp
 7. Word mode shows its note inside the scale line (built; visual check pending).
 8. Empty "Answer / Found / Counts as" header when there are no rows (fixed in the follow-up).
 Plus everything C1 and C2 will not cover. Do this list in one pass, with screenshots, shortly before the first public release.
+
+
+## Cosmetic / UX backlog (25 Oct 2026)
+Owner: refinements only; not blocking next roadmap steps.
+
+**Proration informativeness (after P3b core)**
+- Before Run Scoring: plain-language “what proration does”; optional preview counts.
+- After scoring: list respondents × scales that were prorated; which items were unavailable (missing / not scored / out of range); links to row/cell.
+- Grid: highlight prorated **score** cells (not inventing item values); tooltip with short reason.
+- Scoring panel result card owns the detail; status bar stays one short line.
+- Remove CSV/XLSX buttons from the Scoring panel (Export screen already exports).
+
+**Still open from earlier polish lists:** C1/C2 clarity passes; end-of-project response-scales visual polish list above.

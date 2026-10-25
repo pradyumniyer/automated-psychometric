@@ -33,3 +33,7 @@ APP_FLOW §8. If the LiveGrid is not visible beside the config panels, it is not
 
 ## Briefing an AI coder (paste this as the first message)
 > Read CLAUDE.md, docs/PROJECT_RULES.md, docs/HANDOFF.md, docs/PHASE1_BRIEF.md and docs/IMPLEMENTATION_PLAN.md. Do not write code yet. Tell me what you understood, what is ambiguous or conflicting, and your plan for step 0a only. Then wait for my approval. After each step, show lint/typecheck/test/audit output and stop.
+
+---
+## Agent update — 25 Oct 2026
+Branch **`p2d-data-quality`** (ahead of `local-first-rebuild`). Done since prior handoff: word response scales hardening; Data Quality scale-resolution + item counts + Advanced; neutral normality + KS + reliability; subscale builder (One scale / Subscales, assign by id); proration opt-in UI. **Next:** C1/C2. **Backlog:** richer proration explanations/highlights (`FIX_LIST` cosmetic section). Merge to `local-first-rebuild` when convenient.

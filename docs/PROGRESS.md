@@ -1,6 +1,6 @@
 # Build progress log (current state; read this to know where the build stands)
 
-Branch: `local-first-rebuild` (public remote at 061526d = P2c-U1). Updated 21 Oct 2026. Work in progress sits on branch `p2c2-codex` (local; a temporary copy at 3d42520 may exist on GitHub). Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
+Branch: work is on `p2d-data-quality` (merge back into `local-first-rebuild` when ready). Updated **25 Oct 2026**. Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
 
 ## Done (commits)
 | Step | What | Commit |
@@ -44,28 +44,33 @@ Branch: `local-first-rebuild` (public remote at 061526d = P2c-U1). Updated 21 Oc
 - (21 Oct 2026) With 35 answers one stray 8 made detection pick 1-9 and score the 8; fixed by the weak-end check (RESPONSE_SCALES 16.3).
 - (21 Oct 2026) Autosave dropped an edit made within 1 second of leaving the screen. Fix in P2c-4.
 
+
+| P2c-4 / words | Response scales: word + numeric, assign-by-label, empty = not scored, rare labels → Other answers (1%+2 threshold), range preserved for specials, scale-complete Flip/Start at 0, backspace blocks scoring, numbers-only inputs | on `p2c4-words-grok` → merged into work leading to `p2d-data-quality` |
+| P2d | Data Quality uses subscale scale resolution (no allowed-non-response editor); item answer counts (Valid / Not scored / Scored special / Outside range / No number / Blank); summary strip + Advanced thresholds | `688c5b6` and follow-ups on `p2d-data-quality` |
+| P2d-2 (F7) | Neutral normality wording (no Normal/Non-normal verdict, no parametric gatekeeping); Lilliefors KS beside Shapiro–Wilk; Reliability panel (α, α-if-deleted, corrected item–total r); Q–Q ticks to 2 decimals | same branch (hand-checked Fixture A: W 0.9804, p 0.8356) |
+| P3a (F6) | Subscale builder: One scale / Subscales; assign by **card id** (fixes empty-card cross-wiring); assign dialog (search, multi-select); unassigned strip; unit tests `tests/subscaleBuilder.test.ts` | `d637328` |
+| P3b (F8) | Proration opt-in in Scoring panel (default off; 20/25/50%); persisted on survey config; count of prorated scores in result card and status | applied on `p2d-data-quality` (safe merge with P3a ConfigScreen) |
+
 ## Known open items (not yet done)
-- UI shows binary "normal / not normal" wording (DataQualityScreen: `status`, `mainText`, `Verdict StatBox`); needs an approved text change (spec §2.6).
-- No UI switch yet for z-score outliers, proration, Overall options, or the KS line (approved additions, step 1e).
-- Lint: 3 errors, 4 warnings, all pre-existing (ConfigScreen, ImportPreviewModal, ProjectList, ui), per the 20 Oct handoff (earlier notes said 5 and 3; run `npm run lint` before each prompt to confirm). Make lint blocking in CI after cleanup (P5).
-- Dev-only audit advisories (Vitest 3 tree; fixes need Vite 6 + plugin-react upgrade): schedule as its own toolchain-upgrade step.
-- Production audit is now clean (0 vulnerabilities). Respondent data no longer goes to any server.
-- `distributions` `pchisq` `_logP` argument removed; `pnorm`/`qnorm` honour `logP`.
+- **Proration UX polish (backlog, cosmetic):** explain what proration will do before Run Scoring; after scoring list which respondents/scales/items were unavailable; link to rows/cells; highlight prorated **score** cells in the grid (items stay unchanged); richer Scoring-panel result card; drop redundant CSV/XLSX from that card (Export owns export). Core F8 control is done.
+- Z-score outliers UI switch still optional (engine exists).
+- Overall options UI polish if any remain beyond current Overall settings.
+- Lint: pre-existing errors/warnings — make lint blocking in CI after cleanup (**P5**). Run `npm run lint` before each prompt.
+- Dev-only audit advisories (Vitest 3 tree; fixes need Vite 6 + plugin-react): toolchain-upgrade step.
+- Production audit clean; respondent data stays local.
+- `ConfigScreen.tsx` still large (split deferred).
+- DQ thresholds **are** persisted from Data Quality Advanced; allowed-non-response editor removed (resolution is via response scales).
+- Merge `p2d-data-quality` → `local-first-rebuild` when ready; push remote.
 
-- `ConfigScreen.tsx` is still ~1,700+ lines (split deferred). `supabase/migrations/` kept as history only. No Supabase data was migrated (prototype data).
-- DQ thresholds, allowed non-responses and `last_tab` are in the schema but not yet persisted from the screens.
-- Math has been verified by tests; UI/UX was hand-checked by the owner after the storage wiring. A hand check of the Fixture A numbers through the UI is recommended (see owner checklist).
 
-## Current work (21 Oct 2026)
-Hand-tested and approved by the owner: Fixture A (all flows), Fixture B (ranges, Confirm only for reverse subscales, Widen to 1-8, Not scored, reload) and the template-apply path for numeric scales. Test suite on `p2c2-codex`: 887 tests; typecheck and build pass; lint 3 errors and 3 warnings (all pre-existing; no new findings).
+## Current work (25 Oct 2026)
 
-**Merge status:** `p2c2-codex` (5fa8d4c) is approved for numeric scales and is to be merged into `local-first-rebuild` with `--ff-only` and pushed (steps in the handoff). The word fixture hand test then found word scales broken (FIX_LIST F16, F17); P2c-4 fixes it on a new branch `p2c4-words` created after the merge. The owner then specified the word-scale table he wants and the architect refined it (RESPONSE_SCALES 17.2); prompt P2c-4 was rewritten for it, including his later decisions (scoring waits for every flagged answer, words and numbers; Flip and Start at 0 only after all decisions; Reset to detected for the whole card). The owner decided cosmetic polish of the Response scales card waits for an end-of-project list (FIX_LIST).
+Active branch: **`p2d-data-quality`**. Owner hand-checked: response scales (words + numeric), Data Quality (counts, neutral normality, reliability, Fixture A stats), subscale builder (One scale / Subscales, assign-by-id), proration control (opt-in 20/25/50%, prorated count).
 
-**Order from here:** merge `p2c2-codex` -> P2c-4 (word scales v3 + autosave flush) -> P2d (Data Quality) -> P2d-2 (normality and reliability, F7) -> P3a (subscale builder F6, known bug with several empty cards) -> P3b (proration F8) -> C1 and C2 clarity passes -> S1 and the small-fixes backlog -> P4 Import v2 -> P2e robustness with real-world fixtures (before the first public deployment) -> P6 preset library -> P5 cleanup -> owner checks templates (with words), history/undo, Export cards, Report -> first free deployment and closed beta -> accounts/billing/cloud resume -> F11 Report rework -> end-of-project polish list. Details and prompts: `docs/AGENT_PROMPTS.md`.
+**Next (order):** C1 and C2 clarity passes → S1 / small-fixes backlog → P4 Import v2 → P2e real-world fixtures → P6 preset library → P5 cleanup → owner checks (templates with words, history/undo, Export, Report) → first free deployment. Details: `docs/AGENT_PROMPTS.md`.
 
-**Not hand-checked yet:** word fixture after P2c-4, history/undo, the rest of Data Quality, other Export cards, Report, templates with word scales.
+**Backlog (not blocking):** proration informativeness (see Known open items); end-of-project polish list in `FIX_LIST.md`.
 
-Builders: Codex in VS Code (GPT-5.6 Luna; high reasoning for fixes and state work; 6.1 Sol not available on the owner's Go plan) and GitHub Copilot student plan as backup (151 of 200 credits used on 19 Oct; renews 1 Nov 2026). Rules for both: `.github/copilot-instructions.md`; every prompt runs on its own branch (top of `docs/AGENT_PROMPTS.md`).
 
 ## Next (revised for credit budget)
 1. Merge and push the approved work; commit the updated docs first.
