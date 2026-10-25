@@ -307,6 +307,7 @@ export default function App() {
             onSetExcludedRows={setExcludedRowsDirect}
             onInspectRow={(rowIndex) => goToConfig(rowIndex)}
             onGoToExport={goToExport}
+            onGoToConfig={() => goToConfig()}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={changeActiveDataset}
           />

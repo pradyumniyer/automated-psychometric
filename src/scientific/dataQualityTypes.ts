@@ -129,9 +129,12 @@ export interface NormalitySummary {
   pValue: number | null;
   skewness: number | null;
   excessKurtosis: number | null;
+  /** @deprecated Keep for older UI; do not show as a binary verdict. */
   isNormal: boolean | null;
   interpretation: string;
   insufficientData: boolean;
+  ksD: number | null;
+  ksPValue: number | null;
 }
 
 export interface QualityResult {

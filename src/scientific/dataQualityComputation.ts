@@ -1,5 +1,6 @@
 import { mean, sd, skewness, kurtosis, quantile } from './descriptives';
 import { shapiroWilk, ShapiroWilkResult } from './shapiroWilk';
+import { lillieforsTest } from './kolmogorovSmirnov';
 import { detectScale } from './detection';
 import { AllowedNonResponse, DEFAULT_THRESHOLDS, FlagCategory, ItemMissingness, NormalitySummary, PerRowQuality, QualityComputationOptions, QualityResult, QualityThresholds, RowFlag, Severity } from './dataQualityTypes';
 import { createLegacyNormalizedMatrix, maxSeverity, resolveRowIds, severityRank, validateNormalizedMatrix } from './dataQualityHelpers';
@@ -332,24 +333,34 @@ export function computeDataQuality(
       n,
       W: null, pValue: null, skewness: null, excessKurtosis: null,
       isNormal: null,
-      interpretation: `Insufficient data (n=${n}). At least 3 valid row means required for normality testing.`,
+      interpretation: `Insufficient data (n=${n}). At least 3 valid row means are needed for these statistics.`,
       insufficientData: true,
+      ksD: null,
+      ksPValue: null,
     };
   } else {
     const sw: ShapiroWilkResult = n <= 5000 ? shapiroWilk(validMeans) : { W: NaN, pValue: NaN, n, ifault: 2, method: 'n > 5000' };
+    const ks = n >= 4 ? lillieforsTest(validMeans) : { D: NaN, pValue: NaN, n, method: 'Lilliefors', lillieforsCorrected: true };
     const skew = skewness(validMeans, 2);
     const exKurt = kurtosis(validMeans, 2);
     const isNormal = !isNaN(sw.pValue) ? sw.pValue > 0.05 : null;
 
+    // Spec §2.6: statistics + plain note only — no binary verdict, no "parametric are appropriate".
     let interpretation: string;
     if (isNaN(sw.pValue)) {
       interpretation = n > 5000
-        ? `Shapiro-Wilk not supported for n > 5000. Sample size: n=${n}. Consider visual inspection (histogram, Q-Q plot) or a Lilliefors-corrected KS test. Skewness=${skew.toFixed(3)}, excess kurtosis=${exKurt.toFixed(3)}.`
-        : `Normality test could not be completed (n=${n}). Inspect the histogram and Q-Q plot visually.`;
-    } else if (isNormal) {
-      interpretation = `Data appears normally distributed (Shapiro-Wilk W=${sw.W.toFixed(4)}, p=${sw.pValue.toFixed(4)} > 0.05). Skewness=${skew.toFixed(3)}, excess kurtosis=${exKurt.toFixed(3)}. Parametric analyses are appropriate.`;
+        ? `Shapiro–Wilk is not computed for n > 5000 (n=${n}). Use the histogram and Q–Q plot; Lilliefors KS is shown when available. Skewness=${skew.toFixed(3)}, excess kurtosis=${exKurt.toFixed(3)}.`
+        : `Shapiro–Wilk could not be completed (n=${n}). Inspect the histogram and Q–Q plot.`;
     } else {
-      interpretation = `Data significantly deviates from normality (Shapiro-Wilk W=${sw.W.toFixed(4)}, p=${sw.pValue.toFixed(4)} ≤ 0.05). Skewness=${skew.toFixed(3)}, excess kurtosis=${exKurt.toFixed(3)}. Note: in large samples, even tiny deviations can be statistically significant — always inspect the Q-Q plot and histogram before deciding on transformations or non-parametric methods.`;
+      const ksNote = !isNaN(ks.pValue)
+        ? ` Lilliefors KS D=${ks.D.toFixed(4)}, p=${ks.pValue.toFixed(4)}.`
+        : '';
+      interpretation = (
+        `Shapiro–Wilk W=${sw.W.toFixed(4)}, p=${sw.pValue.toFixed(4)}.${ksNote} `
+        + `Skewness=${skew.toFixed(3)}, excess kurtosis=${exKurt.toFixed(3)}. `
+        + `These are descriptive aids — always inspect the histogram and Q–Q plot; `
+        + `in large samples small departures can reach p ≤ 0.05.`
+      );
     }
 
     normality = {
@@ -361,6 +372,8 @@ export function computeDataQuality(
       isNormal,
       interpretation,
       insufficientData: false,
+      ksD: isNaN(ks.D) ? null : ks.D,
+      ksPValue: isNaN(ks.pValue) ? null : ks.pValue,
     };
   }
 

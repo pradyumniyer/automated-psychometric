@@ -18,6 +18,7 @@ import {
   QualityThresholds, Severity, FlagCategory,
 } from '@/scientific/dataQuality';
 import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
+import { cronbachAlphaFromNormalizedMatrix } from '@/scientific/reliability';
 import { saveDataQualityThresholds } from '@/lib/dataQualitySettings';
 import { Button, Card } from './ui';
 
@@ -54,12 +55,14 @@ interface Props {
   onSetExcludedRows: (rows: Set<number>) => Promise<void>;
   onInspectRow: (rowIndex: number) => void;
   onGoToExport: () => void;
+  onGoToConfig?: () => void;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
 }
 
 export function DataQualityScreen({
   project, excludedRows, onToggleRow, onBulkExclude, onSetExcludedRows, onInspectRow, onGoToExport,
+  onGoToConfig,
   sharedDatasetId, onDatasetChange,
 }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -413,7 +416,7 @@ export function DataQualityScreen({
                   {includedCount} respondent{includedCount === 1 ? '' : 's'} · {analysedItemColumns.length} item{analysedItemColumns.length === 1 ? '' : 's'} analysed.
                   {qualityResult.missingness.respondentsAboveThreshold > 0 && <> {qualityResult.missingness.respondentsAboveThreshold} above the missingness threshold.</>}
                   {totals.outOfRange > 0 && <> {totals.outOfRange} answer{totals.outOfRange === 1 ? '' : 's'} outside range.</>}
-                  {totals.noNumber > 0 && <> {totals.noNumber} answer{totals.noNumber === 1 ? '' : 's'} need a number or a decision.</>}
+                  {totals.noNumber > 0 && <> {totals.noNumber === 1 ? '1 answer needs' : `${totals.noNumber} answers need`} a number or a decision.</>}
                   {totals.blank > 0 && <> {totals.blank} blank cell{totals.blank === 1 ? '' : 's'}.</>}
                   {!attention && <> No data-quality issues need attention.</>}
                 </p>
@@ -433,8 +436,11 @@ export function DataQualityScreen({
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-warning-100 text-warning-800 border border-warning-200">{totals.blank} blank</span>
                   )}
                 </div>
-                {subscaleStates.length === 0 && (
-                  <p className="text-xs text-secondary-600 mt-2">Set up your scales first: go to Response scales.</p>
+                {(subscaleStates.length === 0 || totals.noNumber > 0 || totals.outOfRange > 0) && onGoToConfig && (
+                  <p className="text-xs text-secondary-600 mt-2">
+                    {subscaleStates.length === 0 ? 'Set up your scales first. ' : 'Review answers on the scale cards. '}
+                    <button type="button" className="text-primary-600 hover:underline" onClick={() => onGoToConfig()}>Go to Response scales</button>
+                  </p>
                 )}
               </div>
             );
@@ -515,10 +521,10 @@ export function DataQualityScreen({
             <SummaryCard
               icon={<BarChart3 className="w-5 h-5" />}
               title="Normality"
-              status={qualityResult.normality.insufficientData ? 'neutral' : qualityResult.normality.isNormal === true ? 'success' : qualityResult.normality.isNormal === false ? 'warning' : 'neutral'}
-              mainText={qualityResult.normality.insufficientData ? 'Insufficient data' : qualityResult.normality.isNormal ? 'Normal' : 'Non-normal'}
-              subText={qualityResult.normality.n ? `n=${qualityResult.normality.n}` : ''}
-              detail={qualityResult.normality.W != null ? `W=${qualityResult.normality.W.toFixed(3)}` : ''}
+              status="neutral"
+              mainText={qualityResult.normality.insufficientData ? 'Insufficient data' : 'Shape checks'}
+              subText={qualityResult.normality.W != null ? `W=${qualityResult.normality.W.toFixed(4)}` : '—'}
+              detail={qualityResult.normality.pValue != null ? `p=${qualityResult.normality.pValue.toFixed(4)}` : 'n < 3'}
             />
           </div>
 
@@ -663,6 +669,84 @@ export function DataQualityScreen({
             </Card>
           )}
 
+
+          {/* ── Reliability ── */}
+          {qualityNormalization && subscaleStates.some((s) => s.items.length >= 2) && (
+            <Card className="p-5">
+              <h2 className="text-sm font-semibold text-secondary-900 mb-1">Reliability</h2>
+              <p className="text-xs text-secondary-400 mb-3">Cronbach&apos;s α and item–total correlations on included rows (same scoring matrix). No verbal labels.</p>
+              <div className="space-y-4">
+                {subscaleStates.filter((s) => s.items.length >= 2).map((subscale) => {
+                  const config = {
+                    id: subscale.id,
+                    name: subscale.name,
+                    items: subscale.items,
+                    scoringMethod: subscale.scoringMethod,
+                    responseScale: {
+                      scaleType: subscale.scaleType,
+                      minValue: subscale.minValue ?? undefined,
+                      maxValue: subscale.maxValue ?? undefined,
+                      labelMap: subscale.labelMap,
+                      confirmed: subscale.confirmed === true,
+                    },
+                  } as SubscaleConfig;
+                  let result: ReturnType<typeof cronbachAlphaFromNormalizedMatrix> | null = null;
+                  try {
+                    const included = (dataset?.rows ?? []).map((_, i) => i).filter((i) => !excludedRows.has(i));
+                    result = cronbachAlphaFromNormalizedMatrix(qualityNormalization.normalizedMatrix, config, included);
+                  } catch {
+                    result = null;
+                  }
+                  if (!result || result.nCases < 2) {
+                    return (
+                      <div key={subscale.id} className="text-xs text-secondary-500">
+                        <span className="font-medium text-secondary-700">{subscale.name}</span> — not enough complete cases for α.
+                      </div>
+                    );
+                  }
+                  const negItems = result.itemStats.filter((item) => item.itemRestCorrelation < 0);
+                  return (
+                    <div key={subscale.id} className="border border-secondary-100 rounded-lg p-3">
+                      <div className="flex flex-wrap items-baseline gap-3 mb-2">
+                        <span className="text-sm font-medium text-secondary-900">{subscale.name}</span>
+                        <span className="text-xs text-secondary-600">α = {result.alpha.toFixed(3)}</span>
+                        <span className="text-xs text-secondary-500">standardized α = {result.standardizedAlpha.toFixed(3)}</span>
+                        <span className="text-xs text-secondary-400">n = {result.nCases}, items = {result.nItems}</span>
+                      </div>
+                      {negItems.length > 0 && (
+                        <p className="text-xs text-warning-700 mb-2">
+                          Negative item–total correlation: {negItems.map((item) => item.itemName).join(', ')}. Check reverse coding.
+                        </p>
+                      )}
+                      <div className="overflow-auto max-h-[180px]">
+                        <table className="w-full text-xs border-collapse">
+                          <thead className="bg-secondary-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left font-medium text-secondary-500">Item</th>
+                              <th className="px-2 py-1 text-right font-medium text-secondary-500">Corrected item–total r</th>
+                              <th className="px-2 py-1 text-right font-medium text-secondary-500">α if deleted</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-secondary-100">
+                            {result.itemStats.map((item) => (
+                              <tr key={item.itemName}>
+                                <td className="px-2 py-1 font-mono text-secondary-700">{item.itemName}</td>
+                                <td className={`px-2 py-1 text-right ${item.itemRestCorrelation < 0 ? 'text-warning-700 font-medium' : 'text-secondary-700'}`}>
+                                  {item.itemRestCorrelation.toFixed(3)}
+                                </td>
+                                <td className="px-2 py-1 text-right text-secondary-600">{item.alphaIfDeleted.toFixed(3)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
           {/* ── Charts ── */}
           <div className="grid grid-cols-3 gap-4">
             {/* Histogram with normal curve */}
@@ -693,8 +777,8 @@ export function DataQualityScreen({
                 <ResponsiveContainer width="100%" height={200}>
                   <ComposedChart data={qqData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
-                    <XAxis dataKey="theoretical" tick={{ fontSize: 10 }} domain={['dataMin', 'dataMax']} type="number" />
-                    <YAxis tick={{ fontSize: 10 }} domain={['dataMin', 'dataMax']} type="number" />
+                    <XAxis dataKey="theoretical" tick={{ fontSize: 10 }} tickFormatter={(v: number) => Number(v).toFixed(2)} domain={['dataMin', 'dataMax']} type="number" />
+                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => Number(v).toFixed(2)} domain={['dataMin', 'dataMax']} type="number" />
                     <Tooltip contentStyle={{ fontSize: 11 }} />
                     <ReferenceLine segment={[{ x: Math.min(...qqData.map(d => d.theoretical)), y: Math.min(...qqData.map(d => d.theoretical)) }, { x: Math.max(...qqData.map(d => d.theoretical)), y: Math.max(...qqData.map(d => d.theoretical)) }]} stroke="#a8a29e" strokeDasharray="4 4" />
                     <Scatter dataKey="sample" fill="#0d9488" name="Sample" />
@@ -717,16 +801,15 @@ export function DataQualityScreen({
             </Card>
           </div>
 
-          {/* ── Normality interpretation ── */}
+          {/* ── Normality assessment ── */}
           <Card className="p-5">
             <h2 className="text-sm font-semibold text-secondary-900 mb-2">Normality assessment</h2>
-            <div className="grid grid-cols-4 gap-4 mb-3">
-              <StatBox label="Test" value={qualityResult.normality.insufficientData ? '—' : 'Shapiro-Wilk'} />
-              <StatBox label="W statistic" value={qualityResult.normality.W != null ? qualityResult.normality.W.toFixed(4) : '—'} />
-              <StatBox label="p-value" value={qualityResult.normality.pValue != null ? qualityResult.normality.pValue.toFixed(4) : '—'} />
-              <StatBox label="Verdict" value={qualityResult.normality.insufficientData ? 'Insufficient' : qualityResult.normality.isNormal ? 'Normal' : 'Non-normal'} />
-            </div>
-            <div className="grid grid-cols-2 gap-4 mb-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-3">
+              <StatBox label="n (row means)" value={String(qualityResult.normality.n)} />
+              <StatBox label="Shapiro–Wilk W" value={qualityResult.normality.W != null ? qualityResult.normality.W.toFixed(4) : '—'} />
+              <StatBox label="Shapiro–Wilk p" value={qualityResult.normality.pValue != null ? qualityResult.normality.pValue.toFixed(4) : '—'} />
+              <StatBox label="Lilliefors KS D" value={qualityResult.normality.ksD != null && Number.isFinite(qualityResult.normality.ksD) ? qualityResult.normality.ksD.toFixed(4) : '—'} />
+              <StatBox label="Lilliefors KS p" value={qualityResult.normality.ksPValue != null && Number.isFinite(qualityResult.normality.ksPValue) ? qualityResult.normality.ksPValue.toFixed(4) : '—'} />
               <StatBox label="Skewness" value={qualityResult.normality.skewness != null ? qualityResult.normality.skewness.toFixed(4) : '—'} />
               <StatBox label="Excess kurtosis" value={qualityResult.normality.excessKurtosis != null ? qualityResult.normality.excessKurtosis.toFixed(4) : '—'} />
             </div>

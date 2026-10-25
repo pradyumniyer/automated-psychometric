@@ -50,6 +50,8 @@ export interface ScreenSurveyConfig {
     customFormula: string;
   };
   linkedTemplateId?: string | null;
+  prorationEnabled?: boolean;
+  prorationMaxMissingPct?: 20 | 25 | 50;
 }
 
 function toStoredBand(
@@ -186,8 +188,8 @@ export function toSurveyConfigRecord(
         },
     bands,
     allowed_nonresponse: existing?.allowed_nonresponse ?? [],
-    proration_enabled: existing?.proration_enabled ?? false,
-    proration_max_missing_pct: existing?.proration_max_missing_pct ?? 20,
+    proration_enabled: input.prorationEnabled ?? existing?.proration_enabled ?? false,
+    proration_max_missing_pct: input.prorationMaxMissingPct ?? existing?.proration_max_missing_pct ?? 20,
     dq_thresholds: existing?.dq_thresholds ?? {},
     linked_template_id: input.linkedTemplateId === undefined
       ? existing?.linked_template_id ?? null
