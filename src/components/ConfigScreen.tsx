@@ -146,6 +146,9 @@ export function ConfigScreen({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [checkedSheets, setCheckedSheets] = useState<Set<string>>(new Set());
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [showFirstRunChecklist, setShowFirstRunChecklist] = useState(() => {
+    try { return localStorage.getItem('psychometric-prep-first-run-done') !== '1'; } catch { return true; }
+  });
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [scaleGroupMode, setScaleGroupMode] = useState<'one' | 'subscales'>('one');
   const [activeSubscaleId, setActiveSubscaleId] = useState<string | null>(null);
@@ -424,7 +427,7 @@ export function ConfigScreen({
       setShowUpdateTemplate(!!linkedTemplate);
       setSaveState('saved');
       if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
-      saveStateTimerRef.current = setTimeout(() => setSaveState('idle'), 2000);
+      saveStateTimerRef.current = setTimeout(() => setSaveState('idle'), 4000);
     } catch (error) {
       setSaveState('idle');
       setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
@@ -1368,16 +1371,16 @@ export function ConfigScreen({
           {/* Auto-save indicator */}
           <div className="flex items-center gap-1.5 text-sm">
             {saveState === 'saving' && <><Loader2 className="w-3.5 h-3.5 text-secondary-400 animate-spin" /><span className="text-secondary-500">Saving...</span></>}
-            {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-success-600" /><span className="text-success-600">Saved</span></>}
+            {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-success-600" /><span className="text-success-600">All changes saved on this device</span></>}
           </div>
           <div className="w-px h-6 bg-secondary-200" />
           {/* Summary toggles */}
           <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5" aria-label="Summary rows">
-            <span
-              className="px-2 text-xs font-medium text-secondary-500 whitespace-nowrap"
-              title="Adds rows at the bottom of the grid with the sum / mean of each column across respondents. Blank and invalid cells are ignored."
-            >
+            <span className="px-2 text-xs font-medium text-secondary-500 whitespace-nowrap inline-flex items-center gap-1">
               Summary rows
+              <Tooltip text="Adds a Sum or Mean row at the bottom of the grid across included respondents. Blank and not-scored cells are ignored. Original answers are never changed.">
+                <Info className="w-3 h-3 text-secondary-400" />
+              </Tooltip>
             </span>
             {([
               { key: 'sum' as const, icon: Sigma, label: 'Sum', active: showSummarySum, toggle: onToggleSummarySum },
@@ -1472,6 +1475,33 @@ export function ConfigScreen({
             </button>
           )}
           <button onClick={() => setStatusMsg(null)}><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
+      {dataset && showFirstRunChecklist && (
+        <div className="mx-5 mt-2 mb-1 px-3 py-2.5 rounded-lg border border-primary-200 bg-primary-50/60 text-sm text-secondary-700">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-primary-800 mb-1">Getting started</div>
+              <ol className="text-[12px] text-secondary-600 space-y-0.5 list-decimal list-inside">
+                <li>Mark ID / demographic columns</li>
+                <li>Group items into one scale or subscales</li>
+                <li>Set response scales (how answers become numbers)</li>
+                <li>Optional: interpretation bands</li>
+                <li>Run scoring, then check Data Quality and export</li>
+              </ol>
+            </div>
+            <button
+              type="button"
+              className="text-xs text-primary-700 hover:underline flex-shrink-0"
+              onClick={() => {
+                try { localStorage.setItem('psychometric-prep-first-run-done', '1'); } catch { /* ignore */ }
+                setShowFirstRunChecklist(false);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -1798,7 +1828,7 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
     { name: 'demographics', icon: Users, label: 'ID' },
     { name: 'subscales', icon: Layers, label: 'Subscales' },
     { name: 'scales', icon: Sliders, label: 'Response scales' },
-    { name: 'bands', icon: Tag, label: 'Bands' },
+    { name: 'bands', icon: Tag, label: 'Bands' }, // interpretation bands
     { name: 'scoring', icon: Calculator, label: 'Scoring' },
   ];
   return (

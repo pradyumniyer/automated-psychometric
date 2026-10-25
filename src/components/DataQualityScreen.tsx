@@ -376,7 +376,7 @@ export function DataQualityScreen({
             <div>
               <h1 className="text-xl font-bold text-secondary-900">Data Quality</h1>
               <p className="text-sm text-secondary-500 mt-0.5">
-                Review missingness, out-of-range values, response bias, outliers, and normality. Exclude problematic rows before export.
+                Same rules as scoring: blank, not scored, and out-of-range answers are not treated as valid scale values. Review missingness, bias, outliers, and shape checks, then exclude rows before export.
               </p>
             </div>
             <div className="flex items-center gap-4">
