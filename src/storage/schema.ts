@@ -28,7 +28,18 @@ export interface DatasetRecord {
   row_ids: string[];
   row_meta?: Record<string, unknown>;
   column_meta: Record<string, unknown>;
-  import_meta?: { file_name?: string; header_row?: number; data_start_row?: number };
+  import_meta?: {
+    file_name?: string;
+    header_row?: number;
+    data_start_row?: number;
+    role?: 'source' | 'instrument';
+    parent_dataset_id?: string | null;
+    source_sheet_label?: string;
+    split_plan?: {
+      demoColumns: string[];
+      groups: { name: string; startIndex: number; endIndex: number; childDatasetId?: string }[];
+    };
+  };
   created_at: number;
 }
 

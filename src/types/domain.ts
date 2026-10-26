@@ -8,6 +8,30 @@ export interface Project {
   last_tab?: string;
 }
 
+export type DatasetRole = 'source' | 'instrument';
+
+export interface DatasetSplitGroupMeta {
+  name: string;
+  startIndex: number;
+  endIndex: number;
+  childDatasetId?: string;
+}
+
+export interface DatasetSplitPlan {
+  demoColumns: string[];
+  groups: DatasetSplitGroupMeta[];
+}
+
+export interface DatasetImportMeta {
+  file_name?: string;
+  header_row?: number;
+  data_start_row?: number;
+  role?: DatasetRole;
+  parent_dataset_id?: string | null;
+  source_sheet_label?: string;
+  split_plan?: DatasetSplitPlan;
+}
+
 export interface Dataset {
   id: string;
   project_id: string;
@@ -21,6 +45,11 @@ export interface Dataset {
   col_count: number;
   linked_template_id: string | null;
   created_at: string;
+  role?: DatasetRole;
+  parent_dataset_id?: string | null;
+  source_sheet_label?: string | null;
+  split_plan?: DatasetSplitPlan | null;
+  import_meta?: DatasetImportMeta;
 }
 
 export interface DemographicColumn {

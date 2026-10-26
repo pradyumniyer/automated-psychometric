@@ -22,6 +22,14 @@ export interface DatasetImportInput {
   headerRow?: number;
   dataStartRow?: number;
   demographicColumns?: Omit<import('@/types/domain').DemographicColumn, 'id' | 'project_id' | 'dataset_id' | 'created_at'>[];
+  rowIds?: string[];
+  role?: 'source' | 'instrument';
+  parentDatasetId?: string | null;
+  sourceSheetLabel?: string;
+  splitPlan?: {
+    demoColumns: string[];
+    groups: { name: string; startIndex: number; endIndex: number; childDatasetId?: string }[];
+  };
 }
 
 export interface ProjectRepository {
@@ -34,6 +42,7 @@ export interface DatasetRepository {
   list(projectId: string): Promise<Dataset[]>;
   get(datasetId: string): Promise<Dataset | null>;
   import(input: DatasetImportInput): Promise<Dataset>;
+  updateImportMeta(datasetId: string, meta: Partial<NonNullable<import('@/storage/schema').DatasetRecord['import_meta']>>): Promise<Dataset | null>;
   delete(datasetId: string): Promise<void>;
 }
 
@@ -112,10 +121,11 @@ function toProject(record: ProjectRecord): Project {
 }
 
 function toDataset(record: DatasetRecord, linkedTemplateId: string | null = null): Dataset {
+  const meta = record.import_meta;
   return {
     id: record.id,
     project_id: record.project_id,
-    file_name: record.import_meta?.file_name ?? record.name,
+    file_name: meta?.file_name ?? record.name,
     sheet_name: record.sheet_name ?? null,
     headers: record.headers,
     rows: record.rows.map((row) => Object.fromEntries(
@@ -127,6 +137,11 @@ function toDataset(record: DatasetRecord, linkedTemplateId: string | null = null
     col_count: record.headers.length,
     linked_template_id: linkedTemplateId,
     created_at: new Date(record.created_at).toISOString(),
+    role: meta?.role ?? 'source',
+    parent_dataset_id: meta?.parent_dataset_id ?? null,
+    source_sheet_label: meta?.source_sheet_label ?? null,
+    split_plan: meta?.split_plan ?? null,
+    import_meta: meta,
   };
 }
 
@@ -219,7 +234,9 @@ export const datasetRepository: DatasetRepository = {
   async import(input) {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const rowIds = input.rows.map(() => crypto.randomUUID());
+    const rowIds = input.rowIds && input.rowIds.length === input.rows.length
+      ? [...input.rowIds]
+      : input.rows.map(() => crypto.randomUUID());
     const datasetRecord: DatasetRecord = {
       id,
       project_id: input.projectId,
@@ -233,6 +250,10 @@ export const datasetRepository: DatasetRepository = {
       column_meta: input.columnMeta,
       import_meta: {
         file_name: input.fileName,
+        role: input.role ?? 'source',
+        parent_dataset_id: input.parentDatasetId ?? null,
+        ...(input.sourceSheetLabel ? { source_sheet_label: input.sourceSheetLabel } : {}),
+        ...(input.splitPlan ? { split_plan: input.splitPlan } : {}),
         ...(input.headerRow !== undefined ? { header_row: input.headerRow } : {}),
         ...(input.dataStartRow !== undefined ? { data_start_row: input.dataStartRow } : {}),
       },
@@ -293,6 +314,20 @@ export const datasetRepository: DatasetRepository = {
     );
 
     return toDataset(datasetRecord);
+  },
+
+  async updateImportMeta(datasetId, meta) {
+    const record = await db.datasets.get(datasetId);
+    if (!record) return null;
+    const merged = { ...(record.import_meta ?? {}), ...meta };
+    // Allow clearing organization: empty groups means not split
+    if (meta.split_plan && meta.split_plan.groups.length === 0) {
+      delete merged.split_plan;
+    }
+    const next = { ...record, import_meta: merged };
+    await db.datasets.put(next);
+    const config = await db.survey_configs.get(datasetId);
+    return toDataset(next, config?.linked_template_id ?? null);
   },
 
   async delete(datasetId) {
