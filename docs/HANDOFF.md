@@ -36,3 +36,29 @@ APP_FLOW §8. If the LiveGrid is not visible beside the config panels, it is not
 
 ## C2 hand-check (25 Oct 2026)
 C2 accepted. Summary-rows tip and broader in-app teaching deferred: see FIX_LIST “Onboarding & explanation backlog”. Prefer a real tutorial at beta/launch rather than more scattered (i) tips in v1.
+
+---
+
+## Continue here (26 Oct 2026) — agent / new chat
+
+**Branch:** `p2d-data-quality` (pushed; continue on this branch unless the owner says otherwise).
+
+### Done recently (do not redo)
+- Response scales (words + numeric), Data Quality + neutral normality/reliability, subscale builder (P3a), proration control core (P3b), C1/C2 clarity, S1 summary rows (no Age/ID in summary).
+- P4 **started:** `src/lib/importLayoutDetection.ts`, tests, ImportPreviewModal shell — **incomplete UX**.
+
+### Known gap (fix first if touching import)
+Import modal can show summary + confirm **without** a visible grid. Spec requires **always-visible compact preview** and primary **Import N rows**. See `docs/IMPORT_DETECTION.md`.
+
+### Next work (owner direction)
+1. **P4a** — Fix import modal: always show preview; quiet detection summary; Adjust collapsed (open if low confidence); empty rows/cols on by default with counts.
+2. **P4b** — Expand **ID step** (not a separate wizard): One scale (default) vs Several scales; column map paint + names; create N sheets with shared demos + per-scale items. Details in `IMPORT_DETECTION.md` Layer B.
+3. Then P2e / P6 / P5 as in `PROGRESS.md`.
+
+### Backlog (not blocking)
+- Proration informativeness (which cells, highlights).
+- Onboarding / tutorial / Summary-rows tip honesty.
+- End-of-project visual polish list in `FIX_LIST.md`.
+
+### Rules
+`docs/PROJECT_RULES.md` and `.github/copilot-instructions.md`. One step at a time; tests first; do not push unless the owner asks.

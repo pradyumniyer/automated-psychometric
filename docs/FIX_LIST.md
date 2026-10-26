@@ -143,3 +143,6 @@ Owner: correct after C2 hand-check; **defer past v1 / first beta**.
 4. **Tooltip component** — Further anti-clipping (viewport-aware, multi-line) if tips return in volume.
 
 Related: proration informativeness backlog (same date); end-of-project visual polish list above.
+
+## Import / ID structure (26 Oct 2026)
+Approved design: Layer A = import (detect layout, always show preview); Layer B = ID step (one scale vs several scales → column map → N sheets). Full write-up: `docs/IMPORT_DETECTION.md`. Next code: **P4a**, then **P4b**.

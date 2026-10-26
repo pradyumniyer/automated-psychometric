@@ -151,7 +151,16 @@ The Summary rows under the grid (Sum and Mean) and the Summary sheet / `_summary
 ---
 
 ## Status snapshot (25 Oct 2026)
-Completed on branch `p2d-data-quality`: response-scales words path, **P2d**, **P2d-2**, **P3a**, **P3b** (core). Next prompt to run: **C1** (clarity pass). Proration UX depth is backlog in `FIX_LIST.md`, not a new P-step unless the owner promotes it.
+Completed on branch `p2d-data-quality`: response-scales words path, **P2d**, **P2d-2**, **P3a**, **P3b** (core). Next prompt to run: **P4a**, then **P4b**. (clarity pass). Proration UX depth is backlog in `FIX_LIST.md`, not a new P-step unless the owner promotes it.
+
+
+**P4. Import v2** (`docs/IMPORT_DETECTION.md`, updated 26 Oct 2026).
+
+**P4a (do first).** Fix import modal: always-visible compact preview (≈6×8, 30-char cells + tooltip); quiet detection summary; primary **Import N rows**; **Adjust** collapsed unless confidence low; empty rows/cols removed by default with counts. Pure detection in `src/lib/importLayoutDetection.ts` (L1–L7 core; L4/L8+ later).
+
+**P4b.** Expand **ID step** (no separate structure wizard): default **One scale**; **Several scales** uses column map (click/drag paint, not typing ranges), scale names, **Create N sheets** = shared demos + each item block. Do not auto-split scales. Subscales remain in Scale Groups.
+
+**P4c later.** Undo split, advanced type-in ranges, L4, real-world import fixtures.
 
 ## Specs for the next prompts (to be turned into full prompts one at a time, after the previous one is approved)
 Every prompt below inherits the standing test rules above and must add edge cases from `docs/UX_PRINCIPLES.md` section 11.

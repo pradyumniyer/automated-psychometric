@@ -1,6 +1,6 @@
 # Build progress log (current state; read this to know where the build stands)
 
-Branch: `local-first-rebuild` (public remote at 061526d = P2c-U1). Updated 21 Oct 2026. Work in progress sits on branch `p2c2-codex` (local; a temporary copy at 3d42520 may exist on GitHub). Rules for agents: `PROJECT_RULES.md`. One step at a time, tests first.
+Branch: **`p2d-data-quality`** (continue here). Updated **26 Oct 2026**. Rules: `PROJECT_RULES.md`.
 
 ## Done (commits)
 | Step | What | Commit |
@@ -43,6 +43,14 @@ Branch: `local-first-rebuild` (public remote at 061526d = P2c-U1). Updated 21 Oc
 - (21 Oct 2026) Word scales were silently wrong or blank: preset numbers were displayed but not saved (all scores blank), and datasets with no subscales used first-seen numbering (wrong sums with no warning). Fix in P2c-4.
 - (21 Oct 2026) With 35 answers one stray 8 made detection pick 1-9 and score the 8; fixed by the weak-end check (RESPONSE_SCALES 16.3).
 - (21 Oct 2026) Autosave dropped an edit made within 1 second of leaving the screen. Fix in P2c-4.
+
+
+| P4 (partial) | Import detection module + modal shell; **P4a/P4b design approved** (`IMPORT_DETECTION.md`) | in progress |
+
+## Next (26 Oct 2026)
+1. **P4a** — Import modal: always-visible preview; primary Import; Adjust; silent empties/header.
+2. **P4b** — ID step multi-scale organize (column map → N sheets).
+3. P2e → P6 → P5.
 
 ## Known open items (not yet done)
 - **Onboarding / tutorial** and honest Summary-rows (i) tip — deferred past v1 (see FIX_LIST).
