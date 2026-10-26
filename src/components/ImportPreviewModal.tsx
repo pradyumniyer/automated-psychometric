@@ -13,6 +13,7 @@ import {
   type EmptyRowReport,
   type EmptyColumnReport,
 } from '@/lib/fileParser';
+import { detectImportLayout, layoutToModalFields, type ImportLayoutDetection } from '@/lib/importLayoutDetection';
 import { Button, Modal } from './ui';
 
 type Preset = 'simple' | 'two-row' | 'auto-detect';
@@ -46,25 +47,35 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
   const [headerRow, setHeaderRow] = useState(0);
   const [labelRow, setLabelRow] = useState<number | null>(null);
   const [dataStartRow, setDataStartRow] = useState(1);
-  const [removeEmptyRows, setRemoveEmptyRows] = useState(false);
-  const [removeEmptyCols, setRemoveEmptyCols] = useState(false);
+  const [removeEmptyRows, setRemoveEmptyRows] = useState(true);
+  const [removeEmptyCols, setRemoveEmptyCols] = useState(true);
   const [activePreset, setActivePreset] = useState<Preset>('auto-detect');
   const [importing, setImporting] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
+  const [detection, setDetection] = useState<ImportLayoutDetection | null>(null);
 
   // Load raw rows when request changes
   useEffect(() => {
     if (!request) { setRawRows(null); return; }
     setLoading(true);
     setError(null);
-    setRemoveEmptyRows(false);
-    setRemoveEmptyCols(false);
+    setRemoveEmptyRows(true);
+    setRemoveEmptyCols(true);
+    setShowAdjust(false);
+    setDetection(null);
     setImporting(false);
     getRawSheet(request.file, request.sheetName)
       .then((rows) => {
         setRawRows(rows);
-        // Auto-detect on open
-        const layout = detectHeaderLayout(rows);
-        applyLayout(layout);
+        const detected = detectImportLayout(rows);
+        setDetection(detected);
+        const fields = layoutToModalFields(detected);
+        setHeaderRow(fields.headerRow);
+        setLabelRow(fields.labelRow);
+        setDataStartRow(fields.dataStartRow);
+        setRemoveEmptyRows(fields.removeEmptyRows);
+        setRemoveEmptyCols(fields.removeEmptyColumns);
+        setShowAdjust(detected.confidence === 'low');
         setActivePreset('auto-detect');
         setLoading(false);
       })
@@ -103,7 +114,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
   }, [rawRows, applyLayout]);
 
   // Computed preview data
-  const previewRows = rawRows?.slice(0, 20) ?? [];
+  const previewRows = rawRows?.slice(0, 6) ?? [];
   const totalRawRows = rawRows?.length ?? 0;
 
   const previewHeaders = useMemo(() => {
@@ -169,9 +180,7 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
     }
   };
 
-  const maxCols = rawRows
-    ? Math.max(...rawRows.slice(0, 20).map((r) => r.length), 0)
-    : 0;
+  const maxCols = Math.min(8, Math.max(1, ...((rawRows ?? []).map((r) => (r as unknown[]).length).concat([1]))));
 
   const formatEmptyRowSample = (report: EmptyRowReport): string => {
     const sample = report.rowNumbers.slice(0, 5);
@@ -196,7 +205,102 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Preset buttons */}
+                    {/* Detection summary — always */}
+          {detection && !validationError && (
+            <div className={`px-3 py-2.5 rounded-lg border text-sm ${
+              detection.confidence === 'high' ? 'bg-success-50 border-success-200 text-success-900'
+              : detection.confidence === 'medium' ? 'bg-info-50 border-info-200 text-info-900'
+              : 'bg-warning-50 border-warning-200 text-warning-900'
+            }`}>
+              <div className="font-medium">{detection.summary}</div>
+              {detection.warnings.length > 0 && (
+                <ul className="mt-1 text-[11px] opacity-90 list-disc list-inside">
+                  {detection.warnings.slice(0, 4).map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {!validationError && !detection && (
+            <div className="text-xs text-secondary-500">
+              {dataRowCount} data row{dataRowCount !== 1 ? 's' : ''} × {previewHeaders.length} column{previewHeaders.length !== 1 ? 's' : ''}
+              {labelRow != null && ' (with question labels)'}
+            </div>
+          )}
+
+{/* Preview grid */}
+          <div className="border border-secondary-200 rounded-lg overflow-hidden">
+            <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+              <table className="w-full text-xs border-collapse">
+                <tbody>
+                  {previewRows.map((row, rIdx) => {
+                    const isHeader = rIdx === headerRow;
+                    const isLabel = rIdx === labelRow;
+                    const isData = rIdx >= dataStartRow;
+                    const isEmpty = row.every((v: unknown) => v == null || String(v).trim() === '');
+                    const isBefore = rIdx < dataStartRow && !isHeader && !isLabel;
+                    let bgClass = 'bg-white';
+                    if (isHeader) bgClass = 'bg-primary-100';
+                    else if (isLabel) bgClass = 'bg-blue-50';
+                    else if (isEmpty && isData) bgClass = 'bg-warning-50/60';
+                    else if (isBefore) bgClass = 'bg-secondary-50';
+
+                    return (
+                      <tr key={rIdx} className={`${bgClass} border-b border-secondary-100`}>
+                        <td className="px-2 py-1 text-secondary-400 font-mono w-12 text-right border-r border-secondary-200 sticky left-0 bg-inherit flex-shrink-0">
+                          <div className="flex items-center justify-end gap-1">
+                            {isHeader && <span className="px-1 py-0.5 rounded bg-primary-600 text-white text-[9px] font-semibold leading-none">H</span>}
+                            {isLabel && <span className="px-1 py-0.5 rounded bg-blue-600 text-white text-[9px] font-semibold leading-none">L</span>}
+                            {isEmpty && isData && <span className="px-1 py-0.5 rounded bg-warning-500 text-white text-[9px] font-semibold leading-none">E</span>}
+                            <span>{rIdx + 1}</span>
+                          </div>
+                        </td>
+                        {Array.from({ length: maxCols }, (_, cIdx) => {
+                          const val = (row as unknown[])[cIdx];
+                          const full = val != null ? String(val) : '';
+                          const display = full.length > 30 ? `${full.slice(0, 30)}…` : full;
+                          return (
+                            <td
+                              key={cIdx}
+                              className={`px-2 py-1 max-w-[140px] truncate ${isHeader ? 'font-semibold text-primary-900' : isLabel ? 'text-blue-700 italic' : isBefore ? 'text-secondary-400' : 'text-secondary-700'}`}
+                              title={full}
+                            >
+                              {display || <span className="text-secondary-300">--</span>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {totalRawRows > 6 && (
+              <div className="px-3 py-1.5 bg-secondary-50 border-t border-secondary-200 text-xs text-secondary-500 text-center">
+                Showing first rows (up to 6×8); full file imports on confirm
+              </div>
+            )}
+          </div>
+
+          
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="text-xs font-medium text-primary-700 hover:underline"
+              onClick={() => setShowAdjust((v) => !v)}
+            >
+              {showAdjust ? 'Hide layout adjust' : 'Adjust layout'}
+            </button>
+            <span className="text-[11px] text-secondary-400">
+              Header and empty rows/columns are detected automatically
+            </span>
+          </div>
+
+          {showAdjust && (
+          <div className="space-y-3 rounded-lg border border-secondary-200 p-3 bg-secondary-50/40">
+{/* Preset buttons */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-secondary-500 mr-1">Format:</span>
             {([
@@ -319,58 +423,8 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
             </div>
           )}
 
-          {/* Preview grid */}
-          <div className="border border-secondary-200 rounded-lg overflow-hidden">
-            <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
-              <table className="w-full text-xs border-collapse">
-                <tbody>
-                  {previewRows.map((row, rIdx) => {
-                    const isHeader = rIdx === headerRow;
-                    const isLabel = rIdx === labelRow;
-                    const isData = rIdx >= dataStartRow;
-                    const isEmpty = row.every((v: unknown) => v == null || String(v).trim() === '');
-                    const isBefore = rIdx < dataStartRow && !isHeader && !isLabel;
-                    let bgClass = 'bg-white';
-                    if (isHeader) bgClass = 'bg-primary-100';
-                    else if (isLabel) bgClass = 'bg-blue-50';
-                    else if (isEmpty && isData) bgClass = 'bg-warning-50/60';
-                    else if (isBefore) bgClass = 'bg-secondary-50';
-
-                    return (
-                      <tr key={rIdx} className={`${bgClass} border-b border-secondary-100`}>
-                        <td className="px-2 py-1 text-secondary-400 font-mono w-12 text-right border-r border-secondary-200 sticky left-0 bg-inherit flex-shrink-0">
-                          <div className="flex items-center justify-end gap-1">
-                            {isHeader && <span className="px-1 py-0.5 rounded bg-primary-600 text-white text-[9px] font-semibold leading-none">H</span>}
-                            {isLabel && <span className="px-1 py-0.5 rounded bg-blue-600 text-white text-[9px] font-semibold leading-none">L</span>}
-                            {isEmpty && isData && <span className="px-1 py-0.5 rounded bg-warning-500 text-white text-[9px] font-semibold leading-none">E</span>}
-                            <span>{rIdx + 1}</span>
-                          </div>
-                        </td>
-                        {Array.from({ length: maxCols }, (_, cIdx) => {
-                          const val = (row as unknown[])[cIdx];
-                          const display = val != null ? String(val) : '';
-                          return (
-                            <td
-                              key={cIdx}
-                              className={`px-2 py-1 max-w-[200px] truncate ${isHeader ? 'font-semibold text-primary-900' : isLabel ? 'text-blue-700 italic' : isBefore ? 'text-secondary-400' : 'text-secondary-700'}`}
-                              title={display}
-                            >
-                              {display || <span className="text-secondary-300">--</span>}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {totalRawRows > 20 && (
-              <div className="px-3 py-1.5 bg-secondary-50 border-t border-secondary-200 text-xs text-secondary-500 text-center">
-                Showing first 20 of {totalRawRows} rows
-              </div>
-            )}
           </div>
+          )}
 
           {/* Legend */}
           <div className="flex items-center gap-4 text-xs text-secondary-500">
@@ -378,38 +432,6 @@ export function ImportPreviewModal({ open, request, onConfirm, onCancel }: Props
             {labelRow != null && <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-300" /> Labels row</span>}
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-warning-50 border border-warning-300" /> Empty row</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-secondary-50 border border-secondary-200" /> Skipped</span>
-          </div>
-
-          {/* Detected column names */}
-          {previewHeaders.length > 0 && !validationError && (
-            <div>
-              <h4 className="text-xs font-semibold text-secondary-500 uppercase tracking-wide mb-1.5">Detected columns ({previewHeaders.length})</h4>
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                {previewHeaders.map((h, i) => (
-                  <span key={i} className={`px-2 py-0.5 text-xs rounded-full border ${h.startsWith('Column_') ? 'bg-warning-50 text-warning-700 border-warning-200' : 'bg-secondary-100 text-secondary-700 border-secondary-200'}`}>
-                    {h}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Summary line */}
-          {!validationError && (
-            <div className="text-xs text-secondary-500">
-              {dataRowCount} data row{dataRowCount !== 1 ? 's' : ''} × {previewHeaders.length} column{previewHeaders.length !== 1 ? 's' : ''}
-              {labelRow != null && ' (with question labels)'}
-            </div>
-          )}
-
-          {/* Help note */}
-          <div className="flex items-start gap-2 px-3 py-2 bg-secondary-50 rounded-lg">
-            <Info className="w-3.5 h-3.5 text-secondary-400 flex-shrink-0 mt-0.5" />
-            <p className="text-[11px] text-secondary-500 leading-relaxed">
-              Works best with tabular exports from Qualtrics, SurveyMonkey, REDCap, Google Forms, and Excel/CSV.
-              For multi-row headers, use the controls above to pick the name row.
-              Trailing empty rows are trimmed automatically; empty rows within the data are kept by default.
-            </p>
           </div>
 
           {/* Actions */}
