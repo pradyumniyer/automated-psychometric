@@ -83,12 +83,14 @@ export function detectScale(_headers: string[], rows: Record<string, unknown>[],
   return { scaleType: 'categorical', minValue: null, maxValue: null, uniqueValues: uniqueStrings.sort(), confidence: 0.85, suggestion: `Categorical scale with ${uniqueStrings.length} unique labels. Map each label to a numeric value.` };
 }
 
-export type LikertCategory = 'agreement' | 'frequency' | 'satisfaction' | 'quality' | 'importance' | 'likelihood' | 'severity';
+export type LikertCategory = 'agreement' | 'frequency' | 'satisfaction' | 'quality' | 'importance' | 'likelihood' | 'severity' | 'clinical';
 
 export interface LikertPreset {
   name: string;
   category: LikertCategory;
   points: number;
+  /** When true, scale is natively 0..(points-1); hide "Start at 0" and keep 0-based values */
+  nativeZero?: boolean;
   labels: { label: string; value: number; aliases?: string[] }[];
 }
 
@@ -126,6 +128,41 @@ export const COMMON_LIKERT_SCALES: LikertPreset[] = [
   { name: '3-pt Severity', category: 'severity', points: 3, labels: [{ label: 'Mild', value: 1 }, { label: 'Moderate', value: 2 }, { label: 'Severe', value: 3 }] },
   { name: '4-pt Severity', category: 'severity', points: 4, labels: [{ label: 'None', value: 1 }, { label: 'Mild', value: 2 }, { label: 'Moderate', value: 3 }, { label: 'Severe', value: 4 }] },
   { name: '5-pt Severity', category: 'severity', points: 5, labels: [{ label: 'None', value: 1 }, { label: 'Mild', value: 2 }, { label: 'Moderate', value: 3 }, { label: 'Severe', value: 4 }, { label: 'Extreme', value: 5 }] },
+
+  // Clinical / published instruments (P6) — native numbering
+  { name: 'PHQ-9 / GAD-7 (0-3)', category: 'clinical', points: 4, nativeZero: true, labels: [
+    { label: 'Not at all', value: 0, aliases: ['not at all', 'none at all', '0'] },
+    { label: 'Several days', value: 1, aliases: ['several day', 'a few days', '1'] },
+    { label: 'More than half the days', value: 2, aliases: ['more than half the days', 'more than half of the days', 'over half the days', '2'] },
+    { label: 'Nearly every day', value: 3, aliases: ['nearly everyday', 'almost every day', 'every day', '3'] },
+  ]},
+  { name: 'Perceived Stress Scale (0-4)', category: 'clinical', points: 5, nativeZero: true, labels: [
+    { label: 'Never', value: 0, aliases: ['0'] },
+    { label: 'Almost never', value: 1, aliases: ['almost never', '1'] },
+    { label: 'Sometimes', value: 2, aliases: ['2'] },
+    { label: 'Fairly often', value: 3, aliases: ['fairly often', 'quite often', '3'] },
+    { label: 'Very often', value: 4, aliases: ['very often', '4'] },
+  ]},
+  { name: 'BSI-style (0-4)', category: 'clinical', points: 5, nativeZero: true, labels: [
+    { label: 'Not at all', value: 0, aliases: ['not at all', '0'] },
+    { label: 'A little bit', value: 1, aliases: ['a little', 'a little bit', '1'] },
+    { label: 'Moderately', value: 2, aliases: ['moderate', '2'] },
+    { label: 'Quite a bit', value: 3, aliases: ['quite a bit', '3'] },
+    { label: 'Extremely', value: 4, aliases: ['extreme', '4'] },
+  ]},
+  { name: 'PANAS (1-5)', category: 'clinical', points: 5, labels: [
+    { label: 'Very slightly or not at all', value: 1, aliases: ['very slightly', 'not at all', 'very slightly or not at all'] },
+    { label: 'A little', value: 2, aliases: ['a little bit'] },
+    { label: 'Moderately', value: 3, aliases: ['moderate'] },
+    { label: 'Quite a bit', value: 4 },
+    { label: 'Extremely', value: 5, aliases: ['extreme'] },
+  ]},
+  { name: 'General Self-Efficacy (1-4)', category: 'clinical', points: 4, labels: [
+    { label: 'Not at all true', value: 1, aliases: ['not at all true', 'not true at all'] },
+    { label: 'Hardly true', value: 2, aliases: ['hardly true', 'barely true'] },
+    { label: 'Moderately true', value: 3, aliases: ['moderately true', 'somewhat true'] },
+    { label: 'Exactly true', value: 4, aliases: ['exactly true', 'completely true'] },
+  ]},
 ];
 
 function levenshtein(a: string, b: string): number {

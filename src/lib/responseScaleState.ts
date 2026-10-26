@@ -258,9 +258,12 @@ export function chooseResponsePreset<T extends ScaleRangeState>(state: T, preset
   for (const point of preset.labels) if (!labels.some((entry) => entry.kind !== 'special' && labelValue({ labelMap: labels }, entry) === point.value)) {
     labels.push({ label: point.label, value: point.value, kind: 'scale', manual: false });
   }
+  const presetValues = preset.labels.map((point) => point.value);
+  const minValue = Math.min(...presetValues);
+  const maxValue = Math.max(...presetValues);
   const next = { ...state, labelMap: labels, labelSource: 'preset' as const, presetName,
-    flipped: false, startsAtZero: false, rangeSource: 'preset' as const,
-    minValue: 1, maxValue: preset.points, baseMin: 1, baseMax: preset.points } as T;
+    flipped: false, startsAtZero: !!preset.nativeZero, rangeSource: 'preset' as const,
+    minValue, maxValue, baseMin: minValue, baseMax: maxValue } as T;
   return next;
 }
 
@@ -269,16 +272,22 @@ export function togglePresetFlip<T extends ScaleRangeState>(state: T): T {
   const preset = COMMON_LIKERT_SCALES.find((candidate) => candidate.name === state.presetName);
   if (!preset) return state;
   const flipped = !state.flipped;
+  const presetValues = preset.labels.map((point) => point.value);
+  const nativeMin = Math.min(...presetValues);
+  const nativeMax = Math.max(...presetValues);
+  const minValue = state.startsAtZero && nativeMin === 1 ? 0 : (state.startsAtZero || nativeMin === 0 ? Math.min(0, nativeMin) : nativeMin);
+  // Range after optional start-at-0 on 1-based presets
+  const rangeMin = state.startsAtZero && nativeMin === 1 ? 0 : nativeMin;
+  const rangeMax = state.startsAtZero && nativeMin === 1 ? nativeMax - 1 : nativeMax;
   const labels = (state.labelMap ?? []).map((entry) => {
     if (entry.manual || entry.kind === 'special' || entry.notScored) return entry;
     const point = preset.labels.find(({ label, aliases = [] }) => [label, ...aliases].some((candidate) => normalizedLabelKey(candidate) === normalizedLabelKey(entry.label)));
     if (!point) return entry;
-    const baseValue = (state.startsAtZero ? point.value - 1 : point.value);
-    return { ...entry, value: flipped ? (state.startsAtZero ? preset.points - 1 - baseValue : preset.points + 1 - baseValue) : baseValue };
+    let baseValue = state.startsAtZero && nativeMin === 1 ? point.value - 1 : point.value;
+    if (flipped) baseValue = rangeMin + rangeMax - baseValue;
+    return { ...entry, value: baseValue };
   });
-  const minValue = state.startsAtZero ? 0 : 1;
-  const maxValue = state.startsAtZero ? preset.points - 1 : preset.points;
-  return { ...state, labelMap: labels, flipped, minValue, maxValue, baseMin: minValue, baseMax: maxValue,
+  return { ...state, labelMap: labels, flipped, minValue: rangeMin, maxValue: rangeMax, baseMin: rangeMin, baseMax: rangeMax,
     rangeSource: 'preset', labelSource: state.labelSource } as T;
 }
 
@@ -286,6 +295,8 @@ export function togglePresetStartAtZero<T extends ScaleRangeState>(state: T): T 
   if (!state.presetName) return state;
   const preset = COMMON_LIKERT_SCALES.find((candidate) => candidate.name === state.presetName);
   if (!preset) return state;
+  // Native 0-based instruments (PHQ-9, GAD-7, PSS, BSI) — do not offer a second zero shift
+  if (preset.nativeZero) return state;
   const startsAtZero = !state.startsAtZero;
   const labels = (state.labelMap ?? []).map((entry) => {
     if (entry.manual || entry.kind === 'special' || entry.notScored) return entry;
