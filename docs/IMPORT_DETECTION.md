@@ -53,7 +53,8 @@ Compact preview: ~6 rows × ~8 columns, cells cut ~30 chars + tooltip, header ro
 
 ### Implementation status (26 Oct 2026)
 - Pure module `src/lib/importLayoutDetection.ts` + tests for L1–L3, L5–L7 core: **started**.
-- Modal shell: **started**; must be fixed so **preview is always visible** and primary action is **Import** (**P4a**).
+- Modal: **P4a done** (always-visible preview, Adjust, Import primary).
+- ID multi-scale split: **P4b done** (source vs instrument hierarchy).
 - L4, L8–L11, CSV dialect edge cases, 100k-row stress: **later**.
 
 ---

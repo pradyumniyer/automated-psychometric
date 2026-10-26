@@ -113,6 +113,21 @@ The app must handle ANY dataset, not only Fixture A. Run Fixture B (`docs/fixtur
 
 **F19. Real-world fixtures and robustness (P2e).** Fixtures so far are small, clean and hand-made (A: 30 respondents; B: 12; words: 20). Real exports are messy: Qualtrics extra header rows, Google Forms long headers, mixed numeric and word columns, duplicate or missing IDs, decimal commas, 2,000 columns, 5,000 rows, 6 respondents, 10 or more subscales, one-item subscales. Generate synthetic fixtures with independent expected values and run the whole pipeline (import to export, reload, template).
 
+### P2e scope refresh (26 Oct 2026 — after P4a/P4b)
+
+Robustness must exercise **current** product paths, not only the original import/score path:
+
+1. **Import Layer A (P4a)** — messy headers (Qualtrics ImportId, title rows, trailing Mean/SD); always-visible preview; empty rows/cols dropped by default.
+2. **Pre-split workbook** — multi-sheet picker still works (one tab per sheet).
+3. **Master sheet → Several scales (P4b)** — at least one fixture path: wide columns → organize into ≥2 instrument sheets → score on an **instrument** tab (not the source).
+4. **Source tab** — after split, organization summary persists across reload; instruments keep `source / name` labels.
+5. **Word scales + specials** — Prefer not to say / N/A not scored by default; mapping on instrument sheets.
+6. **Small n (G)** and **messy headers (C)** as P2e-1; D/E/F later.
+
+**P2e-1 deliverable:** generator script + fixtures **C** and **G** + expected JSON + automated tests (layout detection and/or import smoke + scoring smoke on clean path). Manual full UI pass optional.
+
+
+
 **F20. Leftovers from the state-fix prompts** (agent report 21 Oct 2026, accepted as follow-up): template-apply through the real preview/confirm UI is not tested; the exhaustive short action sequences do not re-check storage and template round trips after every action or compare app scores after every sequence step; negative ranges (-3 to 3) not confirmed in the range boxes; autosave on unmount (F17). Cleaning-log rule: typed-number decisions are not logged (differs from RESPONSE_SCALES 15).
 
 **F21. Decisions still to take (owner):** (a) show again the reverse-widening explanation note under an out-of-range row (RESPONSE_SCALES 12 and 15), or drop it; (b) log typed-number decisions or not; (c) RESOLVED (owner, 21 Oct 2026, late): scoring WAITS until every flagged answer, word or number, has a decision (number, Counts as, Widen, or Not scored); waiting status bar with a Go to button and "Treat all N as not scored"; included respondents only.

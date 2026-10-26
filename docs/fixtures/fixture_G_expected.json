@@ -1,0 +1,21 @@
+{
+  "respondentCount": 6,
+  "itemColumns": [
+    "S1",
+    "S2",
+    "S3"
+  ],
+  "scale": {
+    "min": 1,
+    "max": 5
+  },
+  "rowSums": [
+    6,
+    6,
+    7,
+    3,
+    9,
+    9
+  ],
+  "notes": "Tiny sample for small-n scoring and DQ edges"
+}

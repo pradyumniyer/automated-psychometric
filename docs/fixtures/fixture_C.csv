@@ -1,0 +1,15 @@
+ResponseId,Q1,Q2,Q3,Q4,Q5,Q6,Q7,Q8,Q9
+ResponseId,"Over the last 2 weeks, item 1?","Over the last 2 weeks, item 2?","Over the last 2 weeks, item 3?","Over the last 2 weeks, item 4?","Over the last 2 weeks, item 5?","Over the last 2 weeks, item 6?","Over the last 2 weeks, item 7?","Over the last 2 weeks, item 8?","Over the last 2 weeks, item 9?"
+"{""ImportId"":""ResponseId""}","{""ImportId"":""Q1""}","{""ImportId"":""Q2""}","{""ImportId"":""Q3""}","{""ImportId"":""Q4""}","{""ImportId"":""Q5""}","{""ImportId"":""Q6""}","{""ImportId"":""Q7""}","{""ImportId"":""Q8""}","{""ImportId"":""Q9""}"
+R001,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days
+R002,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day
+R003,Not at all,Prefer not to say,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all
+R004,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days
+R005,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days
+R006,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day
+R007,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all
+R008,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days
+R009,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days
+R010,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day
+R011,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all
+R012,Several days,More than half the days,Nearly every day,Not at all,Several days,More than half the days,Nearly every day,Not at all,Several days

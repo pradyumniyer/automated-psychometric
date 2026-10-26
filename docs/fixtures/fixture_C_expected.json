@@ -1,0 +1,30 @@
+{
+  "layout": {
+    "headerRowIndex": 0,
+    "importIdRowIndex": 2,
+    "dataStartRowIndex": 3,
+    "respondentCount": 12,
+    "itemColumns": [
+      "Q1",
+      "Q2",
+      "Q3",
+      "Q4",
+      "Q5",
+      "Q6",
+      "Q7",
+      "Q8",
+      "Q9"
+    ]
+  },
+  "notes": "Qualtrics-style three header rows; PHQ-like 0-3 word scale; Prefer not to say not scored",
+  "scale": {
+    "min": 0,
+    "max": 3,
+    "labels": [
+      "Not at all",
+      "Several days",
+      "More than half the days",
+      "Nearly every day"
+    ]
+  }
+}

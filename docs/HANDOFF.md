@@ -39,26 +39,22 @@ C2 accepted. Summary-rows tip and broader in-app teaching deferred: see FIX_LIST
 
 ---
 
-## Continue here (26 Oct 2026) — agent / new chat
+---
 
-**Branch:** `p2d-data-quality` (pushed; continue on this branch unless the owner says otherwise).
+## Continue here (26 Oct 2026, evening)
 
-### Done recently (do not redo)
-- Response scales (words + numeric), Data Quality + neutral normality/reliability, subscale builder (P3a), proration control core (P3b), C1/C2 clarity, S1 summary rows (no Age/ID in summary).
-- P4 **started:** `src/lib/importLayoutDetection.ts`, tests, ImportPreviewModal shell — **incomplete UX**.
+**Branch:** `p2d-data-quality`.
 
-### Known gap (fix first if touching import)
-Import modal can show summary + confirm **without** a visible grid. Spec requires **always-visible compact preview** and primary **Import N rows**. See `docs/IMPORT_DETECTION.md`.
+### Done (do not redo)
+- P4a import preview; P4b multi-scale split on ID step; hierarchy (`role`, `parent_dataset_id`, `split_plan`); source tab summary + Remove organized sheets.
+- Response scales, DQ, P3a/P3b, C1/C2, S1 as before.
 
-### Next work (owner direction)
-1. **P4a** — Fix import modal: always show preview; quiet detection summary; Adjust collapsed (open if low confidence); empty rows/cols on by default with counts.
-2. **P4b** — Expand **ID step** (not a separate wizard): One scale (default) vs Several scales; column map paint + names; create N sheets with shared demos + per-scale items. Details in `IMPORT_DETECTION.md` Layer B.
-3. Then P2e / P6 / P5 as in `PROGRESS.md`.
+### Backlog (not blocking P2e)
+- Lock Configure steps (subscales → score) on **source** sheets until unsplit.
+- Proration cell-level UX; onboarding/tutorial; P4c (edit organization in place, L4 headers).
 
-### Backlog (not blocking)
-- Proration informativeness (which cells, highlights).
-- Onboarding / tutorial / Summary-rows tip honesty.
-- End-of-project visual polish list in `FIX_LIST.md`.
+### Next
+**P2e-1** robustness fixtures C + G (see `FIX_LIST.md` P2e / F19, updated for post-P4 pipeline). Then P2e-2/3 → P6 → P5.
 
 ### Rules
-`docs/PROJECT_RULES.md` and `.github/copilot-instructions.md`. One step at a time; tests first; do not push unless the owner asks.
+`docs/PROJECT_RULES.md`. Tests first. Do not push unless owner asks.
