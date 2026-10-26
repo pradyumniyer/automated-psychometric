@@ -54,7 +54,7 @@ C2 accepted. Summary-rows tip and broader in-app teaching deferred: see FIX_LIST
 - Proration cell-level UX; onboarding/tutorial; P4c (edit organization in place, L4 headers).
 
 ### Next
-**P2e-1** robustness fixtures C + G (see `FIX_LIST.md` P2e / F19, updated for post-P4 pipeline). Then P2e-2/3 → P6 → P5.
+**P2e-1 (done)** robustness fixtures C + G (see `FIX_LIST.md` P2e / F19, updated for post-P4 pipeline). Then P2e-2/3 → P6 → P5.
 
 ### Rules
 `docs/PROJECT_RULES.md`. Tests first. Do not push unless owner asks.

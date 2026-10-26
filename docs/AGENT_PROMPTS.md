@@ -151,7 +151,7 @@ The Summary rows under the grid (Sum and Mean) and the Summary sheet / `_summary
 ---
 
 ## Status snapshot (25 Oct 2026)
-Completed on branch `p2d-data-quality`: response-scales words path, **P2d**, **P2d-2**, **P3a**, **P3b** (core). Next prompt to run: **P2e-1** (fixtures C+G), then P2e-2/3 → P6 → P5. (clarity pass). Proration UX depth is backlog in `FIX_LIST.md`, not a new P-step unless the owner promotes it.
+Completed on branch `p2d-data-quality`: response-scales words path, **P2d**, **P2d-2**, **P3a**, **P3b** (core). Next prompt to run: **P2e-1 (done)** (fixtures C+G), then P2e-2/3 → P6 → P5. (clarity pass). Proration UX depth is backlog in `FIX_LIST.md`, not a new P-step unless the owner promotes it.
 
 
 **P4. Import v2** (`docs/IMPORT_DETECTION.md`, updated 26 Oct 2026).

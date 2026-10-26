@@ -1,0 +1,54 @@
+{
+  "respondentCount": 20,
+  "itemCount": 21,
+  "subscalePlan": {
+    "Subscale_1": [
+      "S1a",
+      "S1b"
+    ],
+    "Subscale_2": [
+      "S2a",
+      "S2b"
+    ],
+    "Subscale_3": [
+      "S3a",
+      "S3b"
+    ],
+    "Subscale_4": [
+      "S4a",
+      "S4b"
+    ],
+    "Subscale_5": [
+      "S5a",
+      "S5b"
+    ],
+    "Subscale_6": [
+      "S6a",
+      "S6b"
+    ],
+    "Subscale_7": [
+      "S7a",
+      "S7b"
+    ],
+    "Subscale_8": [
+      "S8a",
+      "S8b"
+    ],
+    "Subscale_9": [
+      "S9a",
+      "S9b"
+    ],
+    "Subscale_10": [
+      "S10a",
+      "S10b"
+    ],
+    "Subscale_11": [
+      "S11only"
+    ]
+  },
+  "missingCodes": [
+    -99,
+    0
+  ],
+  "notes": "Numeric; -99 and 0 as missing; decimal; 10 two-item subscales + one one-item subscale"
+}

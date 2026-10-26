@@ -50,7 +50,11 @@ Branch: **`p2d-data-quality`** (continue here). Updated **26 Oct 2026** (evening
 | P4b-fix | Persist split_plan/role; source summary UI; remove organized sheets | done |
 
 ## Next (26 Oct 2026, evening)
-1. **P2e-1** — Robustness fixtures C (Qualtrics-style words) + G (tiny n=6); generator; pipeline smoke tests (accounts for P4 import + P4b multi-sheet).
+1. **P2e-1 (done)** — fixtures C+G
+1b. **P2e-2** — fixtures D+E + tests
+1c. **P2e-3** — fixture F + leftovers
+# was:
+1. **P2e-1 (done)** — Robustness fixtures C (Qualtrics-style words) + G (tiny n=6); generator; pipeline smoke tests (accounts for P4 import + P4b multi-sheet).
 2. **P2e-2** — Fixtures D, E + deeper pipeline.
 3. **P2e-3** — Fixture F (wide/perf) + leftovers.
 4. **P6** preset library → **P5** cleanup.

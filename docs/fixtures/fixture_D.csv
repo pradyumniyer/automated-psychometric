@@ -1,0 +1,11 @@
+Timestamp,Email Address,What is your ID?,How old are you?,I feel calm,I feel tense,Rate your energy (1-5),Rate your focus (1-5)
+2024-01-01 10:00:00,user0@example.com,a01,20,Strongly disagree,NEUTRAL,1,1
+2024-01-02 10:00:00,user1@example.com,dup01,21,Disagree,Agree,2,2
+2024-01-03 10:00:00,user2@example.com,b02,22,Neutral,Strongly agree,3,3
+2024-01-04 10:00:00,user3@example.com,DUP01,23,Agree,STRONGLY DISAGREE,4,4
+2024-01-05 10:00:00,user4@example.com,c03,24,Strongly agree,Disagree,5,1
+2024-01-06 10:00:00,user5@example.com,d04,25,Strongly disagree,Neutral,1,2
+2024-01-07 10:00:00,user6@example.com,e05,26,Disagree,AGREE,2,3
+2024-01-08 10:00:00,user7@example.com,f06,27,Neutral,Strongly agree,3,4
+2024-01-09 10:00:00,user8@example.com,g07,28,Agree,Strongly disagree,4,1
+2024-01-10 10:00:00,user9@example.com,h08,29,Strongly agree,DISAGREE,5,2

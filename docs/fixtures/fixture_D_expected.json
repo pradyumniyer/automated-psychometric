@@ -1,0 +1,18 @@
+{
+  "respondentCount": 10,
+  "duplicateIdValues": [
+    "dup01",
+    "DUP01"
+  ],
+  "mixedColumns": {
+    "word": [
+      "I feel calm",
+      "I feel tense"
+    ],
+    "numeric": [
+      "Rate your energy (1-5)",
+      "Rate your focus (1-5)"
+    ]
+  },
+  "notes": "Google Forms style long headers; Timestamp; mixed word/numeric; case variants; duplicate IDs"
+}
