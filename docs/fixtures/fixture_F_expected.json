@@ -1,0 +1,7 @@
+{
+  "columns": 120,
+  "rows": 300,
+  "itemColumns": 118,
+  "notes": "Wide/tall synthetic numeric export for performance smoke tests",
+  "defaultCommitted": true
+}

@@ -161,3 +161,8 @@ Related: proration informativeness backlog (same date); end-of-project visual po
 
 ## Import / ID structure (26 Oct 2026)
 Approved design: Layer A = import (detect layout, always show preview); Layer B = ID step (one scale vs several scales → column map → N sheets). Full write-up: `docs/IMPORT_DETECTION.md`. Next code: **P4a**, then **P4b**.
+
+### P2e-3 (26 Oct 2026)
+- **Fixture F (committed):** 120 cols × 300 rows (`fixture_F.csv`) for CI.
+- **Full stress (optional):** `python docs/fixtures/generate_fixture_F.py --cols 2000 --rows 5000 --out docs/fixtures/fixture_F_full.csv` (do not commit by default).
+- **Leftovers still open:** template-apply through full UI (D3), exhaustive action sequences (D5), a11y tab order pass, source-sheet Configure lock (backlog).
