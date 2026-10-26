@@ -275,7 +275,6 @@ export function togglePresetFlip<T extends ScaleRangeState>(state: T): T {
   const presetValues = preset.labels.map((point) => point.value);
   const nativeMin = Math.min(...presetValues);
   const nativeMax = Math.max(...presetValues);
-  const minValue = state.startsAtZero && nativeMin === 1 ? 0 : (state.startsAtZero || nativeMin === 0 ? Math.min(0, nativeMin) : nativeMin);
   // Range after optional start-at-0 on 1-based presets
   const rangeMin = state.startsAtZero && nativeMin === 1 ? 0 : nativeMin;
   const rangeMax = state.startsAtZero && nativeMin === 1 ? nativeMax - 1 : nativeMax;

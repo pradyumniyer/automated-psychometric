@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ShieldCheck, AlertTriangle, Eye, TrendingDown, BarChart3, Activity,
-  ChevronDown, ChevronRight, Settings2, Plus, X,
+  ChevronDown, ChevronRight, Settings2,
   Check, Info, FileDown, AlertCircle, RotateCcw,
 } from 'lucide-react';
 import {
@@ -76,8 +76,7 @@ export function DataQualityScreen({
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
-  const [newTextValue, setNewTextValue] = useState('');
-  const [newSentinelValue, setNewSentinelValue] = useState('');
+  // reserved for future "add allowed non-response" UI
 
   // ── Load datasets ──
   const loadDatasets = useCallback(async () => {

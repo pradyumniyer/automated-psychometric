@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
-  Upload, AlertTriangle, Info, Loader2, X,
+  Upload, AlertTriangle, Info, Loader2,
 } from 'lucide-react';
 import {
   getRawSheet,

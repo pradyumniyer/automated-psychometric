@@ -24,7 +24,7 @@ function cellLocation(cell: AnswerTableRow['cells'][number]): string {
 
 function sanitizeNumberDraft(raw: string): string {
   // Allow leading minus, digits, one dot — strip everything else.
-  let next = raw.replace(/[^0-9.+\-]/g, '');
+  let next = raw.replace(/[^0-9.+-]/g, '');
   // Keep only the first dot.
   const dot = next.indexOf('.');
   if (dot !== -1) {

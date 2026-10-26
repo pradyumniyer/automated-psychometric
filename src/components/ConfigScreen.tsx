@@ -1,11 +1,11 @@
 // Configuration & Scoring screen — the single-screen workbench.
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Upload, FileSpreadsheet, BarChart3, History as HistoryIcon, Plus, Trash2, ArrowRight,
+  Upload, FileSpreadsheet, BarChart3, History as HistoryIcon, Plus,
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
-  PanelLeftOpen, Sigma, TrendingUp, ShieldCheck, ChevronDown, ChevronRight, ChevronUp, MoreHorizontal,
+  PanelLeftOpen, Sigma, TrendingUp, ChevronDown, ChevronRight, ChevronUp, MoreHorizontal,
 } from 'lucide-react';
 import {
   ActionHistory,
@@ -30,7 +30,7 @@ import { logAction, logOutOfRangeAction, fetchHistory, deleteAction } from '@/li
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { SheetIdPanel } from './SheetIdPanel';
-import { columnsForGroup, projectRows, rangeFromClicks, validateSplitPlan, type ScaleColumnGroup } from '@/lib/masterSheetSplit';
+import { columnsForGroup, projectRows, validateSplitPlan, type ScaleColumnGroup } from '@/lib/masterSheetSplit';
 import { datasetTabLabel, displaySheetName, getSplitPlan, isInstrumentSheet, isSourceAlreadySplit, sortDatasetsForTabs } from '@/lib/sheetHierarchy';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
@@ -38,7 +38,7 @@ import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection
 import { applyOutOfRangeAction, detectDifferentPresetsAcrossColumns, matchResponsePreset, seedResponseScale, type ResponseScaleLabelSetting } from '@/scientific/responseScales';
 import { evaluateFormula, validateFormula } from '@/scientific/formula';
 import { getOutputRange, validateBands, suggestBands, type OutputRange } from '@/scientific/bandValidation';
-import { Button, Card, Modal, ConfidenceBadge, StatusBadge, EmptyState, Tooltip } from './ui';
+import { Button, Card, Modal, StatusBadge, EmptyState, Tooltip } from './ui';
 import { LiveGrid, GridGroup } from './LiveGrid';
 import { getOutOfBandSummary, getUnassignedItemCount, getUnscoredRowSummary } from '@/lib/scoringStatus';
 import { getDisplayIds, hasDifferentScaleItem, shouldOpenResponseScaleCard, waitingSubscaleStatus, waitingSubscaleTarget } from '@/lib/responseScaleUi';
@@ -108,11 +108,11 @@ export function ConfigScreen({
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
   const activeDatasetId = sharedDatasetId ?? activeDatasetIdState;
-  const setActiveDatasetId = (id: string | null) => {
+  const setActiveDatasetId = useCallback((id: string | null) => {
     if (id !== activeDatasetId) flushPendingSave();
     setActiveDatasetIdState(id);
     onDatasetChange(id);
-  };
+  }, [activeDatasetId, onDatasetChange]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const datasetRef = useRef(dataset);
   datasetRef.current = dataset;
@@ -255,7 +255,7 @@ export function ConfigScreen({
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to load project data: ${(error as Error).message}` });
     }
-  }, [project.id, activeDatasetId]);
+  }, [project.id, activeDatasetId, setActiveDatasetId]);
 
   useEffect(() => { loadDatasets(); }, [loadDatasets]);
 
@@ -437,7 +437,7 @@ export function ConfigScreen({
       setSaveState('idle');
       setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
     }
-  }, [dataset, configDirty, subscaleStates, bandStates, bandStatesByOutput, project.id, linkedTemplate, demoCols, overallScale, overallSettings]);
+  }, [dataset, configDirty, linkedTemplate, persistSurveyConfig]);
   performAutoSaveRef.current = performAutoSave;
 
   // Debounce auto-save: trigger 1s after configDirty becomes true
@@ -651,7 +651,7 @@ export function ConfigScreen({
           try { await datasetRepository.delete(g.childDatasetId); } catch { /* ignore */ }
         }
       }
-      const updated = await datasetRepository.updateImportMeta(dataset.id, {
+      await datasetRepository.updateImportMeta(dataset.id, {
         role: 'source',
         split_plan: undefined,
       });
@@ -2002,234 +2002,6 @@ function ImportZone({ onImport, importing, fileInputRef }: { onImport: (f: File)
     </div>
   );
 }
-
-// ── Demographics Panel ──
-function DemographicsPanel({
-  allColumns,
-  demoCols,
-  onToggle,
-  onMarkAllItems,
-  sampleRow,
-  onCreateSheets,
-  creatingSheets,
-  sheetRole = 'source',
-  sourceSheetLabel = null,
-  splitPlanSummary = null,
-}: {
-  allColumns: string[];
-  demoCols: DemographicColumn[];
-  onToggle: (col: string, isDemo: boolean) => void;
-  onMarkAllItems: () => void;
-  sampleRow: Record<string, unknown> | null;
-  onCreateSheets: (groups: ScaleColumnGroup[], demoNames: string[]) => void;
-  creatingSheets: boolean;
-  sheetRole?: 'source' | 'instrument';
-  sourceSheetLabel?: string | null;
-  splitPlanSummary?: { demoColumns: string[]; groups: { name: string; childDatasetId?: string }[] } | null;
-}) {
-  const [search, setSearch] = useState('');
-  const [structureMode, setStructureMode] = useState<'one' | 'several'>('one');
-  const [groups, setGroups] = useState<ScaleColumnGroup[]>([
-    { id: 'g1', name: 'Scale 1', startIndex: -1, endIndex: -1 },
-  ]);
-  const [activeTarget, setActiveTarget] = useState<'demos' | number>('demos');
-  const [rangeAnchor, setRangeAnchor] = useState<number | null>(null);
-  const demoNames = new Set(demoCols.map((d) => d.column_name));
-  const filtered = allColumns.filter((c) => c.toLowerCase().includes(search.toLowerCase()));
-
-  const paintRange = (colIndex: number) => {
-    if (activeTarget === 'demos') {
-      const col = allColumns[colIndex];
-      if (!col) return;
-      onToggle(col, demoNames.has(col));
-      return;
-    }
-    const gIdx = activeTarget;
-    if (rangeAnchor == null) {
-      setRangeAnchor(colIndex);
-      setGroups((prev) => prev.map((g, i) => (
-        i === gIdx ? { ...g, startIndex: colIndex, endIndex: colIndex } : g
-      )));
-      return;
-    }
-    const { startIndex, endIndex } = rangeFromClicks(rangeAnchor, colIndex);
-    setGroups((prev) => prev.map((g, i) => (
-      i === gIdx ? { ...g, startIndex, endIndex } : g
-    )));
-    setRangeAnchor(null);
-  };
-
-  const colColor = (idx: number): string => {
-    const name = allColumns[idx];
-    if (demoNames.has(name)) return 'bg-primary-200 border-primary-400 text-primary-900';
-    for (let gi = 0; gi < groups.length; gi++) {
-      const g = groups[gi];
-      if (g.startIndex < 0) continue;
-      const a = Math.min(g.startIndex, g.endIndex);
-      const b = Math.max(g.startIndex, g.endIndex);
-      if (idx >= a && idx <= b) {
-        const palette = ['bg-accent-100 border-accent-400', 'bg-success-100 border-success-400', 'bg-warning-100 border-warning-400', 'bg-info-100 border-info-400'];
-        return palette[gi % palette.length] + ' text-secondary-900';
-      }
-    }
-    return 'bg-secondary-50 border-secondary-200 text-secondary-600';
-  };
-
-  const canCreate = structureMode === 'several' && groups.every((g) => g.name.trim() && g.startIndex >= 0);
-
-  return (
-    <div className="p-3 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-secondary-500 uppercase tracking-wide">ID Columns</span>
-        <button type="button" onClick={onMarkAllItems} className="text-xs text-primary-600 hover:underline">Mark all as items</button>
-      </div>
-
-
-      {sheetRole === 'instrument' && (
-        <div className="px-2.5 py-2 rounded-lg border border-secondary-200 bg-secondary-50 text-[11px] text-secondary-600">
-          This sheet is an <strong>instrument</strong> created from{sourceSheetLabel ? <> <strong>{sourceSheetLabel}</strong></> : ' a master sheet'}.
-          Mark ID/demographics only — splitting again is not available.
-        </div>
-      )}
-      {sheetRole !== 'instrument' && splitPlanSummary?.groups?.some((g) => g.childDatasetId) && (
-        <div className="px-2.5 py-2 rounded-lg border border-primary-200 bg-primary-50/50 text-[11px] text-secondary-700">
-          This master was organized into{' '}
-          <strong>{splitPlanSummary.groups.filter((g) => g.childDatasetId).length}</strong> sheet
-          {splitPlanSummary.groups.filter((g) => g.childDatasetId).length === 1 ? '' : 's'}:{' '}
-          {splitPlanSummary.groups.map((g) => g.name).join(', ')}.
-          Use those tabs to configure each scale.
-        </div>
-      )}
-
-      {sheetRole !== 'instrument' && !(splitPlanSummary?.groups?.some((g) => g.childDatasetId)) && (
-      <div className="flex rounded-lg border border-secondary-200 p-0.5 bg-secondary-50">
-        <button
-          type="button"
-          onClick={() => setStructureMode('one')}
-          className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${structureMode === 'one' ? 'bg-white text-primary-700 shadow-sm font-medium' : 'text-secondary-600'}`}
-        >
-          One scale
-        </button>
-        <button
-          type="button"
-          onClick={() => setStructureMode('several')}
-          className={`flex-1 px-2 py-1.5 text-xs rounded-md transition-colors ${structureMode === 'several' ? 'bg-white text-primary-700 shadow-sm font-medium' : 'text-secondary-600'}`}
-        >
-          Several scales
-        </button>
-      </div>
-      )}
-
-      {structureMode === 'one' && (
-        <>
-          <p className="text-[11px] text-secondary-500">Mark ID and demographics. Everything else stays as items on this sheet.</p>
-          <div className="relative">
-            <Search className="w-4 h-4 text-secondary-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="w-full pl-9 pr-3 py-1.5 text-sm border border-secondary-200 rounded-lg focus:outline-none focus:border-primary-400" />
-          </div>
-          <div className="space-y-0.5 max-h-80 overflow-y-auto">
-            {filtered.map((col) => {
-              const isDemo = demoNames.has(col);
-              const info = demoCols.find((d) => d.column_name === col);
-              return (
-                <div key={col} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border transition-colors ${isDemo ? 'border-primary-200 bg-primary-50/40' : 'border-secondary-100 bg-white hover:bg-secondary-50'}`}>
-                  <span className="flex-1 text-sm text-secondary-800 truncate" title={col}>{col}</span>
-                  {isDemo && info && info.detected_by !== 'manual' && <ConfidenceBadge confidence={info.confidence} />}
-                  <button type="button" onClick={() => onToggle(col, isDemo)}
-                    className={`px-2 py-0.5 text-xs font-medium rounded-full transition-colors whitespace-nowrap ${isDemo ? 'bg-primary-600 text-white' : 'bg-secondary-200 text-secondary-600 hover:bg-secondary-300'}`}>
-                    {isDemo ? 'Demo' : 'Item'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          {filtered.length === 0 && <p className="text-sm text-secondary-400 text-center py-4">No columns match &quot;{search}&quot;</p>}
-        </>
-      )}
-
-      {sheetRole !== 'instrument' && !(splitPlanSummary?.groups?.some((g) => g.childDatasetId)) && structureMode === 'several' && (
-        <div className="space-y-3">
-          <p className="text-[11px] text-secondary-500">
-            Click columns below to assign. Set <strong>Demographics</strong> first, then each scale (click first column, then last). Unassigned question columns are not copied to new sheets.
-          </p>
-
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => { setActiveTarget('demos'); setRangeAnchor(null); }}
-              className={`px-2 py-1 text-[11px] rounded-md border ${activeTarget === 'demos' ? 'border-primary-500 bg-primary-50 text-primary-800 font-medium' : 'border-secondary-200 text-secondary-600'}`}
-            >
-              Demographics
-            </button>
-            {groups.map((g, i) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => { setActiveTarget(i); setRangeAnchor(null); }}
-                className={`px-2 py-1 text-[11px] rounded-md border ${activeTarget === i ? 'border-primary-500 bg-primary-50 text-primary-800 font-medium' : 'border-secondary-200 text-secondary-600'}`}
-              >
-                {g.name.trim() || `Scale ${i + 1}`}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto p-1 border border-secondary-100 rounded-lg bg-white">
-            {allColumns.map((col, idx) => (
-              <button
-                key={col}
-                type="button"
-                title={sampleRow && sampleRow[col] != null ? `${col}: ${String(sampleRow[col])}` : col}
-                onClick={() => paintRange(idx)}
-                className={`px-1.5 py-1 text-[10px] font-mono rounded border max-w-[7rem] truncate ${colColor(idx)}`}
-              >
-                {col}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-2">
-            {groups.map((g, i) => (
-              <div key={g.id} className="flex items-center gap-2">
-                <input
-                  value={g.name}
-                  onChange={(e) => setGroups((prev) => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
-                  className="flex-1 min-w-0 px-2 py-1 text-xs border border-secondary-200 rounded-md"
-                  placeholder={`Scale ${i + 1} name`}
-                />
-                <span className="text-[10px] text-secondary-500 tabular-nums whitespace-nowrap">
-                  {g.startIndex >= 0
-                    ? `${allColumns[Math.min(g.startIndex, g.endIndex)] ?? '?'} → ${allColumns[Math.max(g.startIndex, g.endIndex)] ?? '?'} (${Math.abs(g.endIndex - g.startIndex) + 1})`
-                    : 'No columns'}
-                </span>
-                {groups.length > 1 && (
-                  <button type="button" className="text-secondary-400 hover:text-error-600 text-xs" onClick={() => setGroups((prev) => prev.filter((_, j) => j !== i))}>×</button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              className="text-xs text-primary-700 hover:underline"
-              onClick={() => setGroups((prev) => [...prev, { id: `g${Date.now()}`, name: `Scale ${prev.length + 1}`, startIndex: -1, endIndex: -1 }])}
-            >
-              + Add scale
-            </button>
-          </div>
-
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={!canCreate || creatingSheets}
-            onClick={() => onCreateSheets(groups.filter((g) => g.startIndex >= 0), [...demoNames])}
-          >
-            {creatingSheets ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Create {groups.filter((g) => g.startIndex >= 0).length} sheet{groups.filter((g) => g.startIndex >= 0).length === 1 ? '' : 's'}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Subscales Panel
 // ── Subscales Panel — with batch selection ──
 
@@ -2702,7 +2474,6 @@ export function ScaleCardCompact({ name, scaleType, scoringMethod, showOutputs, 
   });
   const mode: ResponseMode = answerTable.mode;
   const hasReverseItems = items.some((item) => item.reverse);
-  const reviewRows = answerTable.rows.filter((row) => row.review);
   const summaryReviewCount = countReviewAnswers(answerTable.rows);
   const scaleLabelsComplete = answerTable.rows
     .filter((row) => row.kind === 'scale')

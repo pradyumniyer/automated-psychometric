@@ -41,12 +41,8 @@ jobs:
         env:
           TZ: Asia/Kolkata
 
-      # Becomes blocking at the end of Phase 0; known failure: 17 lint errors.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
-      # Becomes blocking at the end of Phase 0; known high advisories in xlsx and ws.
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { projectRepository } from '@/storage/repositories';
 import type { Project } from '@/types/domain';
 import { Button, Card, Modal, EmptyState } from './ui';
-import { Plus, FolderOpen, Trash2, FlaskConical, FileText, Calendar } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, FlaskConical, Calendar } from 'lucide-react';
 
 export function ProjectList({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
