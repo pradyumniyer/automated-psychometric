@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ProjectList } from '@/components/ProjectList';
+import { LandingPage } from '@/components/LandingPage';
 import { ConfigScreen } from '@/components/ConfigScreen';
 import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { ExportScreen } from '@/components/ExportScreen';
@@ -15,10 +16,15 @@ import {
 } from '@/lib/appRoute';
 import { restoreProjectView } from '@/lib/projectRestoration';
 
-type View = 'list' | 'config' | 'quality' | 'export' | 'report';
+type View = 'landing' | 'list' | 'config' | 'quality' | 'export' | 'report';
 
 export default function App() {
-  const [view, setView] = useState<View>(() => parseProjectHash(window.location.hash)?.tab ?? 'list');
+  const [view, setView] = useState<View>(() => {
+    const route = parseProjectHash(window.location.hash);
+    if (route?.tab) return route.tab;
+    if (window.location.hash === '#/app' || window.location.hash.startsWith('#/app')) return 'list';
+    return 'landing';
+  });
   const [project, setProject] = useState<Project | null>(null);
   const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
@@ -66,9 +72,14 @@ export default function App() {
 
   useEffect(() => {
     if (!routeReady) return;
-    const nextHash = project && view !== 'list'
-      ? buildProjectHash(project.id, view)
-      : '#/';
+    let nextHash = '#/';
+    if (project && view !== 'list' && view !== 'landing') {
+      nextHash = buildProjectHash(project.id, view);
+    } else if (view === 'list') {
+      nextHash = '#/app';
+    } else if (view === 'landing') {
+      nextHash = '#/';
+    }
     if (window.location.hash !== nextHash) window.location.hash = nextHash;
   }, [project, routeReady, view]);
 
@@ -76,7 +87,7 @@ export default function App() {
     if (!routeReady || !project || loadedProjectId !== project.id) return;
     const saved: ProjectViewSettings = {
       activeDatasetId,
-      tab: view === 'list' ? 'config' : view,
+      tab: (view === 'list' || view === 'landing') ? 'config' : view,
       showSummarySum,
       showSummaryMean,
     };
@@ -99,9 +110,11 @@ export default function App() {
       const route = parseProjectHash(window.location.hash);
       if (!route) {
         setProject(null);
-        setView('list');
         setActiveDatasetId(null);
         setLoadedProjectId(null);
+        const h = window.location.hash;
+        if (h === '#/app' || h.startsWith('#/app')) setView('list');
+        else setView('landing');
         return;
       }
       setView(route.tab);
@@ -220,6 +233,18 @@ export default function App() {
   const setExcludedRowsDirect = useCallback((rows: Set<number>) => (
     persistExcludedRows(rows)
   ), [persistExcludedRows]);
+  if (view === 'landing') {
+    return (
+      <LandingPage
+        onOpenApp={() => {
+          setProject(null);
+          setView('list');
+        }}
+        feedbackUrl={import.meta.env.VITE_FEEDBACK_URL as string | undefined}
+      />
+    );
+  }
+
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
   }
