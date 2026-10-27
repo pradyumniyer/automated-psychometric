@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Hash-based routing — no SPA fallback required.
+# Uncomment if you ever switch to BrowserRouter path routes:
+# [[redirects]]
+#   from = "/*"
+#   to = "/index.html"
+#   status = 200
