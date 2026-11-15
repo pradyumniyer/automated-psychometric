@@ -32,6 +32,7 @@ import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult
 import { SheetIdPanel } from './SheetIdPanel';
 import { columnsForGroup, projectRows, validateSplitPlan, type ScaleColumnGroup } from '@/lib/masterSheetSplit';
 import { datasetTabLabel, displaySheetName, getSplitPlan, isInstrumentSheet, isSourceAlreadySplit, sortDatasetsForTabs } from '@/lib/sheetHierarchy';
+import { actionLabel, scoreReadiness, sourceWorkflowLocked } from '@/lib/phaseA';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
 import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection';
@@ -458,9 +459,23 @@ export function ConfigScreen({
   }
 
   const changeActiveStep = (step: typeof activeStep) => {
+    if (sourceWorkflowLocked(dataset) && step !== 'demographics') {
+      setStatusMsg({
+        type: 'info',
+        text: 'This source is already organized. Open an instrument sheet to score, or remove organized sheets to edit this file.',
+      });
+      setActiveStep('demographics');
+      return;
+    }
     if (step !== activeStep) flushPendingSave();
     setActiveStep(step);
   };
+
+  useEffect(() => {
+    if (sourceWorkflowLocked(dataset) && activeStep !== 'demographics') {
+      setActiveStep('demographics');
+    }
+  }, [dataset, activeStep]);
 
   useEffect(() => {
     const handlePageHide = () => flushPendingSave();
@@ -630,9 +645,17 @@ export function ConfigScreen({
       if (updated) {
         setDatasets((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
       }
+      await logAction(
+        project.id,
+        'sheet_split',
+        `Organized "${sourceLabel}" into ${groups.length} sheet${groups.length === 1 ? '' : 's'}: ${groupMetas.map((g) => g.name).join(', ')}`,
+        { groups: groupMetas.map((g) => g.name) },
+        null,
+        dataset.id,
+      );
       if (firstId) setActiveDatasetId(firstId);
       setStatusMsg({ type: 'success', text: `Created ${groups.length} instrument sheet(s) under "${sourceLabel}". The source tab is for reference only.` });
-      changeActiveStep('subscales');
+      setActiveStep('demographics');
     } catch (e) {
       setStatusMsg({ type: 'error', text: `Could not create sheets: ${(e as Error).message}` });
     } finally {
@@ -668,6 +691,14 @@ export function ConfigScreen({
         split_plan: { demoColumns: [], groups: [] },
       });
       await loadDatasets();
+      await logAction(
+        project.id,
+        'sheet_unsplit',
+        `Removed organized sheets from "${dataset.sheet_name || dataset.file_name}"`,
+        {},
+        null,
+        dataset.id,
+      );
       setActiveDatasetId(dataset.id);
       setStatusMsg({ type: 'info', text: 'Organized sheets removed. You can use Several scales again on this source.' });
       changeActiveStep('demographics');
@@ -829,10 +860,22 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
   };
 
   const toggleReverse = (subscaleId: string, column: string) => {
+    const sub = subscaleStates.find((s) => s.id === subscaleId);
+    const nextReverse = !(sub?.items.find((item) => item.column === column)?.reverse);
     setSubscaleStates(subscaleStates.map((s) => s.id !== subscaleId ? s : afterScaleChange({ ...s, hasReverseItems: s.items.some((item) => item.reverse) }, {
       items: s.items.map((i) => i.column === column ? { ...i, reverse: !i.reverse } : i),
     }) as SubscaleState));
     markDirty();
+    if (dataset) {
+      void logAction(
+        project.id,
+        'reverse_toggle',
+        `${nextReverse ? 'Reversed' : 'Unreversed'} ${column}${sub ? ` on ${sub.name}` : ''}`,
+        { column, subscaleId, reverse: nextReverse },
+        null,
+        dataset.id,
+      );
+    }
   };
 
   const moveItem = (subscaleId: string, index: number, dir: 'up' | 'down') => {
@@ -873,7 +916,20 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     if (min == null || max == null) return;
     updateResponseScale(id, (current) => setTypedRange(current, min, max));
   };
-  const confirmScaleRange = (id: string) => updateResponseScale(id, (current) => confirmRangeState(current));
+  const confirmScaleRange = (id: string) => {
+    const sub = subscaleStates.find((s) => s.id === id);
+    updateResponseScale(id, (current) => confirmRangeState(current));
+    if (dataset && sub) {
+      void logAction(
+        project.id,
+        'range_confirm',
+        `Confirmed response range for ${sub.name}`,
+        { subscaleId: id },
+        null,
+        dataset.id,
+      );
+    }
+  };
   const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => updateResponseScale(id, (current) => afterScaleChange(current, { labelMap: lm, labelSource: 'manual' }) as SubscaleState);
   const setWordOptions = (id: string, patch: { flipped?: boolean; startsAtZero?: boolean }) => {
     updateResponseScale(id, (current) => afterScaleChange(current, patch) as SubscaleState);
@@ -985,6 +1041,11 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
 
   const runScoring = async () => {
     if (!dataset) return;
+    if (sourceWorkflowLocked(dataset)) {
+      setStatusMsg({ type: 'info', text: 'This is a source sheet. Score the organized instrument sheets instead.' });
+      setActiveStep('demographics');
+      return;
+    }
     const pending = pendingResponseAnswers();
     if (pending.length > 0) {
       const groups = new Map<string, typeof pending>();
@@ -1432,7 +1493,13 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
   const displayRows = showExcludedOnly
     ? scoredColumnData.rows.filter((_, index) => sharedExcludedRows.has(index))
     : scoredColumnData.rows;
-  const canScore = !!dataset && realSubscales.every((s) => s.items.length > 0 || (shownScoreOutputs(s.showOutputs, s.scoringMethod).length === 1 && s.scoringMethod === 'custom')) && itemColumns.length > 0;
+  const canScore = !!dataset && !sourceWorkflowLocked(dataset) && realSubscales.every((s) => s.items.length > 0 || (shownScoreOutputs(s.showOutputs, s.scoringMethod).length === 1 && s.scoringMethod === 'custom')) && itemColumns.length > 0;
+  const readiness = scoreReadiness({
+    sourceLocked: sourceWorkflowLocked(dataset),
+    hasItems: itemColumns.length > 0 && realSubscales.some((s) => s.items.length > 0),
+    pendingAnswerCount: dataset ? pendingResponseAnswers().length : 0,
+    unconfirmedReverse: subscaleStates.some((s) => s.items.some((item) => item.reverse) && s.confirmed !== true),
+  });
   const originalColCount = dataset?.col_count ?? 0;
   const computedColCount = scoringResult ? scoringResult.headers.length - originalColCount : 0;
 
@@ -1625,7 +1692,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
         ) : dataset ? (
           <>
             {/* Step rail */}
-            <StepRail activeStep={activeStep} onStepClick={changeActiveStep} stepStatuses={{
+            <StepRail activeStep={activeStep} onStepClick={changeActiveStep} locked={sourceWorkflowLocked(dataset)} stepStatuses={{
               demographics: demoCols.length > 0 || itemColumns.length > 0 ? 'done' : 'pending',
               subscales: realSubscales.length > 0
                 ? (realSubscales.every((s) => s.items.length > 0) ? 'done' : 'attention')
@@ -1783,11 +1850,33 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
                       setProrationEnabled(enabled);
                       void persistSurveyConfig({ prorationEnabled: enabled });
                       markDirty();
+                      if (dataset) {
+                        void logAction(
+                          project.id,
+                          'proration',
+                          enabled
+                            ? `Proration on (up to ${prorationMaxMissingPct}% of items missing)`
+                            : 'Proration off',
+                          { enabled, maxMissingPercent: prorationMaxMissingPct },
+                          null,
+                          dataset.id,
+                        );
+                      }
                     }}
                     onProrationThresholdChange={(pct) => {
                       setProrationMaxMissingPct(pct);
                       void persistSurveyConfig({ prorationMaxMissingPct: pct });
                       markDirty();
+                      if (dataset && prorationEnabled) {
+                        void logAction(
+                          project.id,
+                          'proration',
+                          `Proration threshold set to ${pct}%`,
+                          { enabled: true, maxMissingPercent: pct },
+                          null,
+                          dataset.id,
+                        );
+                      }
                     }}
                   />
                 )}
@@ -1836,6 +1925,9 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
 
             {/* Center — live grid */}
             <div className="flex-1 overflow-auto p-4 bg-secondary-50/30 flex flex-col">
+              <div className={`mb-3 px-3 py-2 rounded-lg text-sm border ${readiness.ready ? 'bg-success-50 border-success-200 text-success-800' : 'bg-warning-50 border-warning-200 text-warning-900'}`}>
+                {readiness.text}
+              </div>
               <LiveGrid
                 groups={groups}
                 rows={displayRows}
@@ -1880,8 +1972,8 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
             {history.map((h) => (
               <div key={h.id} className="px-4 py-3 hover:bg-secondary-50 group">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-secondary-100 text-secondary-600">{h.action_type}</span>
-                  <span className="text-xs text-secondary-400">{new Date(h.created_at).toLocaleTimeString()}</span>
+                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-secondary-100 text-secondary-600">{actionLabel(h.action_type)}</span>
+                  <span className="text-xs text-secondary-400">{new Date(h.created_at).toLocaleString()}</span>
                   {h.undo_data && (
                     <button onClick={() => undoAction(h)} className="ml-auto opacity-0 group-hover:opacity-100 text-xs text-primary-600 hover:underline transition-opacity">Undo</button>
                   )}
@@ -1941,10 +2033,11 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
 type StepName = 'demographics' | 'subscales' | 'scales' | 'bands' | 'scoring';
 type StepStatus = 'pending' | 'active' | 'done' | 'attention';
 
-function StepRail({ activeStep, onStepClick, stepStatuses }: {
+function StepRail({ activeStep, onStepClick, stepStatuses, locked = false }: {
   activeStep: StepName;
   onStepClick: (s: StepName) => void;
   stepStatuses: Record<StepName, StepStatus>;
+  locked?: boolean;
 }) {
   const steps: { name: StepName; icon: React.ComponentType<{ className?: string }>; label: string }[] = [
     { name: 'demographics', icon: Users, label: 'ID' },
@@ -1959,12 +2052,13 @@ function StepRail({ activeStep, onStepClick, stepStatuses }: {
         const status = stepStatuses[s.name];
         const isActive = activeStep === s.name;
         const Icon = s.icon;
+        const stepLocked = locked && s.name !== 'demographics';
         return (
           <button
             key={s.name}
             onClick={() => onStepClick(s.name)}
-            className={`relative flex flex-col items-center gap-1 w-14 py-2 rounded-lg transition-all ${isActive ? 'bg-primary-50 text-primary-700' : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-50'}`}
-            title={s.label}
+            className={`relative flex flex-col items-center gap-1 w-14 py-2 rounded-lg transition-all ${stepLocked ? 'opacity-40 cursor-not-allowed' : ''} ${isActive ? 'bg-primary-50 text-primary-700' : 'text-secondary-400 hover:text-secondary-600 hover:bg-secondary-50'}`}
+            title={stepLocked ? `${s.label} is on the organized sheets` : s.label}
           >
             {isActive && <div className="absolute -left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-600 rounded-full" />}
             <div className="relative">
