@@ -41,7 +41,12 @@ C2 accepted. Summary-rows tip and broader in-app teaching deferred: see FIX_LIST
 
 ---
 
-## Continue here (26 Oct 2026, evening)
+## Continue here (15 Nov 2026)
+
+**Branches:** `big-plan-roadmap` (baseline) and **`phase-a`** (active). Read [ROADMAP.md](./ROADMAP.md) before older "next step" notes below. Those older notes (P2e → P6 → P5) are done or superseded.
+
+**Next code:** History A1b in `ROADMAP.md` (meaningful events, one-step Undo, quiet save). Do not start the form builder on this branch.
+
 
 **Branch:** `p2d-data-quality`.
 

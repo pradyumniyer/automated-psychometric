@@ -1,6 +1,10 @@
 # Build progress log (current state; read this to know where the build stands)
 
-Branch: **`p2d-data-quality`** (continue here). Updated **26 Oct 2026** (evening). Rules: `PROJECT_RULES.md`.
+Branch: **`phase-a`**. Baseline branch: **`big-plan-roadmap`**. Updated **15 Nov 2026**. Living plan: `docs/ROADMAP.md`.
+
+## Current
+Phase A slice A1a is on `phase-a` (`7769d8c`): source sheets that are already organized stay on ID; readiness line; history events for split, reverse, range confirm, and proration. Next is History A1b (see ROADMAP). Do not treat the 26 Oct "next" list at the bottom of this file as current.
+
 
 ## Done (commits)
 | Step | What | Commit |
