@@ -115,6 +115,48 @@ describe('row-ID exclusions, score cache, and history repositories', () => {
     expect(event.undo_data).not.toHaveProperty('rowIndex');
   });
 
+  it('undo then redo restores a config snapshot and clears redo after a new change', async () => {
+    const dataset = await createDataset();
+    const config = await (await import('../src/storage/repositories')).surveyConfigRepository.get(dataset.id);
+    if (!config) throw new Error('missing config');
+    const { historySlice } = await import('../src/lib/historySlice');
+    const { logUndoable } = await import('../src/lib/history');
+    const before = historySlice(config, []);
+    const saved = await (await import('../src/storage/repositories')).surveyConfigRepository.save(dataset.id, {
+      ...config,
+      proration_enabled: true,
+    });
+    const after = historySlice(saved, []);
+    await logUndoable({
+      projectId: dataset.project_id,
+      datasetId: dataset.id,
+      actionType: 'proration',
+      description: 'Proration on',
+      before,
+      after,
+    });
+
+    await expect(historyRepository.undo(dataset.id)).resolves.toBe('Proration on');
+    await expect((await import('../src/storage/repositories')).surveyConfigRepository.get(dataset.id))
+      .resolves.toMatchObject({ proration_enabled: false });
+
+    await expect(historyRepository.redo(dataset.id)).resolves.toBe('Proration on');
+    await expect((await import('../src/storage/repositories')).surveyConfigRepository.get(dataset.id))
+      .resolves.toMatchObject({ proration_enabled: true });
+
+    await logUndoable({
+      projectId: dataset.project_id,
+      datasetId: dataset.id,
+      actionType: 'proration',
+      description: 'Proration off',
+      before: after,
+      after: before,
+    });
+    const listed = await historyRepository.list(dataset.id);
+    expect(listed.some((entry) => entry.stack === 'redo')).toBe(false);
+    expect(listed.some((entry) => entry.action_type === 'export')).toBe(false);
+  });
+
   it('rejects positional row undo data', async () => {
     const dataset = await createDataset();
 

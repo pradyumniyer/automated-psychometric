@@ -45,7 +45,7 @@ C2 accepted. Summary-rows tip and broader in-app teaching deferred: see FIX_LIST
 
 **Branches:** `big-plan-roadmap` (baseline) and **`phase-a`** (active). Read [ROADMAP.md](./ROADMAP.md) before older "next step" notes below. Those older notes (P2e → P6 → P5) are done or superseded.
 
-**Next code:** History A1b in `ROADMAP.md` (meaningful events, one-step Undo, quiet save). Do not start the form builder on this branch.
+**Next code:** Phase A continues with proration explanation (A2). History undo/redo (A1b) is on this branch. Do not start the form builder here.
 
 
 **Branch:** `p2d-data-quality`.

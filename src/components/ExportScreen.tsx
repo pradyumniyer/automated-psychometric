@@ -14,6 +14,7 @@ import { scoreDataset, SubscaleConfig, BandConfig } from '@/scientific/scoring';
 import { buildScoredColumnData, scoreOnlyColumnKeys, type ScoredColumn } from '@/lib/scoredColumns';
 import { buildSummaryExportContent } from '@/lib/summaryStatistics';
 import { collectPendingResponseAnswers } from '@/lib/responseScaleAnswers';
+import { logAction } from '@/lib/history';
 import { shownScoreOutputs } from '@/lib/scoreOutputs';
 import type { SurveyConfigRecord } from '@/storage/schema';
 import { Button, Card } from './ui';
@@ -25,6 +26,7 @@ interface Props {
   onDatasetChange: (id: string | null) => void;
   showSummarySum: boolean;
   showSummaryMean: boolean;
+  onHistoryChanged?: () => void;
 }
 
 type ExportType = 'cleaned_raw' | 'items_only' | 'scored' | 'scores_demo' | 'scores_only';
@@ -36,6 +38,7 @@ export function ExportScreen({
   onDatasetChange,
   showSummarySum,
   showSummaryMean,
+  onHistoryChanged,
 }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -339,6 +342,15 @@ export function ExportScreen({
       const exportOptions = { excludedRows, keepExcluded, numericColumns, summary: summary ?? undefined };
       if (fmt === 'csv') exportToCSV(headers, rows, fn, exportOptions);
       else await exportToXLSX(headers, rows, fn, exportOptions);
+      const labels: Record<ExportType, string> = {
+        cleaned_raw: 'cleaned data',
+        items_only: 'items only',
+        scored: 'scored data',
+        scores_demo: 'scores and demographics',
+        scores_only: 'scores only',
+      };
+      await logAction(project.id, 'export', `Downloaded ${labels[type]} (${fmt.toUpperCase()})`, { format: fmt, exportType: type }, null, dataset.id);
+      onHistoryChanged?.();
     } catch (error) {
       setStorageError(`Failed to export dataset: ${(error as Error).message}`);
     } finally {

@@ -3,7 +3,7 @@
 Branch: **`phase-a`**. Baseline branch: **`big-plan-roadmap`**. Updated **15 Nov 2026**. Living plan: `docs/ROADMAP.md`.
 
 ## Current
-Phase A slice A1a is on `phase-a` (`7769d8c`): source sheets that are already organized stay on ID; readiness line; history events for split, reverse, range confirm, and proration. Next is History A1b (see ROADMAP). Do not treat the 26 Oct "next" list at the bottom of this file as current.
+Phase A slice A1a is on `phase-a` (`7769d8c`): source sheets that are already organized stay on ID; readiness line; history events for split, reverse, range confirm, and proration. A1b (undo, redo, exclusions, data-quality edits, downloads, quiet save) follows on this branch. Next is the proration explanation (A2). Do not treat the 26 Oct "next" list at the bottom of this file as current.
 
 
 ## Done (commits)

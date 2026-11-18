@@ -20,6 +20,8 @@ import {
 import { normalizeResponseMatrix, SubscaleConfig } from '@/scientific/scoring';
 import { cronbachAlphaFromNormalizedMatrix } from '@/scientific/reliability';
 import { saveDataQualityThresholds } from '@/lib/dataQualitySettings';
+import { logUndoable } from '@/lib/history';
+import { describeThresholdChange } from '@/lib/historySlice';
 import { Button, Card } from './ui';
 
 interface SubscaleState {
@@ -58,12 +60,16 @@ interface Props {
   onGoToConfig?: () => void;
   sharedDatasetId: string | null;
   onDatasetChange: (id: string | null) => void;
+  historyEpoch?: number;
+  onHistoryChanged?: () => void;
 }
 
 export function DataQualityScreen({
   project, excludedRows, onToggleRow, onBulkExclude, onSetExcludedRows, onInspectRow, onGoToExport,
   onGoToConfig,
   sharedDatasetId, onDatasetChange,
+  historyEpoch = 0,
+  onHistoryChanged,
 }: Props) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const activeDatasetId = sharedDatasetId;
@@ -73,6 +79,9 @@ export function DataQualityScreen({
   const [subscaleStates, setSubscaleStates] = useState<SubscaleState[]>([]);
   const [thresholds, setThresholds] = useState<QualityThresholds>(DEFAULT_THRESHOLDS);
   const thresholdsLoadedForDataset = useRef<string | null>(null);
+  const thresholdsTouched = useRef(false);
+  const onHistoryChangedRef = useRef(onHistoryChanged);
+  onHistoryChangedRef.current = onHistoryChanged;
   const [storageError, setStorageError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
@@ -130,15 +139,27 @@ export function DataQualityScreen({
       }
     })();
     return () => { cancelled = true; };
-  }, [activeDatasetId, datasets]);
+  }, [activeDatasetId, datasets, historyEpoch]);
 
   useEffect(() => {
     if (!activeDatasetId || thresholdsLoadedForDataset.current !== activeDatasetId) return;
     let cancelled = false;
     const saveTimer = setTimeout(() => {
       saveDataQualityThresholds(activeDatasetId, thresholds)
-        .then(() => {
-          if (!cancelled) setStorageError(null);
+        .then(async (change) => {
+          if (cancelled) return;
+          setStorageError(null);
+          if (!change || !thresholdsTouched.current) return;
+          thresholdsTouched.current = false;
+          await logUndoable({
+            projectId: project.id,
+            datasetId: activeDatasetId,
+            actionType: 'dq_thresholds',
+            description: describeThresholdChange(change.beforeThresholds, change.afterThresholds),
+            before: change.before,
+            after: change.after,
+          });
+          onHistoryChangedRef.current?.();
         })
         .catch((error: unknown) => {
           if (!cancelled) setStorageError(`Failed to save Data Quality thresholds: ${(error as Error).message}`);
@@ -148,7 +169,7 @@ export function DataQualityScreen({
       cancelled = true;
       clearTimeout(saveTimer);
     };
-  }, [activeDatasetId, thresholds]);
+  }, [activeDatasetId, thresholds, project.id]);
 
   // ── Derived state ──
   const demoColumnNames = useMemo(() => new Set(demoCols.map((d) => d.column_name)), [demoCols]);
@@ -292,7 +313,13 @@ export function DataQualityScreen({
     }
   };
 
+  const editThresholds = (next: QualityThresholds) => {
+    thresholdsTouched.current = true;
+    setThresholds(next);
+  };
+
   const resetThresholds = () => {
+    thresholdsTouched.current = true;
     setThresholds(DEFAULT_THRESHOLDS);
   };
 
@@ -465,17 +492,17 @@ export function DataQualityScreen({
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                   <ThresholdInput label="Unexpected missing (% of items)" value={thresholds.unexpectedMissingPct}
-                    onChange={(v) => setThresholds({ ...thresholds, unexpectedMissingPct: v })} />
+                    onChange={(v) => editThresholds({ ...thresholds, unexpectedMissingPct: v })} />
                   <ThresholdInput label="Longstring (consecutive identical)" value={thresholds.longstringMin}
-                    onChange={(v) => setThresholds({ ...thresholds, longstringMin: v })} step={1} />
+                    onChange={(v) => editThresholds({ ...thresholds, longstringMin: v })} step={1} />
                   <ThresholdInput label="Extreme responding rate" value={thresholds.extremeRate}
-                    onChange={(v) => setThresholds({ ...thresholds, extremeRate: v })} step={0.05} />
+                    onChange={(v) => editThresholds({ ...thresholds, extremeRate: v })} step={0.05} />
                   <ThresholdInput label="Midpoint responding rate" value={thresholds.midpointRate}
-                    onChange={(v) => setThresholds({ ...thresholds, midpointRate: v })} step={0.05} />
+                    onChange={(v) => editThresholds({ ...thresholds, midpointRate: v })} step={0.05} />
                   <ThresholdInput label="Low variance (fraction of scale range)" value={thresholds.lowVarianceFraction}
-                    onChange={(v) => setThresholds({ ...thresholds, lowVarianceFraction: v })} step={0.01} />
+                    onChange={(v) => editThresholds({ ...thresholds, lowVarianceFraction: v })} step={0.01} />
                   <ThresholdInput label="Z-score threshold (|z|)" value={thresholds.zscoreThreshold}
-                    onChange={(v) => setThresholds({ ...thresholds, zscoreThreshold: v })} step={0.1} />
+                    onChange={(v) => editThresholds({ ...thresholds, zscoreThreshold: v })} step={0.1} />
                 </div>
               </div>
             )}

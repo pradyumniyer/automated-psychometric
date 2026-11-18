@@ -11,6 +11,8 @@ import type {
 } from './schema';
 import type { Dataset, Project, Template } from '@/types/domain';
 import { migrateSurveyConfigRecord } from './viewAdapters';
+import { redoTip, undoTip } from '@/lib/historyStack';
+import { historySlice, type HistorySlice } from '@/lib/historySlice';
 
 export interface DatasetImportInput {
   projectId: string;
@@ -89,11 +91,14 @@ export interface TemplateRepository {
 }
 
 export interface HistoryRepository {
-  append(event: Omit<import('@/types/domain').ActionHistory, 'id' | 'created_at'> & {
-    undo_data: { rowId: string; wasExcluded?: boolean } | null;
+  append(event: Omit<import('@/types/domain').ActionHistory, 'id' | 'created_at' | 'stack' | 'seq'> & {
+    undo_data: HistoryRecord['undo_data'];
+    stack?: HistoryRecord['stack'];
   }): Promise<void>;
   list(datasetId: string): Promise<import('@/types/domain').ActionHistory[]>;
   delete(actionId: string): Promise<void>;
+  undo(datasetId: string): Promise<string | null>;
+  redo(datasetId: string): Promise<string | null>;
 }
 
 export interface SettingsRepository {
@@ -168,6 +173,8 @@ function toHistory(record: HistoryRecord) {
     payload: record.payload,
     undo_data: record.undo_data,
     created_at: new Date(record.ts).toISOString(),
+    stack: record.stack ?? 'audit',
+    seq: record.seq ?? 0,
   };
 }
 
@@ -299,6 +306,8 @@ export const datasetRepository: DatasetRepository = {
         ...(input.dataStartRow !== undefined ? { dataStartRow: input.dataStartRow } : {}),
       },
       undo_data: null,
+      stack: 'audit',
+      seq: 1,
       ts: now,
     };
 
@@ -418,7 +427,7 @@ export const templateRepository: TemplateRepository = {
   async applyToDataset(templateId, datasetId, config) {
     await db.transaction(
       'rw',
-      [db.templates, db.datasets, db.survey_configs, db.history],
+      [db.templates, db.datasets, db.survey_configs, db.exclusion_state, db.history],
       async () => {
         const [template, dataset] = await Promise.all([
           db.templates.get(templateId),
@@ -427,12 +436,23 @@ export const templateRepository: TemplateRepository = {
         if (!template) throw new Error(`Template "${templateId}" was not found.`);
         if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
         const now = Date.now();
-        await db.survey_configs.put({
+        const existingConfig = await db.survey_configs.get(datasetId);
+        const excluded = await db.exclusion_state.get(datasetId);
+        const excludedRowIds = excluded?.excluded_row_ids ?? [];
+        const savedConfig = {
           ...config,
           dataset_id: datasetId,
           linked_template_id: templateId,
           updated_at: now,
-        });
+        };
+        await db.survey_configs.put(savedConfig);
+        const prior = await db.history.where('dataset_id').equals(datasetId).toArray();
+        for (const record of prior) {
+          if (record.stack === 'redo') await db.history.update(record.id, { stack: 'audit' });
+        }
+        const seq = prior.reduce((max, record) => Math.max(max, record.seq ?? 0), 0) + 1;
+        const before = existingConfig ? historySlice(existingConfig, excludedRowIds) : null;
+        const after = historySlice(savedConfig, excludedRowIds);
         await db.history.add({
           id: crypto.randomUUID(),
           project_id: dataset.project_id,
@@ -440,7 +460,9 @@ export const templateRepository: TemplateRepository = {
           action_type: 'template_apply',
           summary: `Applied template: ${template.name} (v${template.version})`,
           payload: { templateId, templateVersion: template.version },
-          undo_data: null,
+          undo_data: before ? { kind: 'snapshot', before, after } : null,
+          stack: before ? 'undo' : 'audit',
+          seq,
           ts: now,
         });
       },
@@ -535,38 +557,121 @@ export const scoreRepository: ScoreRepository = {
   },
 };
 
+async function writeHistorySlice(datasetId: string, slice: HistorySlice): Promise<void> {
+  const dataset = await db.datasets.get(datasetId);
+  if (!dataset) throw new Error(`Dataset "${datasetId}" was not found.`);
+  const ids = [...new Set(slice.excludedRowIds)];
+  const known = new Set(dataset.row_ids);
+  const unknown = ids.filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    throw new Error(`Cannot restore history: row ID(s) no longer exist (${unknown.join(', ')}).`);
+  }
+  const saved = migrateSurveyConfigRecord({
+    ...slice.config,
+    dataset_id: datasetId,
+    updated_at: Date.now(),
+  });
+  await db.survey_configs.put(saved);
+  await db.exclusion_state.put({ dataset_id: datasetId, excluded_row_ids: ids });
+}
+
+function snapshotOf(record: HistoryRecord): { before: HistorySlice; after: HistorySlice } | null {
+  const undo = record.undo_data;
+  if (!undo || !('kind' in undo) || undo.kind !== 'snapshot') return null;
+  return { before: undo.before as HistorySlice, after: undo.after as HistorySlice };
+}
+
+async function moveHistory(datasetId: string, direction: 'undo' | 'redo'): Promise<string | null> {
+  return db.transaction(
+    'rw',
+    [db.history, db.survey_configs, db.exclusion_state, db.datasets],
+    async () => {
+      const records = await db.history.where('dataset_id').equals(datasetId).toArray();
+      const ranked = records.map((record) => ({
+        id: record.id,
+        seq: record.seq ?? 0,
+        stack: record.stack ?? 'audit' as const,
+      }));
+      const tip = direction === 'undo' ? undoTip(ranked) : redoTip(ranked);
+      if (!tip) return null;
+      const record = records.find((candidate) => candidate.id === tip.id);
+      const snapshot = record ? snapshotOf(record) : null;
+      if (!record || !snapshot) return null;
+      await writeHistorySlice(datasetId, direction === 'undo' ? snapshot.before : snapshot.after);
+      await db.history.update(record.id, { stack: direction === 'undo' ? 'redo' : 'undo' });
+      const seq = records.reduce((max, candidate) => Math.max(max, candidate.seq ?? 0), 0) + 1;
+      const verb = direction === 'undo' ? 'Undid' : 'Redid';
+      await db.history.add({
+        id: crypto.randomUUID(),
+        project_id: record.project_id,
+        dataset_id: datasetId,
+        action_type: direction,
+        summary: `${verb}: ${record.summary}`,
+        payload: { targetId: record.id },
+        undo_data: null,
+        stack: 'audit',
+        seq,
+        ts: Date.now(),
+      });
+      return record.summary;
+    },
+  );
+}
+
 export const historyRepository: HistoryRepository = {
   async append(event) {
-    if (event.undo_data && (
-      typeof event.undo_data.rowId !== 'string' ||
-      'rowIndex' in event.undo_data
-    )) {
+    if (event.undo_data && 'rowIndex' in event.undo_data) {
       throw new Error('History undo data must identify rows by rowId, not row position.');
     }
-    const record: HistoryRecord = {
-      id: crypto.randomUUID(),
-      project_id: event.project_id,
-      ...(event.dataset_id ? { dataset_id: event.dataset_id } : {}),
-      action_type: event.action_type,
-      summary: event.description,
-      payload: event.payload,
-      undo_data: event.undo_data,
-      ts: Date.now(),
-    };
+    if (event.undo_data && !('kind' in event.undo_data) && typeof event.undo_data.rowId !== 'string') {
+      throw new Error('History undo data must identify rows by rowId, not row position.');
+    }
+    const stack = event.stack ?? 'audit';
     await db.transaction('rw', db.history, async () => {
+      const existing = event.dataset_id
+        ? await db.history.where('dataset_id').equals(event.dataset_id).toArray()
+        : [];
+      if (stack === 'undo') {
+        for (const record of existing) {
+          if (record.stack === 'redo') await db.history.update(record.id, { stack: 'audit' });
+        }
+      }
+      const seq = existing.reduce((max, record) => Math.max(max, record.seq ?? 0), 0) + 1;
+      const record: HistoryRecord = {
+        id: crypto.randomUUID(),
+        project_id: event.project_id,
+        ...(event.dataset_id ? { dataset_id: event.dataset_id } : {}),
+        action_type: event.action_type,
+        summary: event.description,
+        payload: event.payload,
+        undo_data: event.undo_data,
+        stack,
+        seq,
+        ts: Date.now(),
+      };
       await db.history.add(record);
     });
   },
 
   async list(datasetId) {
     const records = await db.history.where('dataset_id').equals(datasetId).toArray();
-    return records.sort((left, right) => right.ts - left.ts).map(toHistory);
+    return records
+      .sort((left, right) => (right.seq ?? 0) - (left.seq ?? 0) || right.ts - left.ts)
+      .map(toHistory);
   },
 
   async delete(actionId) {
     await db.transaction('rw', db.history, async () => {
       await db.history.delete(actionId);
     });
+  },
+
+  async undo(datasetId) {
+    return moveHistory(datasetId, 'undo');
+  },
+
+  async redo(datasetId) {
+    return moveHistory(datasetId, 'redo');
   },
 };
 

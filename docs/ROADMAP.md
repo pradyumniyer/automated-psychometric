@@ -11,7 +11,7 @@ One instrument + scoring engine. Two doors later: **Import** (now) and **Form bu
 | Slice | What | State |
 |-------|------|--------|
 | A1a | Source-sheet lock, readiness line, first provenance events (split, reverse, range confirm, proration) | pushed (`7769d8c`) |
-| A1b | History as specified below (every meaningful action, one-step Undo, quiet save) | next, after this design |
+| A1b | History: meaningful actions, one-step undo and redo, quiet save | done on `phase-a` |
 | A2 | Proration explanation: who/what is missing, what fill-in will do, highlight prorated scores | later in A |
 | A3 | P4c only if still needed (edit organization in place) | later |
 | A4 | APA-style report (F11) once provenance can cite the decisions | later |
@@ -34,14 +34,15 @@ Methods-ready summary from provenance. Deeper descriptives/reliability only as n
 
 Longitudinal, content validity, Rpb, EMA, qualitative, institutional cloud and cross-transfer, accounts/billing. Market-research dashboards stay deprioritised. Second beta UI pass after the builder exists.
 
-## History (design, 15 Nov 2026)
+## History (built 16 Nov 2026)
 
-History is the audit trail of **meaningful decisions** on the active sheet. It is not a keystroke log and not a second copy of autosave.
+History is the audit trail of meaningful decisions on the active sheet.
 
-**Record (one event when the decision is committed):** import; organize / remove organized sheets; demographic add/remove or mark-all-items; subscale create, rename, delete, item assign/remove; reverse on/off; response decision (number, Not scored, Counts as, widen) and range confirm / flip / start-at-0; row exclude/include; proration on/off and threshold; score run; template save/apply.
+**Toolbar (every screen):** Undo, Redo, History. Undo reverts the latest undoable change on this sheet. Redo puts it back. A new change clears redo. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) do the same when focus is not in a text field. The panel is newest-first and is not a per-row undo list.
 
-**Do not record:** autosave ticks, focus changes, opening a panel, typing inside a box before commit.
+**Undoable:** demographics, subscale create/delete, scale setup saved from the workbench (including reverse, range confirm, response decisions, bands), proration, row exclude and include (including bulk), data-quality threshold edits, template apply.
 
-**Undo:** one arrow next to History. It undoes the **latest undoable** event on this sheet only (not a full timeline of undos). Older rows stay visible and are not individually undoable. Undo itself is recorded ("Undid …") so the trail stays honest.
+**Audit only:** import, organize / remove organized sheets, delete sheet, score run, template save/update, downloads. Undo and redo themselves are recorded as "Undid …" / "Redid …" and are not undoable.
 
-**Saved line:** "Saving…" only while a write is in flight. "Saved on this device" shows once, briefly, then disappears. It must not repeat on every autosave. A history row appearing is the confirmation that a decision was kept. No history event is written unless the stored config or data actually changed.
+**Saved line:** "Saving…" only while a write is in flight. "Saved on this device" shows briefly, then disappears.
+

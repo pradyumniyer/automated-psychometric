@@ -4,9 +4,12 @@ import { ConfigScreen } from '@/components/ConfigScreen';
 import { DataQualityScreen } from '@/components/DataQualityScreen';
 import { ExportScreen } from '@/components/ExportScreen';
 import { ReportScreen } from '@/components/ReportScreen';
-import type { Project } from '@/types/domain';
-import { datasetRepository, exclusionRepository, settingsRepository } from '@/storage/repositories';
-import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText } from 'lucide-react';
+import type { ActionHistory, Project } from '@/types/domain';
+import { datasetRepository, exclusionRepository, historyRepository, settingsRepository, surveyConfigRepository } from '@/storage/repositories';
+import { ArrowLeft, FlaskConical, Settings2, ShieldCheck, FileDown, FileText, History, Redo2, Undo2 } from 'lucide-react';
+import { fetchHistory, logUndoable } from '@/lib/history';
+import { actionLabel } from '@/lib/phaseA';
+import { describeExclusionChange, historySlice } from '@/lib/historySlice';
 import {
   buildProjectHash,
   parseProjectHash,
@@ -28,6 +31,9 @@ export default function App() {
   const [showSummaryMean, setShowSummaryMean] = useState(false);
   const [routeReady, setRouteReady] = useState(false);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+  const [history, setHistory] = useState<ActionHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyEpoch, setHistoryEpoch] = useState(0);
 
   const restoreProjectState = useCallback(async (projectId: string, requestedTab?: ProjectTab) => {
     const restored = await restoreProjectView(projectId, requestedTab);
@@ -158,17 +164,31 @@ export default function App() {
       if (rowIds.some((rowId) => rowId === undefined)) {
         throw new Error('One or more excluded rows have no stable ID.');
       }
-      await exclusionRepository.replace(
-        activeDatasetId,
-        rowIds.filter((rowId): rowId is string => rowId !== undefined),
-      );
+      const nextIds = rowIds.filter((rowId): rowId is string => rowId !== undefined);
+      const previousIds = (await exclusionRepository.get(activeDatasetId))?.excluded_row_ids ?? [];
+      const same = previousIds.length === nextIds.length && previousIds.every((id) => nextIds.includes(id));
+      if (!same) {
+        const config = project ? await surveyConfigRepository.get(activeDatasetId) : null;
+        await exclusionRepository.replace(activeDatasetId, nextIds);
+        if (config && project) {
+          await logUndoable({
+            projectId: project.id,
+            datasetId: activeDatasetId,
+            actionType: 'row_exclude_toggle',
+            description: describeExclusionChange(previousIds, nextIds, dataset.row_ids),
+            before: historySlice(config, previousIds),
+            after: historySlice(config, nextIds),
+          });
+          setHistory(await fetchHistory(activeDatasetId));
+        }
+      }
       setExcludedRows(rows);
       setStorageError(null);
     } catch (error) {
       setStorageError(`Failed to save row exclusions: ${(error as Error).message}`);
       throw error;
     }
-  }, [activeDatasetId]);
+  }, [activeDatasetId, project]);
 
   const openProject = (p: Project) => {
     setLoadedProjectId(null);
@@ -220,6 +240,55 @@ export default function App() {
   const setExcludedRowsDirect = useCallback((rows: Set<number>) => (
     persistExcludedRows(rows)
   ), [persistExcludedRows]);
+
+  const refreshHistory = useCallback(async () => {
+    if (!activeDatasetId) {
+      setHistory([]);
+      return;
+    }
+    setHistory(await fetchHistory(activeDatasetId));
+  }, [activeDatasetId]);
+
+  useEffect(() => { void refreshHistory(); }, [refreshHistory]);
+
+  const restoreHistory = useCallback(async (direction: 'undo' | 'redo') => {
+    if (!activeDatasetId) return;
+    try {
+      const summary = direction === 'undo'
+        ? await historyRepository.undo(activeDatasetId)
+        : await historyRepository.redo(activeDatasetId);
+      if (!summary) return;
+      const indices = await exclusionRepository.getExcludedIndices(activeDatasetId);
+      setExcludedRows(new Set(indices));
+      setHistoryEpoch((epoch) => epoch + 1);
+      setHistory(await fetchHistory(activeDatasetId));
+      setStorageError(null);
+    } catch (error) {
+      setStorageError(`Could not ${direction}: ${(error as Error).message}`);
+    }
+  }, [activeDatasetId]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === 'z') {
+        event.preventDefault();
+        void restoreHistory(event.shiftKey ? 'redo' : 'undo');
+      } else if (key === 'y') {
+        event.preventDefault();
+        void restoreHistory('redo');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [restoreHistory]);
+
+  const canUndo = history.some((entry) => entry.stack === 'undo' && !!entry.undo_data && 'kind' in entry.undo_data);
+  const canRedo = history.some((entry) => entry.stack === 'redo' && !!entry.undo_data && 'kind' in entry.undo_data);
+
   if (view === 'list' || !project) {
     return <ProjectList onOpenProject={openProject} />;
   }
@@ -242,6 +311,11 @@ export default function App() {
           </div>
         </div>
 
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => void restoreHistory('undo')} disabled={!canUndo} title="Undo (Ctrl+Z)" className="p-1.5 rounded-md text-secondary-600 hover:bg-secondary-100 disabled:opacity-30 disabled:hover:bg-transparent"><Undo2 className="w-4 h-4" /></button>
+          <button type="button" onClick={() => void restoreHistory('redo')} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" className="p-1.5 rounded-md text-secondary-600 hover:bg-secondary-100 disabled:opacity-30 disabled:hover:bg-transparent"><Redo2 className="w-4 h-4" /></button>
+          <button type="button" onClick={() => setShowHistory((open) => !open)} className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium rounded-md ${showHistory ? 'bg-secondary-200 text-secondary-900' : 'text-secondary-600 hover:bg-secondary-100'}`}><History className="w-4 h-4" /> History</button>
+        </div>
         <div className="flex items-center gap-1 bg-secondary-100 rounded-lg p-0.5">
           <button
             onClick={() => goToConfig()}
@@ -296,6 +370,8 @@ export default function App() {
             showSummaryMean={showSummaryMean}
             onToggleSummarySum={() => setShowSummarySum((v) => !v)}
             onToggleSummaryMean={() => setShowSummaryMean((v) => !v)}
+            historyEpoch={historyEpoch}
+            onHistoryChanged={() => { void refreshHistory(); }}
           />
         )}
         {view === 'quality' && (
@@ -310,6 +386,8 @@ export default function App() {
             onGoToConfig={() => goToConfig()}
             sharedDatasetId={activeDatasetId}
             onDatasetChange={changeActiveDataset}
+            historyEpoch={historyEpoch}
+            onHistoryChanged={() => { void refreshHistory(); }}
           />
         )}
         {view === 'export' && (
@@ -320,6 +398,7 @@ export default function App() {
             onDatasetChange={changeActiveDataset}
             showSummarySum={showSummarySum}
             showSummaryMean={showSummaryMean}
+            onHistoryChanged={() => { void refreshHistory(); }}
           />
         )}
         {view === 'report' && (
@@ -331,6 +410,27 @@ export default function App() {
           />
         )}
       </div>
+      {showHistory && (
+        <div className="fixed top-0 right-0 bottom-0 w-80 bg-white border-l border-secondary-200 shadow-lg z-40 flex flex-col">
+          <div className="px-4 py-3 border-b border-secondary-200 flex items-center justify-between">
+            <h3 className="font-semibold text-secondary-800">History</h3>
+            <button type="button" onClick={() => setShowHistory(false)} className="text-sm text-secondary-500 hover:text-secondary-800">Close</button>
+          </div>
+          <p className="px-4 py-2 text-xs text-secondary-500 border-b border-secondary-100">Newest first. Undo and redo use the latest change only, not a row you pick.</p>
+          <div className="flex-1 overflow-auto divide-y divide-secondary-100">
+            {history.length === 0 && <div className="px-4 py-8 text-center text-sm text-secondary-400">No actions yet on this sheet</div>}
+            {history.map((entry) => (
+              <div key={entry.id} className={`px-4 py-3 ${entry.stack === 'redo' ? 'opacity-50' : ''}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-secondary-100 text-secondary-600">{actionLabel(entry.action_type)}</span>
+                  <span className="text-xs text-secondary-400">{new Date(entry.created_at).toLocaleString()}</span>
+                </div>
+                <p className="text-sm text-secondary-700">{entry.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

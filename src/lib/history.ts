@@ -1,6 +1,7 @@
 import { historyRepository } from '@/storage/repositories';
 import type { ActionHistory } from '@/types/domain';
 import type { OutOfRangeActionLog } from '@/scientific/responseScales';
+import { sameHistorySlice, type HistorySlice } from '@/lib/historySlice';
 
 export async function logAction(
   projectId: string,
@@ -17,6 +18,28 @@ export async function logAction(
     description,
     payload,
     undo_data: undoData,
+    stack: 'audit',
+  });
+}
+
+export async function logUndoable(input: {
+  projectId: string;
+  datasetId: string;
+  actionType: string;
+  description: string;
+  payload?: Record<string, unknown>;
+  before: HistorySlice;
+  after: HistorySlice;
+}): Promise<void> {
+  if (sameHistorySlice(input.before, input.after)) return;
+  await historyRepository.append({
+    project_id: input.projectId,
+    dataset_id: input.datasetId,
+    action_type: input.actionType,
+    description: input.description,
+    payload: input.payload ?? {},
+    undo_data: { kind: 'snapshot', before: input.before, after: input.after },
+    stack: 'undo',
   });
 }
 

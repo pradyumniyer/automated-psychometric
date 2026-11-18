@@ -20,9 +20,15 @@ const ACTION_LABELS: Record<string, string> = {
   response_scale_out_of_range: 'Response scale',
   proration: 'Proration',
   row_exclude_toggle: 'Exclusion',
+  config_change: 'Setup',
+  dq_thresholds: 'Data quality',
+  export: 'Export',
   scoring: 'Score',
   template_save: 'Template',
   template_update: 'Template',
+  template_apply: 'Template',
+  undo: 'Undo',
+  redo: 'Redo',
 };
 
 export function actionLabel(actionType: string): string {

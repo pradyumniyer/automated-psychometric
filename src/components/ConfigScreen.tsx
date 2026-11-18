@@ -1,14 +1,13 @@
 // Configuration & Scoring screen — the single-screen workbench.
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Upload, FileSpreadsheet, BarChart3, History as HistoryIcon, Plus,
+  Upload, FileSpreadsheet, BarChart3, Plus,
   Check, AlertTriangle, FileDown, Sparkles,
   Tag, X, Info, Loader2, Search,
   Link2, Unlink, Calculator, Layers, Sliders, Users,
   PanelLeftOpen, Sigma, TrendingUp, ChevronDown, ChevronRight, ChevronUp, MoreHorizontal,
 } from 'lucide-react';
 import {
-  ActionHistory,
   Dataset,
   DemographicColumn,
   Project,
@@ -26,13 +25,14 @@ import {
 } from '@/storage/repositories';
 import { createScoreHashes } from '@/storage/scoreHashes';
 import { fromSurveyConfigRecord, toSurveyConfigRecord } from '@/storage/viewAdapters';
-import { logAction, logOutOfRangeAction, fetchHistory, deleteAction } from '@/lib/history';
+import { logAction, logOutOfRangeAction, logUndoable } from '@/lib/history';
+import { historySlice, sameHistorySlice } from '@/lib/historySlice';
 import { getSheetInfo, exportToCSV, exportToXLSX } from '@/lib/fileParser';
 import { ImportPreviewModal, type ImportPreviewRequest, type ImportPreviewResult } from './ImportPreviewModal';
 import { SheetIdPanel } from './SheetIdPanel';
 import { columnsForGroup, projectRows, validateSplitPlan, type ScaleColumnGroup } from '@/lib/masterSheetSplit';
 import { datasetTabLabel, displaySheetName, getSplitPlan, isInstrumentSheet, isSourceAlreadySplit, sortDatasetsForTabs } from '@/lib/sheetHierarchy';
-import { actionLabel, scoreReadiness, sourceWorkflowLocked } from '@/lib/phaseA';
+import { scoreReadiness, sourceWorkflowLocked } from '@/lib/phaseA';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
 import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection';
@@ -91,6 +91,7 @@ export function ConfigScreen({
   excludedRows: sharedExcludedRows, onToggleRowExclusion, onSetExcludedRows,
   onGoToQuality, sharedDatasetId, onDatasetChange,
   showSummarySum, showSummaryMean, onToggleSummarySum, onToggleSummaryMean,
+  historyEpoch = 0, onHistoryChanged,
 }: {
   project: Project;
   highlightRowIndex: number | null;
@@ -105,6 +106,8 @@ export function ConfigScreen({
   showSummaryMean: boolean;
   onToggleSummarySum: () => void;
   onToggleSummaryMean: () => void;
+  historyEpoch?: number;
+  onHistoryChanged?: () => void;
 }) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetIdState, setActiveDatasetIdState] = useState<string | null>(null);
@@ -133,11 +136,9 @@ export function ConfigScreen({
   const [overallSettings, setOverallSettings] = useState<OverallSettings>({
     enabled: true, basedOn: 'sums', combineBy: 'sum', customFormula: '',
   });
-  const [history, setHistory] = useState<ActionHistory[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [linkedTemplate, setLinkedTemplate] = useState<Template | null>(null);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [showExcludedOnly, setShowExcludedOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [creatingSheets, setCreatingSheets] = useState(false);
@@ -173,17 +174,23 @@ export function ConfigScreen({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const performAutoSaveRef = useRef<() => Promise<void>>(async () => {});
-  const persistSurveyConfig = async (overrides: {
-    demographicColumns?: DemographicColumn[];
-    subscales?: SubscaleState[];
-    bands?: Record<string, BandState[]>;
-    bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
-    overallScale?: SubscaleState | null;
-    overallSettings?: OverallSettings;
-    linkedTemplateId?: string | null;
-    prorationEnabled?: boolean;
-    prorationMaxMissingPct?: 20 | 25 | 50;
-  } = {}) => {
+  const historyNoteRef = useRef<{ actionType: string; description: string } | null>(null);
+  const onHistoryChangedRef = useRef(onHistoryChanged);
+  onHistoryChangedRef.current = onHistoryChanged;
+  const persistSurveyConfig = async (
+    overrides: {
+      demographicColumns?: DemographicColumn[];
+      subscales?: SubscaleState[];
+      bands?: Record<string, BandState[]>;
+      bandsByOutput?: Record<string, Partial<Record<ScoreOutput, BandState[]>>>;
+      overallScale?: SubscaleState | null;
+      overallSettings?: OverallSettings;
+      linkedTemplateId?: string | null;
+      prorationEnabled?: boolean;
+      prorationMaxMissingPct?: 20 | 25 | 50;
+    } = {},
+    history?: { actionType: string; description: string } | 'silent',
+  ) => {
     if (!dataset) throw new Error('No active dataset to save.');
     const datasetId = dataset.id;
     const save = async () => {
@@ -211,7 +218,26 @@ export function ConfigScreen({
         prorationEnabled: overrides.prorationEnabled ?? prorationEnabled,
         prorationMaxMissingPct: overrides.prorationMaxMissingPct ?? prorationMaxMissingPct,
       }, existing);
-      return surveyConfigRepository.save(datasetId, config);
+      const saved = await surveyConfigRepository.save(datasetId, config);
+      if (history !== 'silent' && existing) {
+        const excluded = (await exclusionRepository.get(datasetId))?.excluded_row_ids ?? [];
+        const before = historySlice(existing, excluded);
+        const after = historySlice(saved, excluded);
+        const note = history && history !== 'silent' ? history : historyNoteRef.current;
+        if (!(history && history !== 'silent')) historyNoteRef.current = null;
+        if (!sameHistorySlice(before, after)) {
+          await logUndoable({
+            projectId: project.id,
+            datasetId,
+            actionType: note?.actionType ?? 'config_change',
+            description: note?.description ?? 'Updated scale setup',
+            before,
+            after,
+          });
+          onHistoryChangedRef.current?.();
+        }
+      }
+      return saved;
     };
     const previous = pendingSurveyConfigWrites.get(datasetId);
     const write = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(save);
@@ -263,6 +289,7 @@ export function ConfigScreen({
   // ── Load config for active dataset ──
   const loadDatasetConfig = useCallback(async () => {
     if (!activeDatasetId) { setDataset(null); return; }
+    void historyEpoch;
     const ds = datasets.find((d) => d.id === activeDatasetId);
     if (!ds) { setDataset(null); return; }
     setDataset(ds);
@@ -321,14 +348,12 @@ export function ConfigScreen({
       const hashes = await createScoreHashes(ds, config, configs, excludedRowIds);
       const cached = await scoreRepository.getCurrent(activeDatasetId, hashes);
       setScoringResult(cached?.payload.result as ReturnType<typeof scoreDataset> | null ?? null);
-      const hist = await fetchHistory(activeDatasetId);
-      setHistory(hist);
       setStatusMsg(null);
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to load dataset configuration: ${(error as Error).message}` });
       setScoringResult(null);
     }
-  }, [activeDatasetId, datasets, onSetExcludedRows]);
+  }, [activeDatasetId, datasets, onSetExcludedRows, historyEpoch]);
 
   useEffect(() => { loadDatasetConfig(); }, [loadDatasetConfig]);
 
@@ -433,7 +458,7 @@ export function ConfigScreen({
       setShowUpdateTemplate(!!linkedTemplate);
       setSaveState('saved');
       if (saveStateTimerRef.current) clearTimeout(saveStateTimerRef.current);
-      saveStateTimerRef.current = setTimeout(() => setSaveState('idle'), 4000);
+      saveStateTimerRef.current = setTimeout(() => setSaveState('idle'), 1200);
     } catch (error) {
       setSaveState('idle');
       setStatusMsg({ type: 'error', text: `Auto-save failed. Your changes may not be persisted. ${(error as Error).message}` });
@@ -445,7 +470,6 @@ export function ConfigScreen({
   useEffect(() => {
     if (!configDirty) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    setSaveState('saving');
     saveTimerRef.current = setTimeout(() => { performAutoSave(); }, 1000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [configDirty, performAutoSave]);
@@ -653,6 +677,7 @@ export function ConfigScreen({
         null,
         dataset.id,
       );
+      onHistoryChanged?.();
       if (firstId) setActiveDatasetId(firstId);
       setStatusMsg({ type: 'success', text: `Created ${groups.length} instrument sheet(s) under "${sourceLabel}". The source tab is for reference only.` });
       setActiveStep('demographics');
@@ -699,6 +724,7 @@ export function ConfigScreen({
         null,
         dataset.id,
       );
+      onHistoryChanged?.();
       setActiveDatasetId(dataset.id);
       setStatusMsg({ type: 'info', text: 'Organized sheets removed. You can use Several scales again on this source.' });
       changeActiveStep('demographics');
@@ -724,9 +750,11 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
             confirmed: true,
             created_at: new Date().toISOString(),
           }];
-      await persistSurveyConfig({ demographicColumns: nextDemoCols });
+      await persistSurveyConfig({ demographicColumns: nextDemoCols }, {
+        actionType: 'demographic_toggle',
+        description: `${isDemo ? 'Removed' : 'Added'} demographic: ${col}`,
+      });
       setDemoCols(nextDemoCols);
-      await logAction(project.id, 'demographic_toggle', `${isDemo ? 'Removed' : 'Added'} demographic: ${col}`, { column: col, action: isDemo ? 'remove' : 'add' }, null, dataset.id);
       await loadDatasetConfig();
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to save demographic settings: ${(error as Error).message}` });
@@ -736,9 +764,11 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
   const markAllAsItems = async () => {
     if (!dataset) return;
     try {
-      await persistSurveyConfig({ demographicColumns: [] });
+      await persistSurveyConfig({ demographicColumns: [] }, {
+        actionType: 'demographic_bulk',
+        description: 'Marked all columns as items',
+      });
       setDemoCols([]);
-      await logAction(project.id, 'demographic_bulk', 'Marked all columns as items', {}, null, dataset.id);
       await loadDatasetConfig();
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to save demographic settings: ${(error as Error).message}` });
@@ -752,6 +782,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     try {
       await datasetRepository.delete(dsId);
       await logAction(project.id, 'sheet_delete', `Deleted sheet: ${ds.sheet_name || ds.file_name}`, { datasetId: dsId });
+      onHistoryChanged?.();
       const remaining = datasets.filter((d) => d.id !== dsId);
       setDatasets(remaining);
       if (activeDatasetId === dsId) setActiveDatasetId(remaining.length > 0 ? remaining[0].id : null);
@@ -781,7 +812,10 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
       const name = `Subscale ${nextSubscaleNumber}`;
       const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, labelSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: 0 };
       try {
-        await persistSurveyConfig({ subscales: [...withoutAutomatic, newSub], bands: nextBands, bandsByOutput: nextBandsByOutput, overallScale: null });
+        await persistSurveyConfig({ subscales: [...withoutAutomatic, newSub], bands: nextBands, bandsByOutput: nextBandsByOutput, overallScale: null }, {
+          actionType: 'subscale_create',
+          description: `Created subscale: ${name}`,
+        });
         setSubscaleStates([...withoutAutomatic, newSub]);
         setBandStates(nextBands);
         setBandStatesByOutput(nextBandsByOutput);
@@ -797,12 +831,13 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     const order = realSubscales.length;
     const newSub = { id: crypto.randomUUID(), name, items: [], scoringMethod: 'sum' as const, showOutputs: ['sum'] as ScoreOutput[], customFormula: '', scaleType: 'numeric' as const, minValue: 1, maxValue: 5, baseMin: 1, baseMax: 5, rangeSource: 'detected' as const, labelSource: 'detected' as const, outOfRangeDecisions: {}, labelMap: [], displayOrder: order };
     try {
-      await persistSurveyConfig({ subscales: [...subscaleStates, newSub] });
+      await persistSurveyConfig({ subscales: [...subscaleStates, newSub] }, {
+        actionType: 'subscale_create',
+        description: `Created subscale: ${name}`,
+      });
       setSubscaleStates([...subscaleStates, newSub]);
       setActiveSubscaleId(newSub.id);
       changeActiveStep('subscales');
-      await logAction(project.id, 'subscale_create', `Created subscale: ${name}`, {}, null, dataset.id);
-      const hist = await fetchHistory(dataset.id); setHistory(hist);
       setTimeout(() => {
         const el = document.querySelector(`[data-subscale-id="${newSub.id}"]`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -821,12 +856,13 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     if (sub) delete nextBands[sub.name];
     if (sub) delete nextBandsByOutput[sub.name];
     try {
-      await persistSurveyConfig({ subscales: updated, bands: nextBands, bandsByOutput: nextBandsByOutput });
+      await persistSurveyConfig({ subscales: updated, bands: nextBands, bandsByOutput: nextBandsByOutput }, {
+        actionType: 'subscale_delete',
+        description: `Deleted subscale: ${sub?.name || id}`,
+      });
       setSubscaleStates(updated);
       setBandStates(nextBands);
       setBandStatesByOutput(nextBandsByOutput);
-      await logAction(project.id, 'subscale_delete', `Deleted subscale: ${sub?.name || id}`, {}, null, dataset.id);
-      const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to delete subscale: ${(error as Error).message}` });
     }
@@ -867,14 +903,10 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     }) as SubscaleState));
     markDirty();
     if (dataset) {
-      void logAction(
-        project.id,
-        'reverse_toggle',
-        `${nextReverse ? 'Reversed' : 'Unreversed'} ${column}${sub ? ` on ${sub.name}` : ''}`,
-        { column, subscaleId, reverse: nextReverse },
-        null,
-        dataset.id,
-      );
+      historyNoteRef.current = {
+        actionType: 'reverse_toggle',
+        description: `${nextReverse ? 'Reversed' : 'Unreversed'} ${column}${sub ? ` on ${sub.name}` : ''}`,
+      };
     }
   };
 
@@ -920,14 +952,10 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     const sub = subscaleStates.find((s) => s.id === id);
     updateResponseScale(id, (current) => confirmRangeState(current));
     if (dataset && sub) {
-      void logAction(
-        project.id,
-        'range_confirm',
-        `Confirmed response range for ${sub.name}`,
-        { subscaleId: id },
-        null,
-        dataset.id,
-      );
+      historyNoteRef.current = {
+        actionType: 'range_confirm',
+        description: `Confirmed response range for ${sub.name}`,
+      };
     }
   };
   const setLabelMap = (id: string, lm: ResponseScaleLabelSetting[]) => updateResponseScale(id, (current) => afterScaleChange(current, { labelMap: lm, labelSource: 'manual' }) as SubscaleState);
@@ -1005,16 +1033,8 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
       setStatusMsg({ type: 'error', text: 'Cannot save this exclusion because the row has no stable ID.' });
       return;
     }
-    const wasExcluded = sharedExcludedRows.has(rowIndex);
     try {
       await onToggleRowExclusion(rowIndex);
-      await logAction(project.id, 'row_exclude_toggle',
-        `${wasExcluded ? 'Included' : 'Excluded'} row ${rowIndex + 1}`,
-        { rowId, action: wasExcluded ? 'include' : 'exclude' },
-        { rowId, wasExcluded },
-        dataset.id,
-      );
-      const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Failed to save row exclusion: ${(error as Error).message}` });
     }
@@ -1162,6 +1182,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
 
       const nv = saved.version;
       await logAction(project.id, 'scoring', `Scored data (v${nv}, ${result.rows.length} rows, ${sharedExcludedRows.size} excluded)`, { version: nv, excludedCount: sharedExcludedRows.size }, null, dataset.id);
+      onHistoryChanged?.();
       const idColumn = demoCols.find((column) => /\bID\b/i.test(column.detected_by))?.column_name;
       const displayIds = idColumn
         ? result.rowIds.map((_, index) => {
@@ -1175,7 +1196,6 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
         type: 'success',
         text: `Scoring complete (v${nv}). ${sharedExcludedRows.size} rows excluded.${unscoredSummary ? ` ${unscoredSummary}` : ''}${outOfBandSummary ? ` ${outOfBandSummary}` : ''}`,
       });
-      const hist = await fetchHistory(dataset.id); setHistory(hist);
     } catch (e) { setStatusMsg({ type: 'error', text: `Scoring failed: ${(e as Error).message}` }); }
     setScoring(false);
   };
@@ -1196,6 +1216,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     try {
       await templateRepository.save({ name, description, instrument, definition: def, version: 1 });
       await logAction(project.id, 'template_save', `Saved template: ${name}`);
+      onHistoryChanged?.();
       setStatusMsg({ type: 'success', text: `Template "${name}" saved.` });
       setShowTemplateModal(false);
       await loadDatasets();
@@ -1341,6 +1362,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     try {
       await templateRepository.update(linkedTemplate.id, { definition: def, version: linkedTemplate.version + 1 });
       await logAction(project.id, 'template_update', `Updated template: ${linkedTemplate.name} (v${linkedTemplate.version + 1})`, { templateId: linkedTemplate.id }, null, dataset.id);
+      onHistoryChanged?.();
       setLinkedTemplate({ ...linkedTemplate, version: linkedTemplate.version + 1, definition: def });
       setShowUpdateTemplate(false);
       setStatusMsg({ type: 'success', text: `Template "${linkedTemplate.name}" updated to v${linkedTemplate.version + 1}.` });
@@ -1404,58 +1426,10 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
       };
       if (fmt === 'csv') exportToCSV(data.headers, data.rows, fn, exportOptions);
       else await exportToXLSX(data.headers, data.rows, fn, exportOptions);
+      await logAction(project.id, 'export', `Downloaded scored ${fmt.toUpperCase()}`, { format: fmt, exportType: 'scored' }, null, dataset.id);
+      onHistoryChanged?.();
     } catch (error) {
       setStatusMsg({ type: 'error', text: `Export failed: ${(error as Error).message}` });
-    }
-  };
-
-  const undoAction = async (action: ActionHistory) => {
-    if (!dataset) return;
-    try {
-      if (action.action_type === 'row_exclude_toggle' && action.undo_data) {
-        const rowId = action.undo_data.rowId;
-        if (!rowId) {
-          setStatusMsg({ type: 'error', text: 'Cannot undo: this history event has no stable row ID.' });
-          return;
-        }
-        const rowIndex = dataset.row_ids.indexOf(rowId);
-        if (rowIndex < 0) {
-          setStatusMsg({ type: 'error', text: 'Cannot undo: the affected row no longer exists in this dataset.' });
-          return;
-        }
-        const newSet = new Set(sharedExcludedRows);
-        if (newSet.has(rowIndex)) newSet.delete(rowIndex); else newSet.add(rowIndex);
-        await onSetExcludedRows(newSet);
-        await deleteAction(action.id);
-        const hist = await fetchHistory(dataset.id); setHistory(hist);
-        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
-      } else if (action.action_type === 'demographic_toggle' && action.payload) {
-        const col = action.payload.column as string;
-        const wasAdd = action.payload.action === 'add';
-        const nextDemographics = wasAdd
-          ? demoCols.filter((demographic) => demographic.column_name !== col)
-          : [...demoCols, {
-              id: crypto.randomUUID(),
-              project_id: project.id,
-              dataset_id: dataset.id,
-              column_name: col,
-              detected_by: 'manual',
-              confidence: 1,
-              confirmed: true,
-              created_at: new Date().toISOString(),
-            }];
-        await persistSurveyConfig({ demographicColumns: nextDemographics });
-        setDemoCols(nextDemographics);
-        await deleteAction(action.id);
-        await loadDatasetConfig();
-        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
-      } else {
-        await loadDatasetConfig();
-        await deleteAction(action.id);
-        setStatusMsg({ type: 'info', text: `Undid: ${action.description}` });
-      }
-    } catch (error) {
-      setStatusMsg({ type: 'error', text: `Failed to undo action: ${(error as Error).message}` });
     }
   };
 
@@ -1531,7 +1505,6 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between px-5 py-2.5 bg-white border-b border-secondary-200">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setShowHistoryPanel(!showHistoryPanel)}><HistoryIcon className="w-4 h-4" /> History</Button>
           <Button variant="ghost" size="sm" onClick={() => setShowTemplateModal(true)}><Sparkles className="w-4 h-4" /> Templates</Button>
           {linkedTemplate && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-primary-50 border border-primary-200 rounded-lg">
@@ -1549,7 +1522,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
           {/* Auto-save indicator */}
           <div className="flex items-center gap-1.5 text-sm">
             {saveState === 'saving' && <><Loader2 className="w-3.5 h-3.5 text-secondary-400 animate-spin" /><span className="text-secondary-500">Saving...</span></>}
-            {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-success-600" /><span className="text-success-600">All changes saved on this device</span></>}
+            {saveState === 'saved' && <><Check className="w-3.5 h-3.5 text-success-600" /><span className="text-success-600">Saved on this device</span></>}
           </div>
           <div className="w-px h-6 bg-secondary-200" />
           {/* Summary toggles */}
@@ -1809,7 +1782,7 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
                         const numericValues = values.map(Number).filter(Number.isFinite);
                         const result = applyOutOfRangeAction({ min: subscale.baseMin ?? subscale.minValue!, max: subscale.baseMax ?? subscale.maxValue!, rangeSource: subscale.rangeSource ?? 'manual', confirmed: subscale.confirmed === true, flipped: false, startsAtZero: false, labels: [], outOfRange: action }, numericValues, action, subscale.items.some((item) => item.reverse));
                         await logOutOfRangeAction(project.id, dataset.id, result.log);
-                        setHistory(await fetchHistory(dataset.id));
+                        onHistoryChanged?.();
                       }
                       markDirty();
                     }}
@@ -1848,35 +1821,19 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
                     prorationMaxMissingPct={prorationMaxMissingPct}
                     onProrationEnabledChange={(enabled) => {
                       setProrationEnabled(enabled);
-                      void persistSurveyConfig({ prorationEnabled: enabled });
-                      markDirty();
-                      if (dataset) {
-                        void logAction(
-                          project.id,
-                          'proration',
-                          enabled
-                            ? `Proration on (up to ${prorationMaxMissingPct}% of items missing)`
-                            : 'Proration off',
-                          { enabled, maxMissingPercent: prorationMaxMissingPct },
-                          null,
-                          dataset.id,
-                        );
-                      }
+                      void persistSurveyConfig({ prorationEnabled: enabled }, {
+                        actionType: 'proration',
+                        description: enabled
+                          ? `Proration on (up to ${prorationMaxMissingPct}% of items missing)`
+                          : 'Proration off',
+                      });
                     }}
                     onProrationThresholdChange={(pct) => {
                       setProrationMaxMissingPct(pct);
-                      void persistSurveyConfig({ prorationMaxMissingPct: pct });
-                      markDirty();
-                      if (dataset && prorationEnabled) {
-                        void logAction(
-                          project.id,
-                          'proration',
-                          `Proration threshold set to ${pct}%`,
-                          { enabled: true, maxMissingPercent: pct },
-                          null,
-                          dataset.id,
-                        );
-                      }
+                      void persistSurveyConfig({ prorationMaxMissingPct: pct }, {
+                        actionType: 'proration',
+                        description: `Proration threshold set to ${pct}%`,
+                      });
                     }}
                   />
                 )}
@@ -1959,31 +1916,6 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
           <div className="flex-1 flex items-center justify-center text-secondary-400">Loading...</div>
         )}
       </div>
-
-      {/* History panel */}
-      {showHistoryPanel && (
-        <div className="w-72 border-l border-secondary-200 bg-white overflow-auto flex-shrink-0 absolute right-0 top-0 bottom-0 z-30 shadow-lg">
-          <div className="px-4 py-3 border-b border-secondary-200 flex items-center justify-between">
-            <h3 className="font-semibold text-secondary-800 flex items-center gap-2"><HistoryIcon className="w-4 h-4" /> Action History</h3>
-            <button onClick={() => setShowHistoryPanel(false)} className="text-secondary-400 hover:text-secondary-700"><X className="w-4 h-4" /></button>
-          </div>
-          <div className="divide-y divide-secondary-100">
-            {history.length === 0 && <div className="px-4 py-8 text-center text-sm text-secondary-400">No actions yet</div>}
-            {history.map((h) => (
-              <div key={h.id} className="px-4 py-3 hover:bg-secondary-50 group">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-secondary-100 text-secondary-600">{actionLabel(h.action_type)}</span>
-                  <span className="text-xs text-secondary-400">{new Date(h.created_at).toLocaleString()}</span>
-                  {h.undo_data && (
-                    <button onClick={() => undoAction(h)} className="ml-auto opacity-0 group-hover:opacity-100 text-xs text-primary-600 hover:underline transition-opacity">Undo</button>
-                  )}
-                </div>
-                <p className="text-sm text-secondary-700">{h.description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Sheet selector modal */}
       <Modal open={!!sheetInfos} onClose={() => { setSheetInfos(null); setPendingFile(null); }} title="Import Sheets" maxWidth="max-w-lg">

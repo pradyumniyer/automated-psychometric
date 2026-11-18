@@ -196,4 +196,6 @@ export interface ActionHistory {
   payload: Record<string, unknown>;
   undo_data: { rowId?: string; [key: string]: unknown } | null;
   created_at: string;
+  stack: 'undo' | 'redo' | 'audit';
+  seq: number;
 }

@@ -108,15 +108,23 @@ export interface TemplateRecord extends Omit<Template, 'created_at' | 'updated_a
   updated_at: number;
 }
 
+export type HistoryStackRole = 'undo' | 'redo' | 'audit';
+
 export interface HistoryRecord {
   id: string;
   project_id: string;
   dataset_id?: string;
   ts: number;
+  seq?: number;
+  stack?: HistoryStackRole;
   action_type: string;
   summary: string;
   payload: Record<string, unknown>;
-  undo_data: { rowId: string; wasExcluded?: boolean } | null;
+  undo_data: { rowId: string; wasExcluded?: boolean } | {
+    kind: 'snapshot';
+    before: unknown;
+    after: unknown;
+  } | null;
 }
 
 export interface SettingRecord {
