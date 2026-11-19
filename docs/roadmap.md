@@ -1,26 +1,48 @@
-# Roadmap (v2)
+# Roadmap (big plan)
 
-Phased so each phase is shippable and trustworthy. Full vision: `COMPLETE_PRODUCT.md`.
+Updated 15 Nov 2026. Branches: `big-plan-roadmap` (baseline at the old `p2d-data-quality` tip) and `phase-a` (active work). New phases get a branch from `big-plan-roadmap` after the previous phase is merged back.
 
-> **Two stages.** Stage A (Phases 0–1): recreate the Bolt app on the new foundation, UI unchanged, corrected math, free to use. Stage B (Phases 2+): new project types through the project-type registry. Accounts and billing are **built in Stage A** (step 1h), so paid plans can exist as soon as the first Pro feature ships.
+## Spine
 
-## Phase 0: Safety net and foundation
-Repo private and tidy · CI with `npm audit` · Vitest + fixtures · scientific modules ported and corrected (spec Appendix A) · spreadsheet library replaced · Dexie schema · design tokens. **Exit:** all tests green, no high advisories, local project CRUD works.
+One instrument + scoring engine. Two doors later: **Import** (now) and **Form builder** (Phase C). History/provenance is part of the spine.
 
-## Phase 1: Survey prep excellence (Free + accounts and billing)
-Import (simple data-start control, empty row/column handling, multi-sheet) · Configure workbench · scoring (strict default, opt-in proration 20/25/50) · data quality (with defaults in the spec) · **reliability (Cronbach's α)** · exports (drop or yellow-keep) · reports · templates (2 free) · backup/restore + delete-all · dark mode · launch page, Privacy Policy, Terms · security review. **Exit:** thesis-sized workflow works end to end without support, accounts and billing live, Fixture A cross-checked in jamovi/R (done).
+## Phase A — Quant spine (in progress on `phase-a`)
 
-## Phase 2: Content validity + item analysis (first after Stage A)
-Project-type entry (ADR 0010) · Lawshe (Ayre & Scally) · Aiken V (verified table) · mapping, dimension tags, drop items, exclude experts, expert DQ · exports · **Rpb / item analysis helpers** (spec to be written). **Exit:** usable for a real expert panel and a real item analysis. Open decisions in spec §4.3 resolved first.
+| Slice | What | State |
+|-------|------|--------|
+| A1a | Source-sheet lock, readiness line, first provenance events (split, reverse, range confirm, proration) | pushed (`7769d8c`) |
+| A1b | History: meaningful actions, one-step undo and redo, quiet save | done on `phase-a` |
+| A2 | Proration explanation: who/what is missing, what fill-in will do, highlight prorated scores | later in A |
+| A3 | P4c only if still needed (edit organization in place) | later |
+| A4 | APA-style report (F11) once provenance can cite the decisions | later |
 
-## Phase 3: Reporting and Pro depth
-APA 7 tables → Word · results-draft blurb · curated template library. **Exit:** clear reason to pay beyond "more rows".
+Parked inside A: pixel polish, full tutorial, dark mode, ConfigScreen split.
 
-## Phase 4: Longitudinal · Phase 5: EMA helpers · Phase 6: Expansion (qualitative, HR packs)
-As in `COMPLETE_PRODUCT.md`. Not started until previous phases are stable. Never market "EMA platform".
+## Phase B — Shared instrument contract
 
-## Explicit backlog (parked)
-Cloud LLM default on raw grids · full SEM/IRT · real-time collaboration on matrices · commercial test-item piracy · McDonald's ω and CIs for α (consider after Phase 2).
+Document and code the one model (items, demos, subscales, reverse, response map, proration) that import and the future builder both read and write. History events name those same objects.
 
-## Metrics (simple, privacy-safe)
-Completed export events (local or privacy-safe) · Pro conversion after CV/APA · import/DQ support burden · zero incidents of leaked grids.
+## Phase C — Form builder MVP
+
+Author instrument → collect responses into the same engine. Keep the import door. No full Qualtrics parity.
+
+## Phase D — Selective analysis
+
+Methods-ready summary from provenance. Deeper descriptives/reliability only as needed. EFA/CFA/SEM parked.
+
+## Phase E — Later modules
+
+Longitudinal, content validity, Rpb, EMA, qualitative, institutional cloud and cross-transfer, accounts/billing. Market-research dashboards stay deprioritised. Second beta UI pass after the builder exists.
+
+## History (built 16 Nov 2026)
+
+History is the audit trail of meaningful decisions on the active sheet.
+
+**Toolbar (every screen):** Undo, Redo, History. Undo reverts the latest undoable change on this sheet. Redo puts it back. A new change clears redo. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) do the same when focus is not in a text field. The panel is newest-first and is not a per-row undo list.
+
+**Undoable:** demographics, subscale create/delete, scale setup saved from the workbench (including reverse, range confirm, response decisions, bands), proration, row exclude and include (including bulk), data-quality threshold edits, template apply.
+
+**Audit only:** import, organize / remove organized sheets, delete sheet, score run, template save/update, downloads. Undo and redo themselves are recorded as "Undid …" / "Redid …" and are not undoable.
+
+**Saved line:** "Saving…" only while a write is in flight. "Saved on this device" shows briefly, then disappears.
+

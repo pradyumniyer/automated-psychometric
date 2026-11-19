@@ -33,6 +33,7 @@ import { SheetIdPanel } from './SheetIdPanel';
 import { columnsForGroup, projectRows, validateSplitPlan, type ScaleColumnGroup } from '@/lib/masterSheetSplit';
 import { datasetTabLabel, displaySheetName, getSplitPlan, isInstrumentSheet, isSourceAlreadySplit, sortDatasetsForTabs } from '@/lib/sheetHierarchy';
 import { scoreReadiness, sourceWorkflowLocked } from '@/lib/phaseA';
+import { buildProrationPreview, buildProrationReport, prorationStatusLine } from '@/lib/prorationExplain';
 import { buildTemplateDefinition, templateSubscaleScoreSettings, validateTemplateConfig, matchTemplateToHeaders, formatMatchSummary, TemplateMatchReport } from '@/lib/templates';
 import { scoreDataset, SubscaleConfig, BandConfig, isAutomaticSubscale } from '@/scientific/scoring';
 import { detectDemographics, COMMON_LIKERT_SCALES } from '@/scientific/detection';
@@ -1433,6 +1434,48 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
     }
   };
 
+  
+  const prorationScales = useMemo(() => (
+    subscaleStates
+      .filter((s) => !isAutomaticSubscale(s) || subscaleStates.length === 1)
+      .map((s) => ({ name: s.name, items: s.items.map((i) => i.column) }))
+      .filter((s) => s.items.length > 0)
+  ), [subscaleStates]);
+
+  const prorationPreview = useMemo(() => {
+    if (!dataset || !prorationEnabled) return null;
+    return buildProrationPreview({
+      scales: prorationScales,
+      rows: dataset.rows as Record<string, unknown>[],
+      rowIds: dataset.row_ids,
+      displayIds: getDisplayIds(dataset.rows, demoCols),
+      excludedRowIndices: sharedExcludedRows,
+      maxMissingPercent: prorationMaxMissingPct,
+    });
+  }, [dataset, prorationEnabled, prorationScales, demoCols, sharedExcludedRows, prorationMaxMissingPct]);
+
+  const prorationReport = useMemo(() => {
+    if (!scoringResult || !dataset) {
+      return { hits: [] as ReturnType<typeof buildProrationReport>['hits'], summaryLine: '' };
+    }
+    return buildProrationReport({
+      scaleScores: scoringResult.scaleScores as Record<string, Record<string, { prorated?: boolean }>>,
+      rowIds: dataset.row_ids,
+      displayIds: getDisplayIds(dataset.rows, demoCols),
+    });
+  }, [scoringResult, dataset, demoCols]);
+
+  const prorationAfterLine = prorationStatusLine(
+    prorationEnabled,
+    prorationMaxMissingPct,
+    prorationPreview?.candidates.length ?? 0,
+    scoringResult ? prorationReport.hits.length : null,
+  );
+
+  const setHighlightRowIndexLocal = (rowIndex: number) => {
+    setHighlightCell({ rowIndex, columnKey: dataset?.headers?.[0] ?? '' });
+  };
+
   const scoredColumnData = useMemo(() => buildScoredColumnData({
     result: scoringResult,
     rawHeaders: dataset?.headers ?? [],
@@ -1819,6 +1862,13 @@ const toggleDemographic = async (col: string, isDemo: boolean) => {
                     unassignedItemCount={realSubscales.length > 0 ? getUnassignedItemCount(itemColumns, realSubscales) : 0}
                     prorationEnabled={prorationEnabled}
                     prorationMaxMissingPct={prorationMaxMissingPct}
+                    prorationPreview={prorationPreview}
+                    prorationReport={prorationReport}
+                    prorationAfterLine={prorationAfterLine}
+                    onInspectProration={(rowIndex, columnKey) => {
+                      if (columnKey) setHighlightCell({ rowIndex, columnKey });
+                      else setHighlightRowIndexLocal?.(rowIndex);
+                    }}
                     onProrationEnabledChange={(enabled) => {
                       setProrationEnabled(enabled);
                       void persistSurveyConfig({ prorationEnabled: enabled }, {
@@ -2875,6 +2925,10 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
   prorationMaxMissingPct: 20 | 25 | 50;
   onProrationEnabledChange: (enabled: boolean) => void;
   onProrationThresholdChange: (pct: 20 | 25 | 50) => void;
+  prorationPreview: ReturnType<typeof buildProrationPreview> | null;
+  prorationReport: ReturnType<typeof buildProrationReport>;
+  prorationAfterLine: string;
+  onInspectProration?: (rowIndex: number, columnKey?: string) => void;
 }) {
   const proratedCount = scoringResult
     ? Object.values(scoringResult.scaleScores).reduce((count, byRow) => (
@@ -2946,6 +3000,40 @@ function ScoringPanel({ canScore, scoring, onRunScoring, scoringResult, onExport
           </div>
         )}
       </Card>
+      
+      {prorationEnabled && prorationPreview && (
+        <Card className="p-3 mb-3 border-secondary-200 bg-secondary-50/40" data-a2-proration-preview>
+          <div className="text-xs font-semibold text-secondary-700 mb-1">What proration will do</div>
+          <p className="text-xs text-secondary-600 mb-2 leading-relaxed">{prorationPreview.summaryLine}</p>
+          {prorationPreview.candidates.length > 0 && (
+            <ul className="text-xs text-secondary-700 space-y-1 max-h-36 overflow-y-auto mb-1">
+              {prorationPreview.candidates.slice(0, 12).map((gap) => (
+                <li key={`${gap.rowId}-${gap.scaleName}`}>
+                  <button
+                    type="button"
+                    className="text-primary-700 hover:underline text-left"
+                    onClick={() => onInspectProration?.(gap.rowIndex, gap.missingColumns[0])}
+                  >
+                    {gap.displayId}
+                  </button>
+                  {' · '}{gap.scaleName}
+                  {' · missing '}{gap.missingColumns.join(', ')}
+                  {' ('}{gap.missingColumns.length}/{gap.itemCount}{')'}
+                </li>
+              ))}
+              {prorationPreview.candidates.length > 12 && (
+                <li className="text-secondary-400">+{prorationPreview.candidates.length - 12} more</li>
+              )}
+            </ul>
+          )}
+          {prorationPreview.tooMuchMissing.length > 0 && (
+            <p className="text-xs text-warning-700 mt-1">
+              {prorationPreview.tooMuchMissing.length} gap{prorationPreview.tooMuchMissing.length === 1 ? '' : 's'} over the limit will not be filled.
+            </p>
+          )}
+        </Card>
+      )}
+
       <Button onClick={onRunScoring} disabled={!canScore || scoring} className="w-full mb-3">
         {scoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
         {scoring ? 'Scoring...' : 'Run Scoring'}
